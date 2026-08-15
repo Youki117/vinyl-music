@@ -1,0 +1,427 @@
+/* L3 内容层。坐标全部在 1220×688 设计坐标系内，实测自 design-ref/target/。 */
+
+/* ── E1–E3 标题组 ──────────────────────────────────────── */
+.masthead {
+  position: absolute;
+  left: 26px;
+  top: 2px;
+  color: var(--ink-accent);
+  font-family: var(--font-display);
+  line-height: 0.95;
+}
+
+/* 字号与字距实测自 design-ref/target/ref-veil-primary.png：
+   FASHION 占 424px 宽、SELP-PORTRAIT 占 252px */
+.masthead h1 {
+  margin: 0;
+  font-size: 97px;
+  /* 参考图的字重很轻、笔画对比强，用 500 会明显偏粗 */
+  font-weight: 400;
+  letter-spacing: 3px;
+  line-height: 1.1;
+}
+
+.masthead p {
+  margin: 8px 0 0;
+  font-size: 33px;
+  font-weight: 400;
+  letter-spacing: 1.6px;
+}
+
+.masthead small {
+  display: block;
+  margin-top: 3px;
+  font-size: 18px;
+  font-weight: 400;
+  letter-spacing: 1px;
+  opacity: 0.92;
+}
+
+/* ── E4 署名条 ─────────────────────────────────────────── */
+.byline {
+  position: absolute;
+  left: 165px;
+  top: 152px;
+  min-width: 94px;
+  height: 17px;
+  padding: 0 7px;
+  display: grid;
+  place-items: center;
+  background: #0a0a0a;
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+/* ── E5 歌词 ───────────────────────────────────────────── */
+.lyrics {
+  position: absolute;
+  left: 8px;
+  top: 268px;
+  width: 208px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: var(--ink-secondary);
+  font-family: var(--font-cjk);
+  font-size: 11.5px;
+  text-align: center;
+}
+
+.lyric-line {
+  display: block;
+  white-space: nowrap;
+  transition:
+    opacity 320ms ease,
+    color 320ms ease;
+}
+
+.lyric-line[data-active="true"] {
+  color: var(--ink-primary);
+  font-size: 12.5px;
+  font-weight: 700;
+  opacity: 1 !important;
+}
+
+/* ── E6/E7 黑胶与贴纸 ──────────────────────────────────── */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.disc {
+  position: absolute;
+  left: var(--disc-left);
+  top: var(--disc-top);
+  width: var(--disc-size);
+  height: var(--disc-size);
+  border-radius: 50%;
+  overflow: hidden;
+  will-change: transform;
+  /* 用 animation-play-state 而不是移除动画：后者会让唱片瞬间弹回 0° */
+  animation: spin 20s linear infinite;
+  animation-play-state: paused;
+  /* 纹路要细：参考图的沟槽间距约 1.5px，画粗了立刻变成塑料唱片 */
+  background:
+    repeating-radial-gradient(
+      circle at 50% 50%,
+      #0e0e0e 0 1.1px,
+      #1f1f1f 1.1px 1.7px,
+      #0e0e0e 1.7px 2.9px
+    ),
+    #131313;
+  box-shadow:
+    0 14px 40px rgba(0, 0, 0, 0.5),
+    inset 0 0 46px rgba(0, 0, 0, 0.5);
+}
+
+.disc[data-playing="true"] {
+  animation-play-state: running;
+}
+
+/* 沟槽自身的各向异性反光：跟着唱片转 */
+.disc-grooves {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 200deg at 50% 50%,
+    rgba(255, 255, 255, 0) 0deg,
+    rgba(255, 255, 255, 0.1) 34deg,
+    rgba(255, 255, 255, 0) 84deg,
+    rgba(255, 255, 255, 0) 172deg,
+    rgba(255, 255, 255, 0.075) 212deg,
+    rgba(255, 255, 255, 0) 262deg,
+    rgba(255, 255, 255, 0) 360deg
+  );
+}
+
+/* 定向光照：光源不随唱片旋转，所以必须是 .disc 的兄弟而不是子元素 */
+.disc-lighting {
+  position: absolute;
+  left: var(--disc-left);
+  top: var(--disc-top);
+  width: var(--disc-size);
+  height: var(--disc-size);
+  border-radius: 50%;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      122deg,
+      rgba(255, 255, 255, 0.13) 0%,
+      rgba(255, 255, 255, 0.02) 24%,
+      rgba(0, 0, 0, 0.16) 52%,
+      rgba(255, 255, 255, 0.05) 80%,
+      rgba(0, 0, 0, 0.2) 100%
+    ),
+    radial-gradient(circle at 38% 30%, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0) 58%);
+}
+
+.disc-label {
+  position: absolute;
+  inset: 62px;
+  border-radius: 50%;
+  background-color: #131313;
+  background-size: cover;
+  background-position: center;
+  box-shadow: inset 0 0 16px rgba(0, 0, 0, 0.66);
+  transition: opacity 200ms ease;
+}
+
+.disc-label-empty {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at 42% 34%, #3a3a38, #141413 72%);
+}
+
+.disc-shine {
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+}
+
+.disc-spindle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  border-radius: 50%;
+  background: #050505;
+}
+
+/* 外圈细白环：不随唱片旋转，所以是 .disc 的兄弟而非子元素 */
+.disc-ring {
+  position: absolute;
+  left: calc(var(--disc-left) - 8px);
+  top: calc(var(--disc-top) - 8px);
+  width: calc(var(--disc-size) + 16px);
+  height: calc(var(--disc-size) + 16px);
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  border-bottom-color: transparent;
+  border-left-color: rgba(255, 255, 255, 0.12);
+  pointer-events: none;
+}
+
+/* ── E11/E12 收藏与播放次数 ────────────────────────────── */
+.actions {
+  position: absolute;
+  left: 418px;
+  top: 519px;
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  color: var(--ink-secondary);
+}
+
+.action {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.like {
+  color: #d8d5d0;
+  transition: transform 160ms ease;
+}
+
+.like[data-liked="true"] {
+  color: #e03c3c;
+}
+
+.like:active {
+  transform: scale(0.88);
+}
+
+.count em {
+  font-size: 8px;
+  font-style: normal;
+  align-self: flex-start;
+  margin-top: 1px;
+}
+
+/* ── E8–E10、E13 播放区 ────────────────────────────────── */
+/* 实测自参考图：进度条 x 205..505，控制条与之左右对齐 */
+.playback {
+  position: absolute;
+  left: 205px;
+  top: 536px;
+  width: 300px;
+  color: var(--ink-secondary);
+}
+
+.wave-row {
+  position: relative;
+  height: 36px;
+}
+
+/* 波形窗口跟着播放头走，与参考图一致 */
+.waveform {
+  position: absolute;
+  bottom: 0;
+  left: calc(var(--playhead) - 10px);
+  color: var(--ink-secondary);
+}
+
+.progress {
+  position: relative;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.progress::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1.5px;
+  background: currentColor;
+  opacity: 0.4;
+}
+
+.progress-fill {
+  position: absolute;
+  left: 0;
+  height: 1.5px;
+  background: currentColor;
+  opacity: 0.85;
+}
+
+.progress-thumb {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
+  background: var(--ink-primary);
+}
+
+.timing {
+  margin-top: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 8.5px;
+  font-family: var(--font-cjk);
+}
+
+.timing b {
+  font-weight: 400;
+  font-size: 9.5px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.controls {
+  margin-top: 27px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--ink-secondary);
+}
+
+.controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  transition:
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.controls button:hover {
+  color: var(--ink-primary);
+}
+
+.controls button:active {
+  transform: scale(0.9);
+}
+
+.controls .play {
+  width: 36px;
+  height: 36px;
+  color: var(--ink-primary);
+}
+
+/* ── E14 装饰星标 ──────────────────────────────────────── */
+.sparkle {
+  position: absolute;
+  right: 22px;
+  bottom: 28px;
+  width: 34px;
+  height: 34px;
+  color: rgba(220, 220, 220, 0.72);
+}
+
+/* ── E15 窗口控制：悬停才显现，不打扰画面 ───────────────── */
+.titlebar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 34px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 2px;
+  padding-right: 6px;
+  opacity: 0;
+  transition: opacity 200ms ease;
+  z-index: 5;
+}
+
+.titlebar:hover,
+.titlebar:focus-within {
+  opacity: 1;
+}
+
+.titlebar button {
+  width: 34px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.75);
+  border-radius: 4px;
+}
+
+.titlebar button:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.titlebar .close:hover {
+  background: #c42b1c;
+  color: #fff;
+}
+
+/* 空状态提示 */
+.empty-hint {
+  position: absolute;
+  left: 200px;
+  top: 620px;
+  width: 390px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--ink-secondary);
+  opacity: 0.75;
+}
+
+.empty-hint button {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

@@ -1,0 +1,65 @@
+/* 设计令牌。坐标全部在 1220×688 设计坐标系内，由 Stage 整体缩放。 */
+
+/* 标题字体自带，不走网络（PRD §7 要求全程离线）。
+   Cormorant Garamond 可变字体，SIL OFL 1.1，许可证见 assets/fonts/OFL.txt。
+   已子集化到 Latin Basic：1168KB → 17KB。 */
+@font-face {
+  font-family: "Cormorant Garamond";
+  src: url("../assets/fonts/cormorant-garamond-subset.woff2") format("woff2-variations");
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: block;
+}
+
+:root {
+  --font-display: "Cormorant Garamond", Constantia, "Palatino Linotype", "Book Antiqua", Georgia,
+    "Times New Roman", serif;
+  --font-cjk: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", "Source Han Sans SC", sans-serif;
+  --font-ui: "Segoe UI", var(--font-cjk), sans-serif;
+
+  /* 文字色由 Stage 从皮肤注入，这里只是兜底 */
+  --ink-primary: #3a3a37;
+  --ink-secondary: #7b7975;
+  --ink-accent: #b2845f;
+
+  /* 实测自参考图（scripts/compare-visual.mjs 的 findDisc）：圆心 (359, 344)，直径 298 */
+  --disc-size: 298px;
+  --disc-left: 210px;
+  --disc-top: 195px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #000;
+  color: var(--ink-primary);
+  font-family: var(--font-ui);
+  overflow: hidden;
+  /* 桌面应用不需要文本选中和右键菜单的浏览器默认行为 */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+button {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:focus-visible {
+  outline: 1px solid var(--ink-accent);
+  outline-offset: 3px;
+}

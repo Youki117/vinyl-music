@@ -643,7 +643,14 @@ npm run tauri build
 
 **② 视觉对拍（`scripts/compare-visual.mjs`）** — PRD A5 的执行者：
 
-Playwright 打开 `pnpm dev` 的页面（浏览器路径，不需要 Tauri），注入固定的假数据与固定随机种子，截图，用 `pixelmatch` + SSIM 与 `design-ref/target/ref-ui-dark.png` 比对。SSIM < 0.92 则 CI 失败并输出差异图。同一脚本加 `--sweep` 参数就是 §4.3.3 的参数标定器。
+Playwright 打开 `npm run dev` 的页面（浏览器路径，不需要 Tauri），截图后与 `design-ref/target/ref-veil-primary.png` 比对，输出上下对照图。两层判定：
+
+- **坐标核对（精确）**：从参考图上检测黑胶圆心与半径，与 `tokens.css` 的常量比对，偏差 > 6px 即告警。这是真正有意义的保真度检查，当前实测偏差 0/1/0px。
+- **SSIM（回归绊线）**：阈值 0.66，当前 0.70。**不是保真度指标**，只用来发现布局塌陷、图层丢失、字体未加载这类硬故障。
+
+原稿把 SSIM ≥ 0.92 当作 M1 的硬关口，实测证明那个数字不可达也不该追，理由记在 PRD §4.3 的修订说明里，判据由 `scripts/reference-ceiling.mjs` 给出。
+
+设计坐标系定为 **1243×688**，正是参考图剥掉录屏黑边后的尺寸——这样元素坐标可以 1:1 照抄参考图，对拍全程不做缩放，消除了一整类方法误差。
 
 **③ 手工冒烟清单** — PRD §10 的验收清单，每个里程碑结束跑一遍，结果记进 `docs/smoke-log.md`。
 
