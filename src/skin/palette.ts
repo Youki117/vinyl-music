@@ -53,7 +53,10 @@ export function deriveInk(backdropAvg: [number, number, number] | null, veil: Ve
   const opacity = Math.min(veil.opacity, 0.92)
   const bgL = bdL * (1 - opacity) + tintL * opacity
 
-  const dark = bgL > 0.45
+  // 不能用固定亮度阈值决定深浅：背景亮度落在中段时，两个方向的对比度差别很大，
+  // 阈值切错会得到一个"技术上合法但根本读不清"的配色。两边都算一遍取更优的。
+  const dark = contrastRatio(relativeLuminance(0, 0, 0), bgL) >= contrastRatio(relativeLuminance(255, 255, 255), bgL)
+
   let primary = dark ? "#33322f" : "#ebe9e3"
   let secondary = dark ? "#7b7975" : "#b9b6b0"
 

@@ -26,4 +26,9 @@ export default defineConfig({
     minify: "esbuild",
     sourcemap: false,
   },
+  test: {
+    // 测试只覆盖纯逻辑，不需要 DOM 环境
+    environment: "node",
+    include: ["tests/**/*.test.ts"],
+  },
 })

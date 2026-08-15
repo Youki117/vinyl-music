@@ -8,6 +8,8 @@ import Progress from "@/ui/Progress"
 import Controls from "@/ui/Controls"
 import Actions from "@/ui/Actions"
 import TitleBar from "@/ui/TitleBar"
+import Playlist from "@/ui/panels/Playlist"
+import { engine } from "@/audio/engine"
 import { usePlayer } from "@/store/player"
 import { useSkin } from "@/store/skin"
 import { platform } from "@/platform"
@@ -15,16 +17,58 @@ import { platform } from "@/platform"
 export default function App() {
   const loadSkin = useSkin((s) => s.load)
   const setBackdrop = useSkin((s) => s.setBackdrop)
-  const status = usePlayer((s) => s.status)
-  // M2 会把它换成来自播放引擎的订阅；进度刻意不进 store（技术文档 §10）
-  const [progress, setProgress] = useState(0.27)
+  const init = usePlayer((s) => s.init)
+  const addFiles = usePlayer((s) => s.addFiles)
+  const toggle = usePlayer((s) => s.toggle)
+  const next = usePlayer((s) => s.next)
+  const prev = usePlayer((s) => s.prev)
+  const error = usePlayer((s) => s.error)
+  const queueLength = usePlayer((s) => s.queue.length)
+  const [playlistOpen, setPlaylistOpen] = useState(false)
 
   useEffect(() => {
     void loadSkin()
-  }, [loadSkin])
+    void init()
+  }, [loadSkin, init])
 
-  const toggle = () =>
-    usePlayer.setState({ status: status === "playing" ? "paused" : "playing" })
+  // 应用内快捷键（F8.8）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return
+      const p = usePlayer.getState()
+      switch (e.key) {
+        case " ":
+          e.preventDefault()
+          p.toggle()
+          break
+        case "ArrowLeft":
+          engine.seekBy(-5)
+          break
+        case "ArrowRight":
+          engine.seekBy(5)
+          break
+        case "ArrowUp":
+          e.preventDefault()
+          p.setVolume(Math.min(1, p.volume + 0.05))
+          break
+        case "ArrowDown":
+          e.preventDefault()
+          p.setVolume(Math.max(0, p.volume - 0.05))
+          break
+        case "m":
+        case "M":
+          p.toggleMute()
+          break
+        case "p":
+        case "P":
+          setPlaylistOpen((v) => !v)
+          break
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
 
   const importBackdrop = async () => {
     const ref = await platform.pickImage()
@@ -40,9 +84,25 @@ export default function App() {
       <Disc onToggle={toggle} />
       <div className="disc-lighting" />
       <Actions />
-      <Progress progress={progress} onSeek={setProgress}>
-        <Controls onToggle={toggle} />
+      <Progress>
+        <Controls
+          onToggle={toggle}
+          onPrev={() => void prev()}
+          onNext={() => void next()}
+          onOpenPlaylist={() => setPlaylistOpen(true)}
+        />
       </Progress>
+
+      {queueLength === 0 && (
+        <div className="empty-hint">
+          <button onClick={() => void platform.pickAudioFiles().then(addFiles)}>添加音乐文件</button>
+          {" 或 "}
+          <button onClick={() => void platform.pickAudioFolder().then(addFiles)}>选择文件夹</button>
+        </div>
+      )}
+
+      {error && <div className="toast">{error}</div>}
+
       <button className="sparkle" onClick={importBackdrop} aria-label="更换底图" title="更换底图">
         <svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true">
           <path
@@ -51,6 +111,8 @@ export default function App() {
           />
         </svg>
       </button>
+
+      <Playlist open={playlistOpen} onClose={() => setPlaylistOpen(false)} />
     </Stage>
   )
 }
