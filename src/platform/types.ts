@@ -39,8 +39,22 @@ export interface Platform {
   readCache(key: string): Promise<Uint8Array | null>
   writeCache(key: string, data: Uint8Array): Promise<void>
 
+  /**
+   * 监听拖入窗口的文件。返回取消监听的函数。
+   * 只回调音频文件与图片，其余忽略。
+   */
+  onFileDrop(handler: (files: FileRef[]) => void): () => void
+
+  /**
+   * 来自外壳的播放指令：媒体键、托盘菜单、系统媒体面板。
+   * 前端只认指令不认来源。
+   */
+  onCommand(handler: (cmd: PlayerCommand) => void): () => void
+
   readonly window: WindowControls
 }
+
+export type PlayerCommand = "toggle" | "pause" | "next" | "prev"
 
 export interface WindowControls {
   minimize(): Promise<void>

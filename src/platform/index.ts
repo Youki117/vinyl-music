@@ -1,9 +1,9 @@
 /**
  * 平台分发。按运行环境惰性加载对应实现，Tauri 模块在浏览器下不会被求值。
  */
-import type { FileRef, Platform, PlatformKind } from "./types"
+import type { FileRef, Platform, PlatformKind, PlayerCommand } from "./types"
 
-export type { FileRef, Platform, PlatformKind, WindowControls } from "./types"
+export type { FileRef, Platform, PlatformKind, PlayerCommand, WindowControls } from "./types"
 export { AUDIO_EXTENSIONS, isAudioFile } from "./types"
 
 export const IS_TAURI: boolean =
@@ -32,6 +32,32 @@ export const platform = {
   readConfig: <T>(name: string): Promise<T | null> => impl().then((p) => p.readConfig<T>(name)),
   writeConfig: <T>(name: string, value: T): Promise<void> =>
     impl().then((p) => p.writeConfig(name, value)),
+
+  onFileDrop: (handler: (files: FileRef[]) => void): (() => void) => {
+    let dispose: (() => void) | null = null
+    let cancelled = false
+    void impl().then((p) => {
+      if (cancelled) return
+      dispose = p.onFileDrop(handler)
+    })
+    return () => {
+      cancelled = true
+      dispose?.()
+    }
+  },
+
+  onCommand: (handler: (cmd: PlayerCommand) => void): (() => void) => {
+    let dispose: (() => void) | null = null
+    let cancelled = false
+    void impl().then((p) => {
+      if (cancelled) return
+      dispose = p.onCommand(handler)
+    })
+    return () => {
+      cancelled = true
+      dispose?.()
+    }
+  },
 
   readCache: (key: string): Promise<Uint8Array | null> => impl().then((p) => p.readCache(key)),
   writeCache: (key: string, data: Uint8Array): Promise<void> =>

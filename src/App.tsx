@@ -13,7 +13,7 @@ import SkinEditor from "@/ui/panels/SkinEditor"
 import { engine } from "@/audio/engine"
 import { usePlayer } from "@/store/player"
 import { useSkin } from "@/store/skin"
-import { platform } from "@/platform"
+import { isAudioFile, platform } from "@/platform"
 
 export default function App() {
   const loadSkin = useSkin((s) => s.load)
@@ -32,6 +32,27 @@ export default function App() {
     void loadSkin()
     void init()
   }, [loadSkin, init])
+
+  // 拖文件进窗口导入（F2.2）。音频进播放列表，图片直接当底图 —— 换皮肤最快的路径。
+  useEffect(() => {
+    return platform.onFileDrop((files) => {
+      const audio = files.filter((f) => isAudioFile(f.name))
+      const image = files.find((f) => /\.(png|jpe?g|webp|avif|bmp)$/i.test(f.name))
+      if (audio.length > 0) void addFiles(audio)
+      if (image) void setBackdrop(image)
+    })
+  }, [addFiles, setBackdrop])
+
+  // 媒体键与托盘菜单（F8.4/F8.6）。外壳把来源统一成指令，这里不关心是谁触发的。
+  useEffect(() => {
+    return platform.onCommand((cmd) => {
+      const p = usePlayer.getState()
+      if (cmd === "toggle") p.toggle()
+      else if (cmd === "pause") engine.pause()
+      else if (cmd === "next") void p.next()
+      else if (cmd === "prev") void p.prev()
+    })
+  }, [])
 
   // 应用内快捷键（F8.8）
   useEffect(() => {
@@ -69,6 +90,10 @@ export default function App() {
         case "s":
         case "S":
           setSkinOpen((v) => !v)
+          break
+        case "Escape":
+          setPlaylistOpen(false)
+          setSkinOpen(false)
           break
       }
     }
@@ -122,7 +147,11 @@ export default function App() {
         </svg>
       </button>
 
-      <Playlist open={playlistOpen} onClose={() => setPlaylistOpen(false)} />
+      {/* 两个抽屉都在右侧，同时打开会叠在一起，所以互斥 */}
+      <Playlist
+        open={playlistOpen && !skinOpen}
+        onClose={() => setPlaylistOpen(false)}
+      />
       <SkinEditor open={skinOpen} onClose={() => setSkinOpen(false)} />
     </Stage>
   )

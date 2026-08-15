@@ -112,6 +112,27 @@ export function create(): Platform {
       memCache.set(key, data)
     },
 
+    onFileDrop(handler) {
+      const prevent = (e: DragEvent) => e.preventDefault()
+      const onDrop = (e: DragEvent) => {
+        e.preventDefault()
+        const files = Array.from(e.dataTransfer?.files ?? [])
+        if (files.length > 0) handler(files.map(toRef))
+      }
+      window.addEventListener("dragover", prevent)
+      window.addEventListener("drop", onDrop)
+      return () => {
+        window.removeEventListener("dragover", prevent)
+        window.removeEventListener("drop", onDrop)
+      }
+    },
+
+    onCommand() {
+      // 浏览器下没有媒体键与托盘。Media Session API 只在有音频播放时才有意义，
+      // 开发路径用不上，留空即可。
+      return () => {}
+    },
+
     window: windowControls,
   }
 }

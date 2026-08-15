@@ -377,10 +377,9 @@
   right: 0;
   height: 34px;
   display: flex;
-  justify-content: flex-end;
   align-items: center;
   gap: 2px;
-  padding-right: 6px;
+  padding: 0 6px 0 14px;
   opacity: 0;
   transition: opacity 200ms ease;
   z-index: 5;
@@ -407,6 +406,41 @@
 .titlebar .close:hover {
   background: #c42b1c;
   color: #fff;
+}
+
+.titlebar-spacer {
+  flex: 1;
+  height: 100%;
+}
+
+.volume {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 9px;
+  border-radius: 13px;
+  background: rgba(20, 20, 20, 0.55);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.volume button {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+}
+
+.volume input[type="range"] {
+  width: 78px;
+  height: 3px;
+  accent-color: #ddd9d2;
+  cursor: pointer;
+}
+
+/* 拖放高亮 */
+.viewport[data-dropping="true"] .stage {
+  outline: 2px dashed var(--ink-accent);
+  outline-offset: -6px;
 }
 
 /* 空状态提示 */

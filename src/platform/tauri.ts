@@ -5,7 +5,9 @@ import type { FileRef, Platform, WindowControls } from "./types"
 import { AUDIO_EXTENSIONS } from "./types"
 
 import { invoke } from "@tauri-apps/api/core"
+import { listen } from "@tauri-apps/api/event"
 import { getCurrentWindow } from "@tauri-apps/api/window"
+import { getCurrentWebview } from "@tauri-apps/api/webview"
 import { open } from "@tauri-apps/plugin-dialog"
 import {
   BaseDirectory,
@@ -129,6 +131,59 @@ export function create(): Platform {
     async writeCache(key, data) {
       await ensureCacheDir()
       await fsWriteFile(`${CACHE_DIR}/${key}`, data, { baseDir: BaseDirectory.AppData })
+    },
+
+    onFileDrop(handler) {
+      // tauri.conf.json 开了 dragDropEnabled，所以 HTML5 的 drop 事件不会触发，
+      // 得走 Tauri 自己的事件 —— 好处是直接拿到真实路径，不必再要一次授权。
+      let unlisten: (() => void) | null = null
+      let cancelled = false
+
+      void getCurrentWebview()
+        .onDragDropEvent(async (event) => {
+          if (event.payload.type !== "drop") return
+          const paths = event.payload.paths ?? []
+          const refs: FileRef[] = []
+          for (const p of paths) {
+            try {
+              const info = await stat(p)
+              if (info.isDirectory) {
+                const found = await invoke<ScannedFile[]>("scan_audio_files", { dir: p })
+                refs.push(...found.map((f) => ({ id: f.path, name: f.name, size: f.size, mtime: f.mtime })))
+              } else {
+                refs.push(await refOf(p))
+              }
+            } catch {
+              // 单个路径失败不影响其余
+            }
+          }
+          if (refs.length > 0) handler(refs)
+        })
+        .then((fn) => {
+          if (cancelled) fn()
+          else unlisten = fn
+        })
+
+      return () => {
+        cancelled = true
+        unlisten?.()
+      }
+    },
+
+    onCommand(handler) {
+      let unlisten: (() => void) | null = null
+      let cancelled = false
+      void listen<string>("player://command", (e) => {
+        const cmd = e.payload
+        if (cmd === "toggle" || cmd === "pause" || cmd === "next" || cmd === "prev") handler(cmd)
+      }).then((fn) => {
+        if (cancelled) fn()
+        else unlisten = fn
+      })
+      return () => {
+        cancelled = true
+        unlisten?.()
+      }
     },
 
     window: makeWindowControls(),
