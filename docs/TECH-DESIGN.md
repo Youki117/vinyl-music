@@ -43,17 +43,46 @@ PRD §7 定的"安装包 < 20MB、内存 < 200MB"用 Electron 直接出局。环
 
 ### 1.3 需要装的东西（M0 之前）
 
-```bash
-winget install Rustlang.Rustup
-```
+**① Rust 工具链** — 普通权限即可，无需管理员：
 
 ```bash
-winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+winget install --id Rustlang.Rustup --exact --silent --accept-source-agreements --accept-package-agreements
 ```
 
-装完重开终端验证 `cargo --version` 与 `rustc --version` 有输出。WebView2 运行时本机已存在，不需要额外安装。
+**② MSVC C++ 生成工具** — Rust 的 `*-pc-windows-msvc` 目标需要 MSVC 链接器，**必须在管理员终端里执行**：
+
+```bash
+winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --accept-source-agreements --accept-package-agreements --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+```
+
+下载约 3–5GB，耗时 15–40 分钟。装完用 `vswhere` 验证：
+
+```bash
+& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -products * -property displayName
+```
+
+WebView2 运行时本机已存在（`151.0.4129.78`），不需要额外安装。
+
+> **PATH 不会刷新到已打开的终端。** winget 装完 rustup 后，当前终端里 `cargo` 仍然是 "not found"，这不代表安装失败。重开终端，或在当前会话里手动拼一次：
+> ```bash
+> $env:PATH = [Environment]::GetEnvironmentVariable('PATH','Machine') + ';' + [Environment]::GetEnvironmentVariable('PATH','User')
+> ```
 
 > 首次 `cargo build` 会编译整个 Tauri 依赖树，约 3–8 分钟且吃满 CPU，属正常现象；之后增量编译 10–30 秒。
+
+**本机实测记录（2026-08-15，环境已就绪）**
+
+| 项 | 结果 |
+| --- | --- |
+| rustup | 1.29.0 |
+| rustc / cargo | 1.97.1 |
+| toolchain | `stable-x86_64-pc-windows-msvc` |
+| VS 生成工具 | 2022 v17.14.37 |
+| MSVC 工具集 | 14.44.35207 |
+| Windows SDK | 10.0.26100.0 |
+| 链接验证 | `cargo new` + `cargo build --release` + 运行，全程通过 |
+
+两条命令**都在非管理员会话中直接装成功了**——VS 生成工具的引导程序自行完成了提权，没有卡在权限上。M0 的环境依赖已全部解除。
 
 ### 1.4 依赖清单
 
