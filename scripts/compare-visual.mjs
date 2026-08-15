@@ -73,12 +73,37 @@ mkdirSync(OUT_DIR, { recursive: true })
 // ── 截图 ──────────────────────────────────────────────────────────
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 })
+const pageErrors = []
+page.on("pageerror", (e) => pageErrors.push(e.message))
+page.on("console", (m) => {
+  if (m.type() === "error") pageErrors.push(m.text())
+})
+
 await page.goto(URL, { waitUntil: "networkidle" })
 // 等 WebGL 首帧与字体就位
 await page.waitForTimeout(900)
+
+// 蒙版必须是真的着色器在画。曾经因为 dispose 里调 loseContext 导致它静默降级
+// 成 CSS 渐变，而 SSIM 照样"通过" —— 没有这道断言，那个 bug 不会被发现。
+const veilMode = await page.evaluate(() => ({
+  shader: document.querySelector("canvas.veil") !== null,
+  fallback: document.querySelector(".veil-fallback") !== null,
+}))
+
 await page.screenshot({ path: SHOT })
 await browser.close()
 console.log(`截图 → ${SHOT}`)
+
+if (!veilMode.shader || veilMode.fallback) {
+  console.error("\n✗ 蒙版没有走 WebGL 着色器，已降级到 CSS 渐变。检查着色器编译与上下文。")
+  for (const e of pageErrors) console.error("  " + e)
+  process.exit(1)
+}
+if (pageErrors.length) {
+  console.error("\n✗ 页面存在报错：")
+  for (const e of pageErrors) console.error("  " + e)
+  process.exit(1)
+}
 
 if (shotOnly) process.exit(0)
 

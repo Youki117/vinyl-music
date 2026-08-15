@@ -59,7 +59,10 @@ function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLSh
   if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
     const log = gl.getShaderInfoLog(sh)
     gl.deleteShader(sh)
-    throw new Error(`着色器编译失败: ${log}`)
+    // info log 为 null 通常意味着上下文已丢失，而不是源码有语法错误
+    const kind = type === gl.VERTEX_SHADER ? "顶点" : "片元"
+    const lost = gl.isContextLost() ? "（上下文已丢失）" : ""
+    throw new Error(`${kind}着色器编译失败${lost}: ${log ?? "无 info log"}`)
   }
   return sh
 }
@@ -217,6 +220,12 @@ export class VeilRenderer {
     const { gl } = this
     if (this.program) gl.deleteProgram(this.program)
     gl.deleteTexture(this.bandTex)
-    gl.getExtension("WEBGL_lose_context")?.loseContext()
+
+    // 刻意不调 WEBGL_lose_context.loseContext()：canvas 元素与 GL 上下文是
+    // 一一绑定的，一旦丢弃，后续在同一个 canvas 上 getContext('webgl2') 拿回的
+    // 还是那个已失效的上下文，着色器编译会永久失败。React StrictMode 的
+    // 挂载→清理→再挂载正好会触发这条路径，表现是蒙版静默降级成 CSS 渐变而
+    // 且不报有效错误（getShaderInfoLog 返回 null）。删掉自己创建的资源即可，
+    // 上下文随 canvas 一起回收。
   }
 }

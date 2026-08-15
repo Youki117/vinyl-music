@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 
+import { engine } from "@/audio/engine"
 import { subscribe, onSustainedSlowdown } from "./clock"
 import { useStageFit } from "./useStageFit"
 import { VeilRenderer, type Octaves } from "./veil/renderer"
@@ -61,7 +62,22 @@ export default function Veil() {
     if (fallback) return
     // 蒙版静止时（waveAmp=0 且 breath=0）没必要 60fps 重画同样的画面
     const still = veil.waveAmp === 0 && veil.breath === 0
-    return subscribe((t) => rendererRef.current?.render(t), still ? 0.5 : 60)
+    const reactive = veil.waveAmp > 0
+
+    return subscribe(
+      (t) => {
+        const r = rendererRef.current
+        if (!r) return
+        if (reactive) {
+          // 频谱 → 16 段包络 → uBands。暂停时 tickBands 返回自然衰减的包络，
+          // 画面平滑回到呼吸态，不需要额外处理。
+          const bands = engine.tickBands()
+          if (bands) r.setBands(bands)
+        }
+        r.render(t)
+      },
+      still ? 0.5 : reactive ? 60 : 12,
+    )
   }, [fallback, veil.waveAmp, veil.breath])
 
   if (fallback) {

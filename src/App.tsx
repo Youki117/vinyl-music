@@ -9,6 +9,7 @@ import Controls from "@/ui/Controls"
 import Actions from "@/ui/Actions"
 import TitleBar from "@/ui/TitleBar"
 import Playlist from "@/ui/panels/Playlist"
+import SkinEditor from "@/ui/panels/SkinEditor"
 import { engine } from "@/audio/engine"
 import { usePlayer } from "@/store/player"
 import { useSkin } from "@/store/skin"
@@ -25,6 +26,7 @@ export default function App() {
   const error = usePlayer((s) => s.error)
   const queueLength = usePlayer((s) => s.queue.length)
   const [playlistOpen, setPlaylistOpen] = useState(false)
+  const [skinOpen, setSkinOpen] = useState(false)
 
   useEffect(() => {
     void loadSkin()
@@ -64,15 +66,23 @@ export default function App() {
         case "P":
           setPlaylistOpen((v) => !v)
           break
+        case "s":
+        case "S":
+          setSkinOpen((v) => !v)
+          break
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [])
 
+  // 黑胶右键直接换底图，是 PRD §6.2 要求的三步内完成的主路径
   const importBackdrop = async () => {
     const ref = await platform.pickImage()
-    if (ref) await setBackdrop(ref)
+    if (ref) {
+      await setBackdrop(ref)
+      setSkinOpen(true)
+    }
   }
 
   return (
@@ -81,7 +91,7 @@ export default function App() {
       <Masthead />
       <Lyrics />
       <div className="disc-ring" />
-      <Disc onToggle={toggle} />
+      <Disc onToggle={toggle} onContextMenu={() => setSkinOpen(true)} />
       <div className="disc-lighting" />
       <Actions />
       <Progress>
@@ -113,6 +123,7 @@ export default function App() {
       </button>
 
       <Playlist open={playlistOpen} onClose={() => setPlaylistOpen(false)} />
+      <SkinEditor open={skinOpen} onClose={() => setSkinOpen(false)} />
     </Stage>
   )
 }
