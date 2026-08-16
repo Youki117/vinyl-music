@@ -18,6 +18,85 @@ function stripExt(name: string): string {
 }
 
 /**
+ * 判断标签值是不是解码坏了。
+ *
+ * 控制字符（\x00-\x08、\x0b、\x0c、\x0e-\x1f）不该出现在正常曲名里，出现了就说明
+ * 解码环节出了问题，此时宁可退回文件名，也不要把乱码显示给用户。
+ */
+export function looksCorrupt(s: string): boolean {
+  // eslint-disable-next-line no-control-regex
+  return /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(s)
+}
+
+/** RIFF LIST/INFO 里我们关心的字段 */
+const WAV_INFO_KEYS: Record<string, "title" | "artist" | "album"> = {
+  INAM: "title",
+  IART: "artist",
+  IPRD: "album",
+}
+
+/**
+ * 自己解一遍 WAV 的 LIST/INFO 块。
+ *
+ * music-metadata 读这个块时按 7 位 ASCII 处理，会把每个字节的最高位抹掉
+ * （实测「测试曲目一」的 UTF-8 字节 E6 B5 8B… 变成 'f' '5' \x0b…）。这是有损的，
+ * 拿到字符串后再怎么转码都救不回来，只能重新读原始字节。
+ *
+ * RIFF 规范里 INFO 值本是 ASCII/CP1252，但 ffmpeg 等工具普遍直接写 UTF-8，
+ * 所以这里先试 UTF-8，失败再退回 latin1。
+ */
+export function parseWavInfo(bytes: Uint8Array): Partial<Record<"title" | "artist" | "album", string>> {
+  const out: Partial<Record<"title" | "artist" | "album", string>> = {}
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const ascii = (o: number, n: number) =>
+    String.fromCharCode(...bytes.subarray(o, o + n))
+
+  if (bytes.byteLength < 12 || ascii(0, 4) !== "RIFF" || ascii(8, 4) !== "WAVE") return out
+
+  const utf8 = new TextDecoder("utf-8", { fatal: true })
+  const latin1 = new TextDecoder("latin1")
+
+  let p = 12
+  while (p + 8 <= bytes.byteLength) {
+    const id = ascii(p, 4)
+    const size = view.getUint32(p + 4, true)
+    const body = p + 8
+    if (size > bytes.byteLength - body) break
+
+    if (id === "LIST" && size >= 4 && ascii(body, 4) === "INFO") {
+      let q = body + 4
+      const end = body + size
+      while (q + 8 <= end) {
+        const sub = ascii(q, 4)
+        const len = view.getUint32(q + 4, true)
+        const valStart = q + 8
+        if (len > end - valStart) break
+
+        const key = WAV_INFO_KEYS[sub]
+        if (key) {
+          // 去掉结尾的填充 0
+          let n = len
+          while (n > 0 && bytes[valStart + n - 1] === 0) n--
+          const raw = bytes.subarray(valStart, valStart + n)
+          let text: string
+          try {
+            text = utf8.decode(raw)
+          } catch {
+            text = latin1.decode(raw)
+          }
+          const trimmed = text.trim()
+          if (trimmed) out[key] = trimmed
+        }
+        // 各子块按偶数字节对齐
+        q = valStart + len + (len % 2)
+      }
+    }
+    p = body + size + (size % 2)
+  }
+  return out
+}
+
+/**
  * 读取元数据。复用已经拿到的字节，不重复读盘。
  * 任何一步失败都回退到文件名，绝不因为标签坏了就让曲目不可用。
  */
@@ -56,10 +135,21 @@ export async function readMetadata(ref: FileRef, bytes: Uint8Array): Promise<Tra
     (meta.native?.["ID3v2.3"]?.find((t) => t.id === "USLT")?.value as string | undefined) ??
     null
 
+  // WAV 的 INFO 块由我们自己重解，避开 music-metadata 抹掉高位的问题
+  const wav = /\.wav$/i.test(ref.name) ? parseWavInfo(bytes) : {}
+
+  const pick = (own: string | undefined, parsed: string | undefined, fb: string) => {
+    const a = own?.trim()
+    if (a && !looksCorrupt(a)) return a
+    const b = parsed?.trim()
+    if (b && !looksCorrupt(b)) return b
+    return fb
+  }
+
   return {
-    title: common.title?.trim() || fallback.title,
-    artist: common.artist?.trim() || fallback.artist,
-    album: common.album?.trim() || "",
+    title: pick(wav.title, common.title, fallback.title),
+    artist: pick(wav.artist, common.artist, fallback.artist),
+    album: pick(wav.album, common.album, ""),
     duration: meta.format.duration ?? 0,
     cover,
     lyrics: typeof lyrics === "string" ? lyrics : null,

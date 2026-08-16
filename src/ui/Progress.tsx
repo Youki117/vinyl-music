@@ -13,8 +13,12 @@ import Waveform from "./Waveform"
  */
 export default function Progress({ children }: { children?: ReactNode }) {
   const barRef = useRef<HTMLDivElement>(null)
-  const { frac: progress, time, duration } = useProgress()
+  const { frac: progress, time, duration: engineDuration } = useProgress()
   const track = usePlayer((s) => s.current())
+
+  // 曲目还没载入时引擎时长是 0，退回元数据里的时长 ——
+  // 否则选中一首歌但没按播放，总时长会一直显示 00:00
+  const duration = engineDuration > 0 ? engineDuration : (track?.duration ?? 0)
 
   const seekAt = (clientX: number) => {
     const el = barRef.current

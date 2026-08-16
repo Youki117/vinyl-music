@@ -10,6 +10,8 @@ import Actions from "@/ui/Actions"
 import TitleBar from "@/ui/TitleBar"
 import Playlist from "@/ui/panels/Playlist"
 import SkinEditor from "@/ui/panels/SkinEditor"
+import Playback from "@/ui/panels/Playback"
+import { useLibrary } from "@/store/library"
 import { engine } from "@/audio/engine"
 import { usePlayer } from "@/store/player"
 import { useSkin } from "@/store/skin"
@@ -19,7 +21,7 @@ export default function App() {
   const loadSkin = useSkin((s) => s.load)
   const setBackdrop = useSkin((s) => s.setBackdrop)
   const init = usePlayer((s) => s.init)
-  const addFiles = usePlayer((s) => s.addFiles)
+  const addFiles = useLibrary((s) => s.addFiles)
   const toggle = usePlayer((s) => s.toggle)
   const next = usePlayer((s) => s.next)
   const prev = usePlayer((s) => s.prev)
@@ -27,6 +29,15 @@ export default function App() {
   const queueLength = usePlayer((s) => s.queue.length)
   const [playlistOpen, setPlaylistOpen] = useState(false)
   const [skinOpen, setSkinOpen] = useState(false)
+  const [playbackOpen, setPlaybackOpen] = useState(false)
+
+  // 导入后队列还是空的话，直接把新导入的曲目接上，省得用户再去列表里点一次
+  const importAndQueue = async (files: Parameters<typeof addFiles>[0]) => {
+    const added = await addFiles(files)
+    if (added.length > 0 && usePlayer.getState().queue.length === 0) {
+      usePlayer.setState({ queue: added, index: 0 })
+    }
+  }
 
   useEffect(() => {
     void loadSkin()
@@ -38,10 +49,12 @@ export default function App() {
     return platform.onFileDrop((files) => {
       const audio = files.filter((f) => isAudioFile(f.name))
       const image = files.find((f) => /\.(png|jpe?g|webp|avif|bmp)$/i.test(f.name))
-      if (audio.length > 0) void addFiles(audio)
+      if (audio.length > 0) void importAndQueue(audio)
       if (image) void setBackdrop(image)
     })
-  }, [addFiles, setBackdrop])
+    // importAndQueue 只读 store 的最新状态，不需要进依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setBackdrop])
 
   // 媒体键与托盘菜单（F8.4/F8.6）。外壳把来源统一成指令，这里不关心是谁触发的。
   useEffect(() => {
@@ -91,9 +104,14 @@ export default function App() {
         case "S":
           setSkinOpen((v) => !v)
           break
+        case "e":
+        case "E":
+          setPlaybackOpen((v) => !v)
+          break
         case "Escape":
           setPlaylistOpen(false)
           setSkinOpen(false)
+          setPlaybackOpen(false)
           break
       }
     }
@@ -112,7 +130,10 @@ export default function App() {
 
   return (
     <Stage>
-      <TitleBar />
+      <TitleBar
+        onOpenPlayback={() => setPlaybackOpen(true)}
+        onOpenSkin={() => setSkinOpen(true)}
+      />
       <Masthead />
       <Lyrics />
       <div className="disc-ring" />
@@ -130,9 +151,13 @@ export default function App() {
 
       {queueLength === 0 && (
         <div className="empty-hint">
-          <button onClick={() => void platform.pickAudioFiles().then(addFiles)}>添加音乐文件</button>
+          <button onClick={() => void platform.pickAudioFiles().then(importAndQueue)}>
+            添加音乐文件
+          </button>
           {" 或 "}
-          <button onClick={() => void platform.pickAudioFolder().then(addFiles)}>选择文件夹</button>
+          <button onClick={() => void platform.pickAudioFolder().then(importAndQueue)}>
+            选择文件夹
+          </button>
         </div>
       )}
 
@@ -147,12 +172,13 @@ export default function App() {
         </svg>
       </button>
 
-      {/* 两个抽屉都在右侧，同时打开会叠在一起，所以互斥 */}
+      {/* 抽屉都在右侧，同时打开会叠在一起，所以互斥 */}
       <Playlist
-        open={playlistOpen && !skinOpen}
+        open={playlistOpen && !skinOpen && !playbackOpen}
         onClose={() => setPlaylistOpen(false)}
       />
-      <SkinEditor open={skinOpen} onClose={() => setSkinOpen(false)} />
+      <SkinEditor open={skinOpen && !playbackOpen} onClose={() => setSkinOpen(false)} />
+      <Playback open={playbackOpen} onClose={() => setPlaybackOpen(false)} />
     </Stage>
   )
 }

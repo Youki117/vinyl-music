@@ -1,5 +1,6 @@
 import { platform, type FileRef } from "@/platform"
 import { BandAnalyser } from "./analyser"
+import { Equalizer } from "./eq"
 
 /**
  * 播放引擎。用 HTMLAudioElement 而不是 AudioBufferSourceNode 作音源：前者自带
@@ -33,6 +34,18 @@ class Engine {
   private _volume = 0.8
   private _muted = false
 
+  private eq: Equalizer | null = null
+  private _eqEnabled = false
+  private _eqGains: number[] = new Array(10).fill(0)
+  private _speed = 1
+  private _outputDevice = ""
+
+  private sleepHandle = 0
+  private sleepAt: number | null = null
+  private sleepAfterTrack = false
+  private sleepPending = false
+  private sleepListeners = new Set<(remaining: number | null) => void>()
+
   /**
    * <audio> 元素惰性创建。模块级 new Audio() 会让这个文件一被 import 就依赖 DOM，
    * 纯逻辑的单元测试因此跑不起来。
@@ -41,6 +54,8 @@ class Engine {
     if (!this._el) {
       const el = new Audio()
       el.preload = "auto"
+      el.playbackRate = this._speed
+      el.preservesPitch = true
       el.addEventListener("timeupdate", () => this.emitProgress())
       el.addEventListener("durationchange", () => this.emitProgress())
       el.addEventListener("ended", () => this.onEnded?.())
@@ -76,10 +91,12 @@ class Engine {
     if (this.ctx) return
     const ctx = new AudioContext()
     const src = ctx.createMediaElementSource(this.el)
+    const eq = new Equalizer(ctx)
     const gain = ctx.createGain()
     const analyser = new BandAnalyser(ctx)
 
-    src.connect(gain)
+    src.connect(eq.input)
+    eq.output.connect(gain)
     gain.connect(ctx.destination)
     // 分析器旁路，不影响输出
     gain.connect(analyser.node)
@@ -88,6 +105,119 @@ class Engine {
     this.ctx = ctx
     this.gain = gain
     this.analyser = analyser
+    this.eq = eq
+  }
+
+  // ── 均衡器 ────────────────────────────────────────────────
+  setEqEnabled(on: boolean): void {
+    this._eqEnabled = on
+    this.ensureGraph()
+    this.eq?.setEnabled(on)
+  }
+
+  setEqGains(gains: number[]): void {
+    this._eqGains = [...gains]
+    this.ensureGraph()
+    this.eq?.setGains(gains)
+  }
+
+  get eqEnabled(): boolean {
+    return this._eqEnabled
+  }
+  get eqGains(): number[] {
+    return [...this._eqGains]
+  }
+
+  // ── 播放速度 ──────────────────────────────────────────────
+  /**
+   * preservesPitch 默认为 true，变速不变调 —— 关掉的话 1.5 倍速会把人声唱成花栗鼠。
+   */
+  setSpeed(rate: number): void {
+    this._speed = Math.min(2, Math.max(0.5, rate))
+    this.el.playbackRate = this._speed
+    this.el.preservesPitch = true
+  }
+
+  get speed(): number {
+    return this._speed
+  }
+
+  // ── 睡眠定时器 ────────────────────────────────────────────
+  /**
+   * @param minutes 分钟数；0 表示取消
+   * @param afterTrack true 表示到点后等当前曲目播完再停
+   */
+  setSleepTimer(minutes: number, afterTrack = false): void {
+    window.clearTimeout(this.sleepHandle)
+    this.sleepAt = null
+    this.sleepAfterTrack = afterTrack
+    if (minutes <= 0) {
+      this.emitSleep()
+      return
+    }
+    this.sleepAt = Date.now() + minutes * 60_000
+    this.sleepHandle = window.setTimeout(() => {
+      if (this.sleepAfterTrack) {
+        // 等当前曲目自然结束，由 store 的 onEnded 走到这里
+        this.sleepPending = true
+      } else {
+        this.pause()
+        this.clearSleep()
+      }
+    }, minutes * 60_000)
+    this.emitSleep()
+  }
+
+  /** 曲目结束时由 store 询问：是否该停在这里。 */
+  consumeSleepPending(): boolean {
+    if (!this.sleepPending) return false
+    this.clearSleep()
+    return true
+  }
+
+  private clearSleep(): void {
+    window.clearTimeout(this.sleepHandle)
+    this.sleepHandle = 0
+    this.sleepAt = null
+    this.sleepPending = false
+    this.emitSleep()
+  }
+
+  cancelSleepTimer(): void {
+    this.clearSleep()
+  }
+
+  /** 剩余毫秒，未设置时为 null。 */
+  get sleepRemaining(): number | null {
+    return this.sleepAt === null ? null : Math.max(0, this.sleepAt - Date.now())
+  }
+
+  private emitSleep(): void {
+    for (const fn of this.sleepListeners) fn(this.sleepRemaining)
+  }
+
+  onSleepChange(fn: (remaining: number | null) => void): () => void {
+    this.sleepListeners.add(fn)
+    fn(this.sleepRemaining)
+    return () => this.sleepListeners.delete(fn)
+  }
+
+  // ── 输出设备 ──────────────────────────────────────────────
+  async listOutputDevices(): Promise<MediaDeviceInfo[]> {
+    if (!navigator.mediaDevices?.enumerateDevices) return []
+    const all = await navigator.mediaDevices.enumerateDevices()
+    return all.filter((d) => d.kind === "audiooutput")
+  }
+
+  async setOutputDevice(deviceId: string): Promise<void> {
+    const el = this.el as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }
+    if (typeof el.setSinkId !== "function") throw new Error("当前环境不支持切换输出设备")
+    await el.setSinkId(deviceId)
+    this._outputDevice = deviceId
+  }
+
+  get outputDevice(): string {
+    return this._outputDevice
   }
 
   private effectiveVolume(): number {
