@@ -136,6 +136,10 @@ export function create(): Platform {
       return null
     },
 
+    async ensureReadable() {
+      // 浏览器没有能力域这回事
+    },
+
     async readConfig<T>(name: string): Promise<T | null> {
       const raw = localStorage.getItem(`vinyl:${name}`)
       if (raw === null) return null

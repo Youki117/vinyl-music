@@ -52,6 +52,16 @@ export interface Platform {
    */
   resolvePath(baseId: string, entry: string): Promise<FileRef | null>
 
+  /**
+   * 确保这些路径可读。
+   *
+   * Tauri 下 fs 有一份静态能力域，只含 $HOME/Music 等标准目录；对话框选中的文件
+   * 会被自动放行，拖放的、以及上次存进曲库的则不会。重启后要先把曲库里的路径
+   * 重新放行一遍，否则音乐库不在标准目录下的用户会发现整个库都播不了。
+   * 浏览器实现下是空操作。
+   */
+  ensureReadable(paths: string[]): Promise<void>
+
   /** 读取一个 JSON 配置。不存在时返回 null。 */
   readConfig<T>(name: string): Promise<T | null>
   /** 写入一个 JSON 配置（实现需保证原子性）。 */

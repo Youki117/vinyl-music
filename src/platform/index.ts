@@ -44,6 +44,8 @@ export const platform = {
     impl().then((p) => p.saveText(name, text)),
   resolvePath: (baseId: string, entry: string): Promise<FileRef | null> =>
     impl().then((p) => p.resolvePath(baseId, entry)),
+  ensureReadable: (paths: string[]): Promise<void> =>
+    impl().then((p) => p.ensureReadable(paths)),
 
   readConfig: <T>(name: string): Promise<T | null> => impl().then((p) => p.readConfig<T>(name)),
   writeConfig: <T>(name: string, value: T): Promise<void> =>

@@ -125,6 +125,14 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
           <button onClick={() => lib.setSort(lib.sort)} aria-label="切换升降序" title="切换升降序">
             {lib.sortDesc ? "↓" : "↑"}
           </button>
+          <button className="drawer-close" onClick={onClose} aria-label="关闭">
+            ✕
+          </button>
+        </header>
+
+        {/* 操作按钮单独一行：380px 的抽屉塞不下搜索框 + 排序 + 五个按钮，
+            挤在一行会把关闭按钮挤到第二行去 */}
+        <div className="lib-actions">
           <button onClick={importFiles}>加文件</button>
           <button onClick={importFolder}>加文件夹</button>
           <button onClick={importM3u} title="导入 m3u / m3u8 歌单文件">
@@ -142,10 +150,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
               删歌单
             </button>
           )}
-          <button className="drawer-close" onClick={onClose} aria-label="关闭">
-            ✕
-          </button>
-        </header>
+        </div>
 
         {lib.scanning && (
           <div className="drawer-progress">

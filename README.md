@@ -118,6 +118,7 @@ node scripts/verify-skin.mjs
 | --- | --- |
 | `npm test` | 169 个单元测试，覆盖 LRC 解析（含词级时间戳）、m3u 解析与生成、文本判码、片段编辑、洗牌、曲库筛选排序、WAV 标签解码、取景换算、配色对比度、格式化 |
 | `verify-real.mjs` | **用公开渠道的真实素材跑 37 项端到端检查**：真实 ID3 标签、外挂歌词、逐字推进、换底图联动、真实音频混音、m3u 导入。素材用 `fetch-real-assets.mjs` 下载 |
+| `verify-packaged.mjs` | **在装好的应用里跑 20 项检查**：fs 能力域、配置读写、曲库恢复。开发模式走的是浏览器实现，测不到这些 |
 | `verify-audio.mjs` | 端到端跑通播放链路（五种音频格式）。需要 `tests/fixtures/` 下有测试音频 |
 | `verify-mix.mjs` | 端到端验证两条音轨同时发声与片段剪辑 |
 | `compare-visual.mjs` | 与参考图对拍。核对黑胶坐标（精确判据），断言蒙版确由 WebGL 画出，SSIM 作回归绊线 |
@@ -127,7 +128,13 @@ node scripts/verify-skin.mjs
 | `analyze-ref.mjs` | 从参考图实测蒙版边缘剖面，产出着色器参数 |
 | `reference-ceiling.mjs` | 测定参考素材自身的 SSIM 上限，用于判定对拍阈值该定在哪 |
 
-> 所有 `verify-*` 与 `compare-visual.mjs` 都需要 `npm run dev` 已在 1420 端口运行。
+> 除 `verify-packaged.mjs` 外，其余 `verify-*` 与 `compare-visual.mjs` 都需要 `npm run dev` 已在 1420 端口运行。
+
+`verify-packaged.mjs` 测的是**装好的应用**，跑法不同——先把 WebView2 的调试端口开出来再启动：
+
+```bash
+WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 ./src-tauri/target/release/vinyl-player.exe & sleep 6 && node scripts/verify-packaged.mjs
+```
 
 用真实素材跑出来的缺陷记录在 [FEATURE-PARITY.md §4.2](docs/FEATURE-PARITY.md)。
 

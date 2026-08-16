@@ -560,6 +560,28 @@ vinyl-player/
 
 版本迁移：每个 JSON 带 `schemaVersion` 字段，加载时按版本跑迁移函数链。第一版就加上，后面改结构不至于把用户数据洗掉。
 
+### 9.1 fs 权限：两个只在打包后才暴露的坑
+
+开发时跑 `npm run dev`，走的是 `platform/browser.ts`——配置进 localStorage，文件靠 `File` 对象，**完全不碰 Tauri 的权限系统**。下面两件事因此在开发期一次都没暴露过，是装机实测（`scripts/verify-packaged.mjs`）才照出来的。
+
+**一、文本读写是独立命令。** `capabilities/default.json` 里给了 `fs:allow-read-file` 与 `fs:allow-write-file`，但 `readTextFile` / `writeTextFile` 走的是 `plugin:fs|read_text_file` / `write_text_file`，是**另外两条命令**，不被前者覆盖。少了它们，所有 JSON 配置在打包后一律 `not allowed by ACL`——曲库、设置、皮肤、混音编排全都存不进也读不出，而界面上看不出任何异常，因为异常被 `void init()` 吞了。
+
+顺带把 `readConfig` 改成读失败降级返回 `null` 并打日志：原先异常会一路抛穿 `init()`，让整个启动流程停在半路。
+
+**二、fs scope 是静态白名单，拖放不在其中。** scope 只列了 `$AUDIO`、`$HOME/Music`、`$DOWNLOAD` 等标准目录。对话框选中的文件由 dialog 插件自动放行，**拖放进来的不会**——实测把 `D:\Project\…` 下的 mp3 拖进打包应用，读取直接报 `forbidden path`。而拖放恰恰是 README 推荐的首选导入方式。
+
+更隐蔽的是**重启**：能力域每次启动重建，`library.json` 里那些绝对路径不会自动重新放行。音乐库不在标准目录下的用户，重启后整个曲库都会变成"无法播放"。
+
+解法不是把 scope 放开成 `**`（等于取消这道防线），而是按用户的实际动作逐个放行——`allow_paths` 命令（`src-tauri/src/grant.rs`）在三个时机被调用：
+
+| 时机 | 放行什么 |
+| --- | --- |
+| 拖放 | 拖进来的路径，目录则递归 |
+| 载入曲库 | `library.json` 里所有曲目的路径 |
+| 找外挂歌词 / 解析 m3u | 那个具体的 `.lrc` 或被引用的音频路径 |
+
+放行音频文件**不等于**放行它旁边的 `.lrc`，得单独补一刀，否则域外的外挂歌词会静默地"找不到"。
+
 ---
 
 ## 10. 状态管理

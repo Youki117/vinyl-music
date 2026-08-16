@@ -155,6 +155,11 @@ export const useLibrary = create<LibraryState>((set, get) => {
         lyrics: null,
         missing: false,
       }))
+
+      // fs 能力域是每次启动重建的，上次拖进来的路径这次并不自动可读。
+      // 不在这里补放行，音乐库不在 $HOME/Music 等标准目录下的用户，
+      // 重启后整个曲库都会变成"无法播放"。
+      await platform.ensureReadable(tracks.map((t) => t.ref.id)).catch(() => {})
       set({
         tracks,
         playlists: raw.playlists ?? [],

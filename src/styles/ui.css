@@ -984,6 +984,34 @@ header button.danger,
   background: rgba(16, 16, 16, 0.74);
 }
 
+/* 曲库抽屉的操作行。按钮多于一行放得下时自动换行，不去挤压搜索框与关闭按钮 */
+.lib-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.lib-actions button {
+  padding: 5px 9px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #b6b2ab;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.lib-actions button:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+.lib-actions button.danger:hover {
+  background: rgba(190, 74, 60, 0.3);
+  color: #ffd9d3;
+}
+
 /* 抽屉内的操作回执，点一下消失 */
 .lib-note {
   margin: 0 12px 6px;

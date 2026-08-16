@@ -1,3 +1,4 @@
+mod grant;
 mod scan;
 
 use tauri::menu::{Menu, MenuItem};
@@ -42,7 +43,10 @@ pub fn run() {
             setup_tray(app.handle())?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![scan::scan_audio_files])
+        .invoke_handler(tauri::generate_handler![
+            scan::scan_audio_files,
+            grant::allow_paths
+        ])
         .run(tauri::generate_context!())
         .expect("Tauri 应用启动失败");
 }

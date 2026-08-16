@@ -51,6 +51,22 @@ function isAbsolute(path: string): boolean {
   return /^[a-zA-Z]:[\\/]/.test(path) || path.startsWith("\\\\") || path.startsWith("/")
 }
 
+/**
+ * 把路径加进 fs 运行时能力域。
+ *
+ * 对话框选的文件由 dialog 插件自动放行，拖放与曲库恢复不会 —— 必须显式补一刀，
+ * 否则音乐库只要不在 $HOME/Music 这几个标准目录下就整个读不了。
+ */
+async function grantPaths(paths: string[]): Promise<void> {
+  if (paths.length === 0) return
+  try {
+    await invoke<number>("allow_paths", { paths })
+  } catch (e) {
+    // 放行失败不该让导入整个失败：域内的文件仍然读得到
+    console.warn("放行路径失败", e)
+  }
+}
+
 async function ensureCacheDir(): Promise<void> {
   if (!(await exists(CACHE_DIR, { baseDir: BaseDirectory.AppData }))) {
     await mkdir(CACHE_DIR, { baseDir: BaseDirectory.AppData, recursive: true })
@@ -89,6 +105,8 @@ export function create(): Platform {
       // 递归扫描放在 Rust 侧：前端逐层 readDir 意味着上千次 IPC 往返，
       // 达不到 PRD F2.6 要求的 1000 首 / 15 秒。
       const found = await invoke<ScannedFile[]>("scan_audio_files", { dir })
+      // 对话框放行的是这个目录本身，递归扫出来的子目录文件未必在内
+      await grantPaths([dir])
       return found.map((f) => ({ id: f.path, name: f.name, size: f.size, mtime: f.mtime }))
     },
 
@@ -113,11 +131,13 @@ export function create(): Platform {
     async readSidecar(ref, ext) {
       // 只换扩展名。Windows 文件系统不分大小写，.LRC 也能被 .lrc 找到
       const path = `${ref.id.replace(/\.[^.\\/]+$/, "")}.${ext}`
+      // 放行音频文件不等于放行它旁边的 .lrc，得单独补一刀，
+      // 否则能力域外的外挂歌词会静默地"找不到"
+      await grantPaths([path])
       try {
         if (!(await exists(path))) return null
         return decodeText(await fsReadFile(path))
       } catch {
-        // 落在 fs scope 之外时会抛，这时当作没有外挂歌词
         return null
       }
     },
@@ -146,6 +166,8 @@ export function create(): Platform {
       const cleaned = entry.trim().replace(/^file:\/\/\/?/i, "")
       if (!cleaned) return null
       const abs = isAbsolute(cleaned) ? cleaned : `${dirOf(baseId)}/${cleaned}`
+      // m3u 指向的文件通常散落在能力域之外，先放行
+      await grantPaths([abs])
       try {
         if (!(await exists(abs))) return null
         return await refOf(abs)
@@ -154,10 +176,22 @@ export function create(): Platform {
       }
     },
 
+    async ensureReadable(paths) {
+      await grantPaths(paths)
+    },
+
     async readConfig<T>(name: string): Promise<T | null> {
       const file = `${name}.json`
-      if (!(await exists(file, { baseDir: BaseDirectory.AppData }))) return null
-      const raw = await readTextFile(file, { baseDir: BaseDirectory.AppData })
+      let raw: string
+      try {
+        if (!(await exists(file, { baseDir: BaseDirectory.AppData }))) return null
+        raw = await readTextFile(file, { baseDir: BaseDirectory.AppData })
+      } catch (e) {
+        // 权限或 IO 问题。抛出去会把整个 init() 带崩，界面停在空白态；
+        // 这里降级成"没有配置"，同时留下痕迹，别让它无声无息。
+        console.error(`读取配置 ${file} 失败`, e)
+        return null
+      }
       try {
         return JSON.parse(raw) as T
       } catch {
@@ -205,6 +239,8 @@ export function create(): Platform {
         .onDragDropEvent(async (event) => {
           if (event.payload.type !== "drop") return
           const paths = event.payload.paths ?? []
+          // 先放行再 stat：拖进来的路径默认不在能力域里，不放行连 stat 都会被拒
+          await grantPaths(paths)
           const refs: FileRef[] = []
           for (const p of paths) {
             try {

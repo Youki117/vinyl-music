@@ -158,7 +158,12 @@ export const usePlayer = create<PlayerState>((set, get) => {
         }
       }
 
-      await useLibrary.getState().load()
+      // 曲库读失败不该让整个启动流程断在这里 —— 后面还有音量、均衡器、
+      // 上次曲目要恢复，界面也还等着这段跑完
+      await useLibrary
+        .getState()
+        .load()
+        .catch((e) => console.error("曲库载入失败", e))
 
       const s = await platform.readConfig<SettingsFile>("settings")
       if (s) {
