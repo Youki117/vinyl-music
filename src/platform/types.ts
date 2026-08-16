@@ -51,6 +51,19 @@ export interface Platform {
    */
   onCommand(handler: (cmd: PlayerCommand) => void): () => void
 
+  /**
+   * 发外部 HTTP 请求。
+   *
+   * Tauri 下走 plugin-http 由 Rust 转发：OpenAI 兼容的服务基本不给浏览器来源发
+   * CORS 头，从 WebView 直接 fetch 会被拦；而且外部域名也过不了 CSP。
+   */
+  request(url: string, init: RequestInit): Promise<Response>
+
+  /**
+   * 把生成的图片存进应用数据目录，返回可当底图用的引用。
+   */
+  saveImage(name: string, bytes: Uint8Array): Promise<FileRef>
+
   readonly window: WindowControls
 }
 

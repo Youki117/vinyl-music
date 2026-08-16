@@ -6,6 +6,8 @@ import { AUDIO_EXTENSIONS } from "./types"
 
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
+import { appDataDir } from "@tauri-apps/api/path"
+import { fetch as tauriFetch } from "@tauri-apps/plugin-http"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { getCurrentWebview } from "@tauri-apps/api/webview"
 import { open } from "@tauri-apps/plugin-dialog"
@@ -23,6 +25,7 @@ import {
 } from "@tauri-apps/plugin-fs"
 
 const CACHE_DIR = "cache"
+const SKIN_DIR = "skins"
 
 /** Rust 侧 scan_audio_files 命令的返回形状。 */
 type ScannedFile = { path: string; name: string; size: number; mtime: number }
@@ -168,6 +171,21 @@ export function create(): Platform {
         cancelled = true
         unlisten?.()
       }
+    },
+
+    async request(url, init) {
+      return tauriFetch(url, init)
+    },
+
+    async saveImage(name, bytes) {
+      const dir = `${SKIN_DIR}/${name}`
+      if (!(await exists(SKIN_DIR, { baseDir: BaseDirectory.AppData }))) {
+        await mkdir(SKIN_DIR, { baseDir: BaseDirectory.AppData, recursive: true })
+      }
+      await fsWriteFile(dir, bytes, { baseDir: BaseDirectory.AppData })
+      // 底图加载走的是绝对路径，这里把 appdata 目录解析出来拼上
+      const abs = `${await appDataDir()}/${dir}`
+      return { id: abs, name, size: bytes.byteLength, mtime: Date.now() }
     },
 
     onCommand(handler) {

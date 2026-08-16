@@ -12,6 +12,7 @@ import Playlist from "@/ui/panels/Playlist"
 import SkinEditor from "@/ui/panels/SkinEditor"
 import Playback from "@/ui/panels/Playback"
 import { useLibrary } from "@/store/library"
+import { useAi } from "@/store/ai"
 import { engine } from "@/audio/engine"
 import { usePlayer } from "@/store/player"
 import { useSkin } from "@/store/skin"
@@ -42,7 +43,19 @@ export default function App() {
   useEffect(() => {
     void loadSkin()
     void init()
+    void useAi.getState().load()
   }, [loadSkin, init])
+
+  // 切歌时套用该曲已有的 AI 配图；没有且开了自动才后台生成，绝不阻塞播放
+  useEffect(() => {
+    let last: string | null = null
+    return usePlayer.subscribe((s) => {
+      const t = s.current()
+      if (!t || t.id === last) return
+      last = t.id
+      void useAi.getState().maybeAuto(t)
+    })
+  }, [])
 
   // 拖文件进窗口导入（F2.2）。音频进播放列表，图片直接当底图 —— 换皮肤最快的路径。
   useEffect(() => {

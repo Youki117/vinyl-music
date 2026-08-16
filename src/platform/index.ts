@@ -59,6 +59,12 @@ export const platform = {
     }
   },
 
+  request: (url: string, init: RequestInit = {}): Promise<Response> =>
+    impl().then((p) => p.request(url, init)),
+
+  saveImage: (name: string, bytes: Uint8Array): Promise<FileRef> =>
+    impl().then((p) => p.saveImage(name, bytes)),
+
   readCache: (key: string): Promise<Uint8Array | null> => impl().then((p) => p.readCache(key)),
   writeCache: (key: string, data: Uint8Array): Promise<void> =>
     impl().then((p) => p.writeCache(key, data)),

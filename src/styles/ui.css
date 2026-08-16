@@ -720,6 +720,38 @@ header button.danger,
   color: #d8695a !important;
 }
 
+.style-suffix {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #ddd9d2;
+  font-family: inherit;
+  font-size: 10.5px;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+}
+
+.style-suffix:focus {
+  border-color: var(--ink-accent);
+}
+
+.scene-text {
+  padding: 7px 9px;
+  border-left: 2px solid var(--ink-accent);
+  background: rgba(255, 255, 255, 0.05);
+  color: #c6c2bb !important;
+}
+
+.skin-body code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.09);
+  font-size: 9.5px;
+}
+
 /* 拖放高亮 */
 .viewport[data-dropping="true"] .stage {
   outline: 2px dashed var(--ink-accent);

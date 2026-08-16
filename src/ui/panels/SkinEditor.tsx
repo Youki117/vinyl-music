@@ -3,6 +3,7 @@ import { useRef, useState } from "react"
 import { platform } from "@/platform"
 import { labelBackground } from "@/skin/resolve"
 import { useSkin } from "@/store/skin"
+import AiTab from "./AiTab"
 
 /**
  * 皮肤面板：导入底图、调整取景框、调蒙版参数、改文案。
@@ -19,7 +20,7 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
   const setLabelSource = useSkin((s) => s.setLabelSource)
   const patchVeil = useSkin((s) => s.patchVeil)
   const patchSkin = useSkin((s) => s.patchSkin)
-  const [tab, setTab] = useState<"image" | "veil" | "text">("image")
+  const [tab, setTab] = useState<"image" | "veil" | "text" | "ai">("image")
 
   const dragRef = useRef<{ mode: "backdrop" | "label"; x: number; y: number } | null>(null)
 
@@ -76,6 +77,9 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
           </button>
           <button data-on={tab === "text"} onClick={() => setTab("text")}>
             文案
+          </button>
+          <button data-on={tab === "ai"} onClick={() => setTab("ai")}>
+            AI 配图
           </button>
         </nav>
         <button className="drawer-close" onClick={onClose} aria-label="关闭">
@@ -228,6 +232,8 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
             </p>
           </>
         )}
+
+        {tab === "ai" && <AiTab />}
       </div>
     </div>
   )

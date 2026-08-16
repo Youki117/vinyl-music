@@ -127,6 +127,16 @@ export function create(): Platform {
       }
     },
 
+    async request(url, init) {
+      // 浏览器开发路径下会受 CORS 限制，属预期行为；正式外壳走 Rust 转发。
+      return fetch(url, init)
+    },
+
+    async saveImage(name, bytes) {
+      const file = new File([bytes as BlobPart], name, { type: "image/png" })
+      return toRef(file)
+    },
+
     onCommand() {
       // 浏览器下没有媒体键与托盘。Media Session API 只在有音频播放时才有意义，
       // 开发路径用不上，留空即可。
