@@ -11,17 +11,22 @@
  * 做法：WebView2 认 --remote-debugging-port，用它把 CDP 端口开出来，
  * 再用 Playwright 连上去，就能在真实应用里执行脚本。
  *
- * 用法（PowerShell）：
- *   $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
- *   Start-Process "src-tauri\target\release\vinyl-player.exe"
+ * 脚本自己负责起停应用与铺设初始状态 —— 检查里有好几项（默认读不了域外路径、
+ * 音量从 0.8 涨到 0.9）只在**冷启动**下成立，连到一个跑热了的实例上会假报失败。
+ *
  *   node scripts/verify-packaged.mjs
  */
 import { chromium } from "playwright"
-import { mkdirSync } from "node:fs"
+import { execFileSync, spawn } from "node:child_process"
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 
 const OUT = "tests/__screenshots__"
+const PORT = 9222
+const EXE = resolve("src-tauri/target/release/vinyl-player.exe")
+const APPDATA = join(process.env.APPDATA ?? join(homedir(), "AppData/Roaming"), "com.vinylplayer.desktop")
+
 mkdirSync(OUT, { recursive: true })
 
 /** 在 fs:scope 允许范围内（$HOME/Music/**） */
@@ -29,9 +34,84 @@ const SCOPED = join(homedir(), "Music", "VinylPlayerTest")
 /** 在允许范围之外 —— 大多数人的音乐库其实都在这种地方 */
 const UNSCOPED = resolve("tests/real")
 
-const browser = await chromium.connectOverCDP("http://127.0.0.1:9222")
+if (!existsSync(EXE)) {
+  console.error(`找不到 ${EXE}，先跑 npm run tauri build`)
+  process.exit(1)
+}
+if (!existsSync(join(UNSCOPED, "ProleteR - April Showers.mp3"))) {
+  console.error("tests/real/ 下没有素材，先跑 node scripts/fetch-real-assets.mjs")
+  process.exit(1)
+}
+
+// ── 铺设初始状态 ─────────────────────────────────────────────────
+// 关掉可能还开着的实例：能力域与音量都是进程内状态，跑热了会污染判定
+try {
+  execFileSync("taskkill", ["/IM", "vinyl-player.exe", "/F"], { stdio: "ignore" })
+} catch {
+  /* 本来就没在跑 */
+}
+
+mkdirSync(APPDATA, { recursive: true })
+// 清掉设置，让音量回到默认 0.8
+rmSync(join(APPDATA, "settings.json"), { force: true })
+
+// 造一份指向能力域之外的曲库，模拟"上次导入的音乐库在 D 盘"
+const track = (name, size, title, duration) => {
+  const id = join(UNSCOPED, name)
+  return {
+    id,
+    ref: { id, name, size, mtime: 0 },
+    title,
+    artist: "ProleteR",
+    album: "Curses From Past Times (EP)",
+    duration,
+    playCount: 0,
+    liked: false,
+    lastPlayed: 0,
+    addedAt: 1,
+  }
+}
+writeFileSync(
+  join(APPDATA, "library.json"),
+  JSON.stringify(
+    {
+      schemaVersion: 2,
+      tracks: [
+        track("ProleteR - April Showers.mp3", 10764625, "April Showers", 269.06),
+        track("ProleteR - Downtown Irony.ogg", 2635135, "Downtown Irony", 261.46),
+      ],
+      playlists: [],
+      activeView: "all",
+      sort: "added",
+      sortDesc: false,
+    },
+    null,
+    2,
+  ),
+  "utf8",
+)
+
+// ── 冷启动 ───────────────────────────────────────────────────────
+const app = spawn(EXE, [], {
+  detached: true,
+  stdio: "ignore",
+  env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` },
+})
+app.unref()
+
+let browser = null
+for (let i = 0; i < 30 && !browser; i++) {
+  await new Promise((r) => setTimeout(r, 700))
+  browser = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`).catch(() => null)
+}
+if (!browser) {
+  console.error("等不到应用的调试端口")
+  process.exit(1)
+}
 const ctx = browser.contexts()[0]
 const page = ctx.pages()[0]
+// 前端 init() 里有配置读取与放行，等它跑完
+await page.waitForTimeout(2500)
 
 const checks = []
 const check = (name, ok, detail) => checks.push([name, !!ok, detail])
@@ -226,6 +306,11 @@ check("域外曲目在启动放行后确实读得动", playable.ok, playable.err
 await page.screenshot({ path: `${OUT}/packaged-library.png` })
 
 await browser.close()
+try {
+  execFileSync("taskkill", ["/IM", "vinyl-player.exe", "/F"], { stdio: "ignore" })
+} catch {
+  /* 已经退了 */
+}
 
 // ── 判定 ─────────────────────────────────────────────────────────
 check("无 JS 报错", errors.length === 0, errors.slice(0, 2).join(" | "))

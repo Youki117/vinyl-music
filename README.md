@@ -130,11 +130,7 @@ node scripts/verify-skin.mjs
 
 > 除 `verify-packaged.mjs` 外，其余 `verify-*` 与 `compare-visual.mjs` 都需要 `npm run dev` 已在 1420 端口运行。
 
-`verify-packaged.mjs` 测的是**装好的应用**，跑法不同——先把 WebView2 的调试端口开出来再启动：
-
-```bash
-WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 ./src-tauri/target/release/vinyl-player.exe & sleep 6 && node scripts/verify-packaged.mjs
-```
+`verify-packaged.mjs` 测的是 `npm run tauri build` 出来的**装机版**：它自己负责关掉旧实例、铺设初始状态、冷启动应用（WebView2 的 `--remote-debugging-port`）、跑完再关掉。几项判定只在冷启动下成立，所以不能连到一个已经跑着的实例上。
 
 用真实素材跑出来的缺陷记录在 [FEATURE-PARITY.md §4.2](docs/FEATURE-PARITY.md)。
 
