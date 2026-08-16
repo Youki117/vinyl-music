@@ -140,6 +140,10 @@ export function create(): Platform {
       // 浏览器没有能力域这回事
     },
 
+    async updateNowPlaying() {
+      // 浏览器下没有系统媒体面板
+    },
+
     async readConfig<T>(name: string): Promise<T | null> {
       const raw = localStorage.getItem(`vinyl:${name}`)
       if (raw === null) return null

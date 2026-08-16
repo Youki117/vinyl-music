@@ -86,6 +86,40 @@ function resetPlayCounter(): void {
 
 let saveTimer = 0
 
+/** 上一次报给系统媒体面板的曲目与状态，用来判断有没有必要再报一次 */
+let smtcKey = ""
+/** 曲目 id → 封面文件路径。由 library.ensureCover 落盘后回填。 */
+const coverPaths = new Map<string, string>()
+
+/**
+ * 报给系统媒体面板。切歌、播放/暂停时调用。
+ *
+ * @param force 封面是异步解出来的，解完要再报一次，这时曲目与状态都没变，
+ *              必须绕过去重判断，否则任务栏那格永远是空的
+ */
+function pushNowPlaying(
+  track: Track | null,
+  playing: boolean,
+  position: number,
+  force = false,
+): void {
+  if (!track) return
+  // 只在曲目或播放状态变了时才重报；位置每秒变四次，跟着报纯属浪费 IPC
+  const key = `${track.id}|${playing}`
+  if (!force && key === smtcKey) return
+  smtcKey = key
+
+  void platform.updateNowPlaying({
+    title: track.title,
+    artist: track.artist,
+    album: track.album,
+    playing,
+    duration: track.duration || engine.duration,
+    position,
+    coverPath: coverPaths.get(track.id) ?? null,
+  })
+}
+
 export const usePlayer = create<PlayerState>((set, get) => {
   const save = () => {
     window.clearTimeout(saveTimer)
@@ -122,7 +156,10 @@ export const usePlayer = create<PlayerState>((set, get) => {
     },
 
     async init() {
-      engine.onStatus((status, error) => set({ status, error }))
+      engine.onStatus((status, error) => {
+        set({ status, error })
+        pushNowPlaying(get().current(), status === "playing", engine.currentTime)
+      })
 
       engine.onProgress((t, d) => {
         set((s) => (s.duration === d ? s : { ...s, duration: d }))
@@ -201,14 +238,23 @@ export const usePlayer = create<PlayerState>((set, get) => {
         await engine.play()
         save()
 
-        // 曲库落盘时不存歌词正文，重启后要在这里把外挂 .lrc 补回来
-        void useLibrary
-          .getState()
-          .ensureLyrics(track.id)
-          .then((lrc) => {
-            if (lrc && get().index === i) get().refreshQueueMeta()
-          })
-          .catch(() => {})
+        // 曲库落盘时不存歌词正文与封面，重启后要在这里补回来。
+        // 封面直接从已经读进内存的字节里解，不再多读一次盘。
+        const lib = useLibrary.getState()
+        void Promise.all([
+          lib.ensureLyrics(track.id).catch(() => null),
+          lib.ensureCover(track.id, bytes).catch(() => null),
+        ]).then(([lrc, cover]) => {
+          if (get().index !== i) return
+          if (lrc || cover) get().refreshQueueMeta()
+          // 封面要等解出来、落盘之后才报给系统媒体面板，否则任务栏那格是空的
+          if (cover?.path) {
+            coverPaths.set(track.id, cover.path)
+            pushNowPlaying(get().current(), engine.status === "playing", engine.currentTime, true)
+          }
+        })
+
+        pushNowPlaying(track, true, 0)
 
         // 波形不阻塞播放
         const idle = window.requestIdleCallback ?? ((cb: () => void) => window.setTimeout(cb, 200))
@@ -267,7 +313,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
       set((s) => ({
         queue: s.queue.map((q) => {
           const t = lib.byId(q.id)
-          return t ? { ...q, lyrics: t.lyrics ?? q.lyrics, liked: t.liked } : q
+          return t ? { ...q, lyrics: t.lyrics ?? q.lyrics, cover: t.cover ?? q.cover, liked: t.liked } : q
         }),
       }))
     },

@@ -1,12 +1,15 @@
 mod grant;
 mod scan;
+#[cfg(target_os = "windows")]
+mod smtc;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
 
-/// 前端约定的事件名。媒体键与托盘菜单都转成同一套事件，前端只认事件不认来源。
-const EVT_COMMAND: &str = "player://command";
+/// 前端约定的事件名。媒体键、托盘菜单、系统媒体面板都转成同一套事件，
+/// 前端只认事件不认来源。
+pub(crate) const EVT_COMMAND: &str = "player://command";
 /// 命令行/拖拽带进来的文件
 const EVT_OPEN_FILES: &str = "player://open-files";
 
@@ -41,11 +44,15 @@ pub fn run() {
             #[cfg(desktop)]
             setup_media_keys(app.handle())?;
             setup_tray(app.handle())?;
+            #[cfg(target_os = "windows")]
+            smtc::init(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             scan::scan_audio_files,
-            grant::allow_paths
+            grant::allow_paths,
+            #[cfg(target_os = "windows")]
+            smtc::smtc_update
         ])
         .run(tauri::generate_context!())
         .expect("Tauri 应用启动失败");

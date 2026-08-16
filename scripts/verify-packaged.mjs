@@ -56,14 +56,14 @@ mkdirSync(APPDATA, { recursive: true })
 rmSync(join(APPDATA, "settings.json"), { force: true })
 
 // 造一份指向能力域之外的曲库，模拟"上次导入的音乐库在 D 盘"
-const track = (name, size, title, duration) => {
+const track = (name, size, title, duration, artist = "ProleteR", album = "Curses From Past Times (EP)") => {
   const id = join(UNSCOPED, name)
   return {
     id,
     ref: { id, name, size, mtime: 0 },
     title,
-    artist: "ProleteR",
-    album: "Curses From Past Times (EP)",
+    artist,
+    album,
     duration,
     playCount: 0,
     liked: false,
@@ -79,6 +79,15 @@ writeFileSync(
       tracks: [
         track("ProleteR - April Showers.mp3", 10764625, "April Showers", 269.06),
         track("ProleteR - Downtown Irony.ogg", 2635135, "Downtown Irony", 261.46),
+        // 这首带内嵌封面（mjpeg 250×250），用来验 SMTC 的缩略图
+        track(
+          "Multi Panel - Christmas With Mr Rice.mp3",
+          3854504,
+          "Christmas with Mr. Rice",
+          233.56,
+          "Multi-Panel",
+          "Another Day, Another Way",
+        ),
       ],
       playlists: [],
       activeView: "all",
@@ -95,7 +104,12 @@ writeFileSync(
 const app = spawn(EXE, [], {
   detached: true,
   stdio: "ignore",
-  env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` },
+  env: {
+    ...process.env,
+    // 这个环境变量会**覆盖** tauri.conf.json 里的 additionalBrowserArgs，
+    // 所以那边的开关要原样带上，否则测出来的行为和用户装机后的不一样
+    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT} --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,MediaSessionService`,
+  },
 })
 app.unref()
 
@@ -295,7 +309,7 @@ const restored = await page.evaluate(async () => {
 console.log(`\n曲库恢复：${restored.length} 条`)
 for (const r of restored) console.log(`  ${r.title}${r.missing ? "  ✗ 标记为无法播放" : ""}`)
 
-check("重启后域外曲库被恢复出来", restored.length === 2, `${restored.length} 条`)
+check("重启后域外曲库被恢复出来", restored.length === 3, `${restored.length} 条`)
 check("恢复的曲目没有被标记为无法播放", restored.every((r) => !r.missing))
 
 // 真正读一次文件，确认启动时的放行确实生效（而不是界面上看着有、一播就废）
@@ -304,6 +318,72 @@ console.log(`  实际读取域外曲目：${playable.ok ? `可读 ${playable.siz
 check("域外曲目在启动放行后确实读得动", playable.ok, playable.err)
 
 await page.screenshot({ path: `${OUT}/packaged-library.png` })
+
+// ── 七、SMTC：系统真的看得到这个会话吗 ───────────────────────────
+// 只能从系统侧问，WebView 里验证不了。放带内嵌封面那首，顺便验缩略图。
+await page.evaluate(async () => {
+  const rows = Array.from(document.querySelectorAll(".lib-main ol li .row"))
+  const target = rows.find((r) => /Christmas/i.test(r.querySelector("b")?.textContent ?? ""))
+  ;(target ?? rows[0])?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))
+})
+await page.waitForTimeout(3500)
+const nowPlaying = await page.evaluate(() => document.querySelector(".timing b")?.textContent ?? "")
+console.log(`\n正在播放：${nowPlaying}`)
+
+let smtc = {}
+try {
+  // PowerShell 7 去掉了 WinRT 类型投影，必须用 Windows PowerShell 5.1
+  const out = execFileSync(
+    "powershell.exe",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", resolve("scripts/smtc-probe.ps1")],
+    { encoding: "utf8", timeout: 30000 },
+  )
+  for (const line of out.split(/\r?\n/)) {
+    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim())
+    if (!m) continue
+    if (m[1] === "SESSION") (smtc.sessions ??= []).push(m[2])
+    else smtc[m[1]] = m[2]
+  }
+} catch (e) {
+  smtc.error = String(e).slice(0, 200)
+}
+
+console.log(`系统媒体会话：${(smtc.sessions ?? []).join(", ") || smtc.error || "(无)"}`)
+console.log(`  标题 ${smtc.TITLE} / 艺术家 ${smtc.ARTIST} / 状态 ${smtc.STATUS} / 封面 ${smtc.HAS_THUMB}`)
+
+check("Windows 认出了本应用的媒体会话", smtc.SMTC_FOUND === "1", smtc.error ?? "未找到 vinyl 会话")
+check("会话里的曲名与正在播的一致", smtc.TITLE === nowPlaying, `${smtc.TITLE} vs ${nowPlaying}`)
+check("会话里的艺术家也对得上", smtc.ARTIST === "Multi-Panel", smtc.ARTIST)
+check("系统认为正在播放", smtc.STATUS === "Playing", smtc.STATUS)
+check("上一首/下一首在系统面板里可用", smtc.CAN_NEXT === "True" && smtc.CAN_PREV === "True", `next=${smtc.CAN_NEXT} prev=${smtc.CAN_PREV}`)
+check("内嵌封面传到了系统面板", smtc.HAS_THUMB === "True", smtc.HAS_THUMB)
+check(
+  "只注册了一个媒体会话（WebView2 自带的那个已关掉）",
+  (smtc.sessions ?? []).length === 1,
+  (smtc.sessions ?? []).join(", "),
+)
+
+// 按钮是亮的，和按下去有反应，是两回事 —— 从系统侧真按一下
+let acted = {}
+try {
+  const out = execFileSync(
+    "powershell.exe",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", resolve("scripts/smtc-probe.ps1"), "-Action", "next"],
+    { encoding: "utf8", timeout: 30000 },
+  )
+  for (const line of out.split(/\r?\n/)) {
+    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim())
+    if (m && m[1] !== "SESSION") acted[m[1]] = m[2]
+  }
+} catch (e) {
+  acted.error = String(e).slice(0, 200)
+}
+await page.waitForTimeout(2500)
+const afterNext = await page.evaluate(() => document.querySelector(".timing b")?.textContent ?? "")
+console.log(`从系统面板按「下一首」：${nowPlaying} → ${afterNext}`)
+
+check("系统面板的「下一首」被系统接受", acted.ACTION_OK === "True", acted.error ?? acted.ACTION_OK)
+check("按下之后应用真的换了歌（事件回到了应用里）", afterNext !== nowPlaying && afterNext.length > 0, `${nowPlaying} → ${afterNext}`)
 
 await browser.close()
 try {

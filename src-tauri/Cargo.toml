@@ -28,6 +28,11 @@ tauri-plugin-window-state = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-global-shortcut = "2"
 
+# 系统媒体面板（任务栏/锁屏那个音乐控件）。Windows 上就是 SMTC，
+# 自己调 windows-rs 要处理一堆 COM 生命周期，这个 crate 已经封好了。
+[target.'cfg(target_os = "windows")'.dependencies]
+souvlaki = "0.8"
+
 [profile.release]
 # 体积优先：PRD §7 要求安装包 < 20MB
 opt-level = "s"

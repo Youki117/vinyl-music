@@ -180,6 +180,14 @@ export function create(): Platform {
       await grantPaths(paths)
     },
 
+    async updateNowPlaying(info) {
+      try {
+        await invoke("smtc_update", { info })
+      } catch {
+        // 系统面板注册不上（旧系统、被策略禁用）不该影响播放本身
+      }
+    },
+
     async readConfig<T>(name: string): Promise<T | null> {
       const file = `${name}.json`
       let raw: string
@@ -278,8 +286,9 @@ export function create(): Platform {
         await mkdir(SKIN_DIR, { baseDir: BaseDirectory.AppData, recursive: true })
       }
       await fsWriteFile(dir, bytes, { baseDir: BaseDirectory.AppData })
-      // 底图加载走的是绝对路径，这里把 appdata 目录解析出来拼上
-      const abs = `${await appDataDir()}/${dir}`
+      // 底图加载走的是绝对路径，这里把 appdata 目录解析出来拼上。
+      // 统一成反斜杠：混着两种分隔符的路径传给系统 API 容易出事
+      const abs = `${await appDataDir()}\\${dir}`.replace(/\//g, "\\")
       return { id: abs, name, size: bytes.byteLength, mtime: Date.now() }
     },
 

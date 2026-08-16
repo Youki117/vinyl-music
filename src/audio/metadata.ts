@@ -97,6 +97,36 @@ export function parseWavInfo(bytes: Uint8Array): Partial<Record<"title" | "artis
 }
 
 /**
+ * 只把内嵌封面取出来。
+ *
+ * 曲库落盘时不存封面（那是二进制，塞进 JSON 不合适），重启后 Track.cover 是 null。
+ * 播放时反正已经把整个文件读进内存了，顺手解一次封面比另存一份缓存简单得多。
+ *
+ * 同时返回原始字节：系统媒体面板要的是**磁盘上的真实文件**，而 CSP 的
+ * `default-src 'self'` 不允许 fetch 自己造的 blob: URL（img-src 放行的只是显示），
+ * 想拿回字节只能在这里一并交出去。
+ *
+ * @returns url 供界面显示（调用方负责 revoke）；bytes 供写盘。无封面返回 null
+ */
+export async function readCover(
+  bytes: Uint8Array,
+): Promise<{ url: string; data: Uint8Array; mime: string } | null> {
+  try {
+    const meta = await parseBlob(new Blob([bytes as BlobPart]))
+    const pic = meta.common.picture?.[0]
+    if (!pic) return null
+    const data: Uint8Array = pic.data
+    return {
+      url: URL.createObjectURL(new Blob([data as BlobPart], { type: pic.format })),
+      data,
+      mime: pic.format ?? "image/jpeg",
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
  * 读取元数据。复用已经拿到的字节，不重复读盘。
  * 任何一步失败都回退到文件名，绝不因为标签坏了就让曲目不可用。
  */

@@ -62,6 +62,12 @@ export interface Platform {
    */
   ensureReadable(paths: string[]): Promise<void>
 
+  /**
+   * 把当前播放信息报给系统媒体面板（Windows 上是 SMTC：任务栏缩略图与锁屏
+   * 上的那个音乐控件）。浏览器实现下是空操作。
+   */
+  updateNowPlaying(info: NowPlaying): Promise<void>
+
   /** 读取一个 JSON 配置。不存在时返回 null。 */
   readConfig<T>(name: string): Promise<T | null>
   /** 写入一个 JSON 配置（实现需保证原子性）。 */
@@ -100,6 +106,18 @@ export interface Platform {
 }
 
 export type PlayerCommand = "toggle" | "pause" | "next" | "prev"
+
+/** 报给系统媒体面板的当前曲目信息。时间单位是秒。 */
+export type NowPlaying = {
+  title: string
+  artist: string
+  album: string
+  playing: boolean
+  duration: number
+  position: number
+  /** 封面文件的绝对路径。系统面板读不了 blob: URL，必须是真实文件。 */
+  coverPath: string | null
+}
 
 export interface WindowControls {
   minimize(): Promise<void>

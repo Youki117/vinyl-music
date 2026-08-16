@@ -1,9 +1,9 @@
 /**
  * 平台分发。按运行环境惰性加载对应实现，Tauri 模块在浏览器下不会被求值。
  */
-import type { FileRef, Platform, PlatformKind, PlayerCommand } from "./types"
+import type { FileRef, NowPlaying, Platform, PlatformKind, PlayerCommand } from "./types"
 
-export type { FileRef, Platform, PlatformKind, PlayerCommand, WindowControls } from "./types"
+export type { FileRef, NowPlaying, Platform, PlatformKind, PlayerCommand, WindowControls } from "./types"
 export {
   AUDIO_EXTENSIONS,
   LYRIC_EXTENSIONS,
@@ -46,6 +46,8 @@ export const platform = {
     impl().then((p) => p.resolvePath(baseId, entry)),
   ensureReadable: (paths: string[]): Promise<void> =>
     impl().then((p) => p.ensureReadable(paths)),
+  updateNowPlaying: (info: NowPlaying): Promise<void> =>
+    impl().then((p) => p.updateNowPlaying(info)),
 
   readConfig: <T>(name: string): Promise<T | null> => impl().then((p) => p.readConfig<T>(name)),
   writeConfig: <T>(name: string, value: T): Promise<void> =>

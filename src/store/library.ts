@@ -1,7 +1,7 @@
 import { create } from "zustand"
 
 import { isLyricFile, platform, type FileRef } from "@/platform"
-import { readMetadata } from "@/audio/metadata"
+import { readCover, readMetadata } from "@/audio/metadata"
 import { formatM3u, matchByName, parseM3u } from "@/lib/m3u"
 import { baseName, stripExt } from "@/lib/text"
 
@@ -60,6 +60,20 @@ const MOST_LIMIT = 100
 
 /** 已经找过外挂歌词的曲目。没找到也记下来，避免每次播放都白跑一趟磁盘。 */
 const probedLyrics = new Set<string>()
+/** 同理，已经解过封面的曲目 */
+const probedCovers = new Set<string>()
+/** 曲目 id → 落盘后的封面文件路径，给系统媒体面板用 */
+const coverFiles = new Map<string, string>()
+
+/** FNV-1a，只用来给封面文件起个稳定的短名字 */
+function hashId(s: string): string {
+  let h = 2166136261
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return (h >>> 0).toString(36)
+}
 
 type LibraryFile = {
   schemaVersion: number
@@ -103,6 +117,12 @@ type LibraryState = {
    * 曲库落盘时不存歌词正文，重启后要靠这个补回来。
    */
   ensureLyrics(id: string): Promise<string | null>
+  /**
+   * 确保内嵌封面就位。曲库落盘时不存封面，重启后要靠这个补回来 ——
+   * 否则唱片中心和系统媒体面板都会是空的。
+   * @param bytes 播放时已经读进内存的文件字节，避免二次读盘
+   */
+  ensureCover(id: string, bytes: Uint8Array): Promise<{ url: string; path: string | null } | null>
   /** 把外挂歌词按同名规则挂到曲目上。返回挂上的数量。 */
   attachLyrics(refs: FileRef[]): Promise<number>
   /** 导入 m3u/m3u8，建一个同名歌单。返回结果说明。 */
@@ -338,6 +358,32 @@ export const useLibrary = create<LibraryState>((set, get) => {
       if (!text) return null
       set((s) => ({ tracks: s.tracks.map((t) => (t.id === id ? { ...t, lyrics: text } : t)) }))
       return text
+    },
+
+    async ensureCover(id, bytes) {
+      const track = get().byId(id)
+      if (!track) return null
+      const known = coverFiles.get(id)
+      if (track.cover) return { url: track.cover, path: known ?? null }
+      if (probedCovers.has(id)) return null
+      probedCovers.add(id)
+
+      const pic = await readCover(bytes)
+      if (!pic) return null
+      set((s) => ({ tracks: s.tracks.map((t) => (t.id === id ? { ...t, cover: pic.url } : t)) }))
+
+      // 顺手落一份到磁盘：系统媒体面板读不了 blob:，只认真实文件路径。
+      // 文件名带曲目哈希，避免复用同一个名字时被系统占着写不进去。
+      let path: string | null = null
+      try {
+        const ext = pic.mime.includes("png") ? "png" : "jpg"
+        const ref = await platform.saveImage(`cover-${hashId(id)}.${ext}`, pic.data)
+        path = ref.id
+        coverFiles.set(id, path)
+      } catch {
+        // 写不进去只影响系统面板的缩略图，界面上的唱片贴纸照常
+      }
+      return { url: pic.url, path }
     },
 
     async attachLyrics(refs) {
