@@ -13,6 +13,8 @@ import SkinEditor from "@/ui/panels/SkinEditor"
 import Playback from "@/ui/panels/Playback"
 import { useLibrary } from "@/store/library"
 import { useAi } from "@/store/ai"
+import { useMix } from "@/store/mix"
+import MixPanel from "@/ui/panels/Mix"
 import { engine } from "@/audio/engine"
 import { usePlayer } from "@/store/player"
 import { useSkin } from "@/store/skin"
@@ -31,6 +33,7 @@ export default function App() {
   const [playlistOpen, setPlaylistOpen] = useState(false)
   const [skinOpen, setSkinOpen] = useState(false)
   const [playbackOpen, setPlaybackOpen] = useState(false)
+  const [mixOpen, setMixOpen] = useState(false)
 
   // 导入后队列还是空的话，直接把新导入的曲目接上，省得用户再去列表里点一次
   const importAndQueue = async (files: Parameters<typeof addFiles>[0]) => {
@@ -46,14 +49,16 @@ export default function App() {
     void useAi.getState().load()
   }, [loadSkin, init])
 
-  // 切歌时套用该曲已有的 AI 配图；没有且开了自动才后台生成，绝不阻塞播放
+  // 切歌时：套用该曲已有的 AI 配图，并把混音编排切到这首歌上
   useEffect(() => {
+    void useMix.getState().load()
     let last: string | null = null
     return usePlayer.subscribe((s) => {
       const t = s.current()
       if (!t || t.id === last) return
       last = t.id
       void useAi.getState().maybeAuto(t)
+      void useMix.getState().setHost(t.id)
     })
   }, [])
 
@@ -121,10 +126,15 @@ export default function App() {
         case "E":
           setPlaybackOpen((v) => !v)
           break
+        case "x":
+        case "X":
+          setMixOpen((v) => !v)
+          break
         case "Escape":
           setPlaylistOpen(false)
           setSkinOpen(false)
           setPlaybackOpen(false)
+          setMixOpen(false)
           break
       }
     }
@@ -146,6 +156,7 @@ export default function App() {
       <TitleBar
         onOpenPlayback={() => setPlaybackOpen(true)}
         onOpenSkin={() => setSkinOpen(true)}
+        onOpenMix={() => setMixOpen(true)}
       />
       <Masthead />
       <Lyrics />
@@ -187,11 +198,12 @@ export default function App() {
 
       {/* 抽屉都在右侧，同时打开会叠在一起，所以互斥 */}
       <Playlist
-        open={playlistOpen && !skinOpen && !playbackOpen}
+        open={playlistOpen && !skinOpen && !playbackOpen && !mixOpen}
         onClose={() => setPlaylistOpen(false)}
       />
-      <SkinEditor open={skinOpen && !playbackOpen} onClose={() => setSkinOpen(false)} />
-      <Playback open={playbackOpen} onClose={() => setPlaybackOpen(false)} />
+      <SkinEditor open={skinOpen && !playbackOpen && !mixOpen} onClose={() => setSkinOpen(false)} />
+      <Playback open={playbackOpen && !mixOpen} onClose={() => setPlaybackOpen(false)} />
+      <MixPanel open={mixOpen} onClose={() => setMixOpen(false)} />
     </Stage>
   )
 }

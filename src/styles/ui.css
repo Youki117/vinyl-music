@@ -745,6 +745,161 @@ header button.danger,
   color: #c6c2bb !important;
 }
 
+/* ── 混音面板 ──────────────────────────────────────────── */
+.mix-panel {
+  width: 420px;
+}
+
+.host-name b {
+  font-weight: 400;
+  color: var(--ink-accent);
+}
+
+.mini-add {
+  margin-left: auto;
+  padding: 3px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 10px;
+  color: #c2beb7;
+}
+
+.mini-add:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.track-picker {
+  max-height: 150px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+}
+
+.track-picker button {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #b6b2ab;
+  text-align: left;
+}
+
+.track-picker button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.track-picker span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-picker em {
+  font-style: normal;
+  font-size: 9.5px;
+  color: #75716b;
+  flex: none;
+}
+
+.layer-row {
+  padding: 7px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.layer-row[data-on="true"] {
+  border-color: var(--ink-accent);
+  background: rgba(178, 132, 95, 0.08);
+}
+
+.layer-name {
+  font-size: 11.5px;
+  color: #ddd9d2;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-ctl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.layer-ctl input[type="range"] {
+  flex: 1;
+  height: 3px;
+  accent-color: var(--ink-accent);
+}
+
+.layer-ctl em {
+  font-style: normal;
+  font-size: 9.5px;
+  color: #85817a;
+  width: 22px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.layer-ctl button {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #a9a59e;
+}
+
+.layer-ctl button:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.layer-ctl button[data-on="true"] {
+  background: var(--ink-accent);
+  color: #16130f;
+}
+
+.layer-offset {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: #85817a;
+}
+
+.layer-offset input {
+  width: 58px;
+  padding: 3px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #ddd9d2;
+  font-size: 10.5px;
+  outline: none;
+}
+
+.envelope {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.28);
+  cursor: crosshair;
+  touch-action: none;
+}
+
 .skin-body code {
   padding: 1px 4px;
   border-radius: 3px;
@@ -1109,4 +1264,34 @@ header button.danger,
 .row-field input[type="checkbox"] {
   justify-self: start;
   accent-color: var(--ink-accent);
+}
+
+/* 片段时间轴 */
+.timeline {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.32);
+  touch-action: none;
+}
+
+.layer-name em {
+  margin-left: 7px;
+  font-style: normal;
+  font-size: 9.5px;
+  color: #75716b;
+}
+
+.clip-info b {
+  font-weight: 400;
+  color: var(--ink-accent);
+}
+
+.chip-row button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.chip-row button:disabled:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #c2beb7;
 }

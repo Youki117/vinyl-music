@@ -56,6 +56,11 @@ class Engine {
       el.preload = "auto"
       el.playbackRate = this._speed
       el.preservesPitch = true
+      // 挂进 DOM（隐藏）而不是留在游离状态：行为完全一样，但外部可观测，
+      // 调试与端到端脚本都能直接数出有几路音频在发声。
+      el.dataset.role = "host"
+      el.style.display = "none"
+      document.body.appendChild(el)
       el.addEventListener("timeupdate", () => this.emitProgress())
       el.addEventListener("durationchange", () => this.emitProgress())
       el.addEventListener("ended", () => this.onEnded?.())
@@ -106,6 +111,28 @@ class Engine {
     this.gain = gain
     this.analyser = analyser
     this.eq = eq
+  }
+
+  /**
+   * 给叠加轨挂一路输入，返回它自己的增益节点。
+   *
+   * 接在主增益之前，所以主音量与频谱分析都会把叠加轨算进去 —— 蒙版波动理应
+   * 跟着"听到的东西"走，而不是只跟主音轨走。均衡器不作用于叠加轨，那是给主
+   * 音轨调音色用的。
+   */
+  attachLayer(el: HTMLAudioElement): GainNode | null {
+    this.ensureGraph()
+    if (!this.ctx || !this.gain) return null
+    const src = this.ctx.createMediaElementSource(el)
+    const g = this.ctx.createGain()
+    g.gain.value = 0
+    src.connect(g)
+    g.connect(this.gain)
+    return g
+  }
+
+  get context(): AudioContext | null {
+    return this.ctx
   }
 
   // ── 均衡器 ────────────────────────────────────────────────

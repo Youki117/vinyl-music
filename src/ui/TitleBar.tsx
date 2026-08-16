@@ -5,9 +5,11 @@ import VolumeControl from "./VolumeControl"
 export default function TitleBar({
   onOpenPlayback,
   onOpenSkin,
+  onOpenMix,
 }: {
   onOpenPlayback?: () => void
   onOpenSkin?: () => void
+  onOpenMix?: () => void
 }) {
   return (
     <div className="titlebar" data-tauri-drag-region>
@@ -36,6 +38,17 @@ export default function TitleBar({
             d="M4 16.5 13 7.5l3.5 3.5-9 9H4z"
           />
           <path fill="none" stroke="currentColor" strokeWidth="1.6" d="m15 5.5 3.5 3.5" />
+        </svg>
+      </button>
+      <button className="tb-tool" onClick={onOpenMix} aria-label="混音" title="混音 (X)">
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+          <path
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            d="M3 18V9M8 18V5M13 18v-6M18 18V8M21 18v-4"
+          />
         </svg>
       </button>
       <span className="titlebar-spacer" data-tauri-drag-region />
