@@ -90,6 +90,12 @@ export interface Platform {
   onCommand(handler: (cmd: PlayerCommand) => void): () => void
 
   /**
+   * 外壳交进来的文件：命令行参数、「打开方式」、拖到 exe 图标上。
+   * 浏览器实现下永不触发。
+   */
+  onOpenFiles(handler: (paths: string[]) => void): () => void
+
+  /**
    * 发外部 HTTP 请求。
    *
    * Tauri 下走 plugin-http 由 Rust 转发：OpenAI 兼容的服务基本不给浏览器来源发
@@ -101,6 +107,12 @@ export interface Platform {
    * 把生成的图片存进应用数据目录，返回可当底图用的引用。
    */
   saveImage(name: string, bytes: Uint8Array): Promise<FileRef>
+
+  /**
+   * 删除应用自己写出去的文件（封面副本、AI 生成图）。
+   * **只用于应用数据目录内的文件**，不碰用户的音乐库。
+   */
+  removeFile(path: string): Promise<void>
 
   readonly window: WindowControls
 }

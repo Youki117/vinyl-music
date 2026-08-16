@@ -101,7 +101,11 @@ writeFileSync(
 )
 
 // ── 冷启动 ───────────────────────────────────────────────────────
-const app = spawn(EXE, [], {
+// 带一个文件参数启动，顺便验「打开方式 / 命令行传文件」这条路。
+// 这条路以前是断的：Rust 侧 emit 了 player://open-files，前端没人监听，
+// 而且首次启动根本没解析过 env::args()。
+const ARG_FILE = join(SCOPED, "ProleteR - April Showers.mp3")
+const app = spawn(EXE, [ARG_FILE], {
   detached: true,
   stdio: "ignore",
   env: {
@@ -124,11 +128,24 @@ if (!browser) {
 }
 const ctx = browser.contexts()[0]
 const page = ctx.pages()[0]
-// 前端 init() 里有配置读取与放行，等它跑完
-await page.waitForTimeout(2500)
+// 前端 init() 里有配置读取与放行，等它跑完。
+// 命令行文件是延后 1.2 秒发的（前端那会儿还没挂上监听），也一并等掉。
+await page.waitForTimeout(4500)
+
+const argOpened = await page.evaluate(() => ({
+  title: document.querySelector(".timing b")?.textContent ?? "",
+  playing: document.querySelector(".disc")?.dataset.playing === "true",
+}))
+console.log(`命令行带文件启动：正在播「${argOpened.title}」`)
 
 const checks = []
 const check = (name, ok, detail) => checks.push([name, !!ok, detail])
+
+check(
+  "命令行传进来的文件被自动播放（打开方式那条路）",
+  argOpened.title === "April Showers" && argOpened.playing,
+  `${argOpened.title} / playing=${argOpened.playing}`,
+)
 
 const errors = []
 page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`))
@@ -309,7 +326,9 @@ const restored = await page.evaluate(async () => {
 console.log(`\n曲库恢复：${restored.length} 条`)
 for (const r of restored) console.log(`  ${r.title}${r.missing ? "  ✗ 标记为无法播放" : ""}`)
 
-check("重启后域外曲库被恢复出来", restored.length === 3, `${restored.length} 条`)
+// 3 条来自 library.json，外加命令行参数带进来的那首（在 $HOME/Music 下，
+// 与 tests/real 里那份是不同路径，会作为新曲目入库）
+check("重启后域外曲库被恢复出来", restored.length >= 3, `${restored.length} 条`)
 check("恢复的曲目没有被标记为无法播放", restored.every((r) => !r.missing))
 
 // 真正读一次文件，确认启动时的放行确实生效（而不是界面上看着有、一播就废）

@@ -29,23 +29,52 @@ type SkinState = {
 
 const fac = new FastAverageColor()
 
-/** id -> object URL。同一张图被底图和贴纸共用时不重复读盘。 */
+/**
+ * id -> object URL。同一张图被底图和贴纸共用时不重复读盘。
+ *
+ * 必须有上限并主动 revoke：手动换底图时最多攒几张，无所谓；但开了 AI 自动配图
+ * 之后每首歌一张 1792×1024 的 PNG，播一百首就是几百 MB 常驻，直接违反
+ * PRD「连续播放 8 小时增长 < 50MB」。Map 的插入顺序就是 LRU 的天然实现。
+ */
 const urlCache = new Map<string, LoadedImage>()
+const URL_CACHE_MAX = 6
+
+/** 正在用的图不能被淘汰掉，否则底图会当场变白 */
+let pinnedIds: string[] = []
+
+function evictImages(): void {
+  for (const [id, img] of urlCache) {
+    if (urlCache.size <= URL_CACHE_MAX) break
+    if (pinnedIds.includes(id)) continue
+    URL.revokeObjectURL(img.url)
+    urlCache.delete(id)
+  }
+}
 
 async function loadImage(id: string | null): Promise<LoadedImage | null> {
   if (!id) return null
   const hit = urlCache.get(id)
-  if (hit) return hit
+  if (hit) {
+    // 命中就挪到末尾，让淘汰顺序反映最近使用
+    urlCache.delete(id)
+    urlCache.set(id, hit)
+    return hit
+  }
 
   const url = await toObjectUrl({ id, name: id, size: 0, mtime: 0 })
   const img = new Image()
   await new Promise<void>((resolve, reject) => {
     img.onload = () => resolve()
-    img.onerror = () => reject(new Error(`图片无法识别：${id}`))
+    img.onerror = () => {
+      // 加载失败的 URL 也要还回去，不然这条泄漏路径反而最容易被触发
+      URL.revokeObjectURL(url)
+      reject(new Error(`图片无法识别：${id}`))
+    }
     img.src = url
   })
   const loaded: LoadedImage = { url, width: img.naturalWidth, height: img.naturalHeight }
   urlCache.set(id, loaded)
+  evictImages()
   return loaded
 }
 
@@ -129,6 +158,8 @@ async function refreshImages(
 ): Promise<void> {
   const { skin } = get()
   try {
+    // 先钉住这一轮要用的两张，免得加载第二张时把第一张淘汰掉
+    pinnedIds = [skin.backdrop, labelSourceId(skin)].filter((v): v is string => !!v)
     const backdrop = await loadImage(skin.backdrop)
     const label = await loadImage(labelSourceId(skin))
     set({ backdrop, label })

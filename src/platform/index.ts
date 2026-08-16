@@ -66,6 +66,19 @@ export const platform = {
     }
   },
 
+  onOpenFiles: (handler: (paths: string[]) => void): (() => void) => {
+    let dispose: (() => void) | null = null
+    let cancelled = false
+    void impl().then((p) => {
+      if (cancelled) return
+      dispose = p.onOpenFiles(handler)
+    })
+    return () => {
+      cancelled = true
+      dispose?.()
+    }
+  },
+
   onCommand: (handler: (cmd: PlayerCommand) => void): (() => void) => {
     let dispose: (() => void) | null = null
     let cancelled = false
@@ -84,6 +97,7 @@ export const platform = {
 
   saveImage: (name: string, bytes: Uint8Array): Promise<FileRef> =>
     impl().then((p) => p.saveImage(name, bytes)),
+  removeFile: (path: string): Promise<void> => impl().then((p) => p.removeFile(path)),
 
   readCache: (key: string): Promise<Uint8Array | null> => impl().then((p) => p.readCache(key)),
   writeCache: (key: string, data: Uint8Array): Promise<void> =>

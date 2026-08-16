@@ -36,6 +36,8 @@ type MixState = {
 
 /** layerId → 正在发声的实例。与 store 里的配置一一对应。 */
 const live = new Map<string, AudioLayer>()
+/** sync 的代际号。await 期间递增即表示这一轮已经过期。 */
+let syncGeneration = 0
 let unsubscribeClock: (() => void) | null = null
 let saveTimer = 0
 
@@ -48,8 +50,16 @@ export const useMix = create<MixState>((set, get) => {
     }, 800)
   }
 
-  /** 把 live 里的实例调成与配置一致 */
+  /**
+   * 把 live 里的实例调成与配置一致。
+   *
+   * 中间有 `await layer.load()`，而 setHost / addLayer / removeLayer 都会调它 ——
+   * 快速切歌时两次 sync 会交错：第二次把 live 清空并停了时钟之后，第一次的
+   * load 才返回，于是把一个已经不该存在的层塞回 live，留下一个不会 tick、
+   * 也没人回收的 <audio>。用代际号挡掉：await 回来发现已经过期就地丢弃。
+   */
   const sync = async () => {
+    const gen = ++syncGeneration
     const mix = get().current()
     const want = new Map((mix?.layers ?? []).map((l) => [l.id, l]))
 
@@ -71,11 +81,19 @@ export const useMix = create<MixState>((set, get) => {
       const layer = new AudioLayer({ ...cfg })
       try {
         await layer.load(track.ref)
+        if (gen !== syncGeneration) {
+          // 这一轮已经过期了：期间发生过新的 sync，这个层不该再上台
+          layer.dispose()
+          return
+        }
         live.set(id, layer)
       } catch (err) {
+        if (gen !== syncGeneration) return
         set({ error: err instanceof Error ? err.message : "叠加轨加载失败" })
       }
     }
+
+    if (gen !== syncGeneration) return
 
     // 有层就开时钟，没有就停
     if (live.size > 0 && !unsubscribeClock) {

@@ -314,7 +314,67 @@ check(
 await page.keyboard.press("Escape")
 await page.waitForTimeout(300)
 
-// ── 九、把每个面板里的按钮都点一遍 ──────────────────────────────
+// ── 九、快速连按不能把状态搞拧 ──────────────────────────────────
+// 暂停有 80ms 淡出，延迟停止的计时器要是不取消，会在下一次播放之后才触发：
+// 界面显示在播放，实际没声音。
+await page.keyboard.press("Escape")
+await page.waitForTimeout(300)
+await page.evaluate(() => {
+  const el = document.querySelector('audio[data-role="host"]') ?? document.querySelector("audio")
+  if (el?.paused) document.querySelector(".disc")?.click()
+})
+await page.waitForTimeout(1200)
+
+for (let i = 0; i < 3; i++) {
+  await page.keyboard.press(" ")
+  await page.waitForTimeout(30) // 刻意小于 80ms 的淡变时长
+  await page.keyboard.press(" ")
+  await page.waitForTimeout(500)
+}
+const rapid = await page.evaluate(() => {
+  const el = document.querySelector('audio[data-role="host"]') ?? document.querySelector("audio")
+  return {
+    uiSaysPlaying: document.querySelector(".disc")?.dataset.playing === "true",
+    elementPaused: el?.paused ?? true,
+  }
+})
+console.log(`\n快速连按空格：界面=${rapid.uiSaysPlaying ? "播放" : "暂停"}，元素=${rapid.elementPaused ? "已暂停" : "在播"}`)
+check(
+  "快速连按空格后，界面状态与实际发声一致",
+  rapid.uiSaysPlaying !== rapid.elementPaused,
+  `界面说${rapid.uiSaysPlaying ? "在播" : "暂停"}，元素${rapid.elementPaused ? "却是暂停的" : "在播"}`,
+)
+
+// 快速切歌时混音层的 sync 会交错，过期那轮不能把层塞回来
+await page.keyboard.press("x")
+await page.waitForTimeout(400)
+const addBtn = await page.$('button:has-text("＋ 添加")')
+if (addBtn) {
+  await addBtn.click()
+  await page.waitForTimeout(300)
+  const pick = await page.$(".track-picker button")
+  if (pick) await pick.click()
+  await page.waitForTimeout(2500)
+}
+await page.keyboard.press("Escape")
+await page.waitForTimeout(300)
+
+const elsBefore = await page.evaluate(() => document.querySelectorAll("audio").length)
+// 连续快切，不给 sync 跑完的机会
+for (let i = 0; i < 6; i++) {
+  await page.click('.controls button[aria-label="下一首"]')
+  await page.waitForTimeout(120)
+}
+await page.waitForTimeout(3500)
+const elsAfter = await page.evaluate(() => ({
+  count: document.querySelectorAll("audio").length,
+  playing: Array.from(document.querySelectorAll("audio")).filter((e) => !e.paused && !e.ended).length,
+}))
+console.log(`快速切歌：音频元素 ${elsBefore} → ${elsAfter.count}，其中 ${elsAfter.playing} 个在播`)
+check("快速切歌不会攒下孤儿音频元素", elsAfter.count <= elsBefore, `${elsBefore} → ${elsAfter.count}`)
+check("快速切歌后同时发声的不超过两轨", elsAfter.playing <= 2, String(elsAfter.playing))
+
+// ── 十、把每个面板里的按钮都点一遍 ──────────────────────────────
 const SKIP = {
   // 关闭类的单独测，混在扫描里会让面板中途关掉，后面的控件就都扫不到了
   selectors: [".drawer-close", ".titlebar button.close"],

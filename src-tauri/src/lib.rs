@@ -28,7 +28,7 @@ pub fn run() {
                 let _ = w.unminimize();
                 let _ = w.set_focus();
             }
-            let files: Vec<String> = argv.into_iter().skip(1).filter(|a| !a.starts_with('-')).collect();
+            let files = playable_args(argv.into_iter().skip(1));
             if !files.is_empty() {
                 let _ = app.emit(EVT_OPEN_FILES, files);
             }
@@ -44,6 +44,11 @@ pub fn run() {
             #[cfg(desktop)]
             setup_media_keys(app.handle())?;
             setup_tray(app.handle())?;
+            // 首次启动的命令行参数（"打开方式"、拖到 exe 上、命令行直接带文件）。
+            // 之前只在单实例重复启动时处理了 argv，首次启动整个漏掉，
+            // 而前端也没人监听这个事件 —— 等于这条路从来没通过。
+            #[cfg(desktop)]
+            emit_startup_files(app.handle());
             #[cfg(target_os = "windows")]
             smtc::init(app.handle())?;
             Ok(())
@@ -56,6 +61,31 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("Tauri 应用启动失败");
+}
+
+/// 从命令行参数里挑出真正存在的文件。
+///
+/// 只认存在于磁盘上的路径：命令行里可能混着开关、也可能是别的什么东西，
+/// 拿去当曲目会在前端产生一串莫名其妙的导入失败。
+fn playable_args(args: impl Iterator<Item = String>) -> Vec<String> {
+    args.filter(|a| !a.starts_with('-'))
+        .filter(|a| std::path::Path::new(a).is_file())
+        .collect()
+}
+
+/// 首次启动时把命令行里带的文件发给前端。
+#[cfg(desktop)]
+fn emit_startup_files(app: &tauri::AppHandle) {
+    let files = playable_args(std::env::args().skip(1));
+    if files.is_empty() {
+        return;
+    }
+    // 前端此刻还没挂上监听，延后一拍再发
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(1200));
+        let _ = handle.emit(EVT_OPEN_FILES, files);
+    });
 }
 
 /// 键盘媒体键。注册失败不该让应用起不来 —— 别的播放器可能已经占用了。

@@ -180,6 +180,17 @@ export function create(): Platform {
       await grantPaths(paths)
     },
 
+    async removeFile(path) {
+      // 只允许删应用数据目录里的东西 —— 这个方法拿到的是绝对路径，
+      // 万一调用方传错，不该有把用户音乐删掉的可能
+      const root = await appDataDir()
+      const normalized = path.replace(/\//g, "\\")
+      if (!normalized.toLowerCase().startsWith(root.replace(/\//g, "\\").toLowerCase())) {
+        throw new Error("拒绝删除应用数据目录之外的文件")
+      }
+      await remove(normalized)
+    },
+
     async updateNowPlaying(info) {
       try {
         await invoke("smtc_update", { info })
@@ -290,6 +301,25 @@ export function create(): Platform {
       // 统一成反斜杠：混着两种分隔符的路径传给系统 API 容易出事
       const abs = `${await appDataDir()}\\${dir}`.replace(/\//g, "\\")
       return { id: abs, name, size: bytes.byteLength, mtime: Date.now() }
+    },
+
+    onOpenFiles(handler) {
+      let unlisten: (() => void) | null = null
+      let cancelled = false
+      void listen<string[]>("player://open-files", async (e) => {
+        const paths = e.payload ?? []
+        if (paths.length === 0) return
+        // 命令行传进来的路径同样不在静态能力域里
+        await grantPaths(paths)
+        handler(paths)
+      }).then((fn) => {
+        if (cancelled) fn()
+        else unlisten = fn
+      })
+      return () => {
+        cancelled = true
+        unlisten?.()
+      }
     },
 
     onCommand(handler) {

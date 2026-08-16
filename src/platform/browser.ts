@@ -140,6 +140,10 @@ export function create(): Platform {
       // 浏览器没有能力域这回事
     },
 
+    async removeFile() {
+      // 浏览器下 saveImage 只造了个内存里的 File，没有可删的东西
+    },
+
     async updateNowPlaying() {
       // 浏览器下没有系统媒体面板
     },
@@ -189,6 +193,11 @@ export function create(): Platform {
     async saveImage(name, bytes) {
       const file = new File([bytes as BlobPart], name, { type: "image/png" })
       return toRef(file)
+    },
+
+    onOpenFiles() {
+      // 浏览器下没有命令行
+      return () => {}
     },
 
     onCommand() {

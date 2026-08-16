@@ -247,8 +247,16 @@ export const useLibrary = create<LibraryState>((set, get) => {
       const set_ = new Set(ids)
       // 内嵌封面是 object URL，不主动释放就一直占着内存
       for (const t of get().tracks) {
-        if (set_.has(t.id) && t.cover) URL.revokeObjectURL(t.cover)
-        if (set_.has(t.id)) probedLyrics.delete(t.id)
+        if (!set_.has(t.id)) continue
+        if (t.cover) URL.revokeObjectURL(t.cover)
+        probedLyrics.delete(t.id)
+        probedCovers.delete(t.id)
+        // 落盘的封面副本也要清掉，否则 skins/ 里会留下没人认领的孤儿文件
+        const file = coverFiles.get(t.id)
+        if (file) {
+          coverFiles.delete(t.id)
+          void platform.removeFile(file).catch(() => {})
+        }
       }
       set((s) => ({
         tracks: s.tracks.filter((t) => !set_.has(t.id)),

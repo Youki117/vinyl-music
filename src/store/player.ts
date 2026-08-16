@@ -30,6 +30,8 @@ type SettingsFile = {
   eqEnabled: boolean
   eqGains: number[]
   lastTrackId: string | null
+  /** 输出设备。同一个面板里 EQ 与速度都记，唯独这项不记说不过去。 */
+  outputDevice: string
 }
 
 type PlayerState = {
@@ -68,6 +70,8 @@ type PlayerState = {
   setVolume(v: number): void
   toggleMute(): void
   setSpeed(v: number): void
+  /** 切输出设备并落盘。失败时抛，由界面提示。 */
+  setOutputDevice(id: string): Promise<void>
 }
 
 const shuffle = new ShuffleOrder()
@@ -133,6 +137,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
         eqEnabled: engine.eqEnabled,
         eqGains: engine.eqGains,
         lastTrackId: s.current()?.id ?? null,
+        outputDevice: engine.outputDevice,
       }
       void platform.writeConfig("settings", file)
     }, 1000)
@@ -159,6 +164,12 @@ export const usePlayer = create<PlayerState>((set, get) => {
       engine.onStatus((status, error) => {
         set({ status, error })
         pushNowPlaying(get().current(), status === "playing", engine.currentTime)
+      })
+
+      // 跳转不改变播放状态，不在这里补一刀的话，系统媒体面板的位置会一直停在
+      // 旧值，直到下次暂停或切歌
+      engine.onSeek((t) => {
+        pushNowPlaying(get().current(), engine.status === "playing", t, true)
       })
 
       engine.onProgress((t, d) => {
@@ -209,6 +220,10 @@ export const usePlayer = create<PlayerState>((set, get) => {
         engine.setSpeed(s.speed ?? 1)
         if (s.eqGains?.length) engine.setEqGains(s.eqGains)
         if (s.eqEnabled) engine.setEqEnabled(true)
+        // 设备可能已经拔了，setSinkId 会抛，吞掉退回系统默认即可
+        if (s.outputDevice) {
+          void engine.setOutputDevice(s.outputDevice).catch(() => {})
+        }
       }
 
       // 恢复上次的队列：用当前视图，定位到上次那首
@@ -401,6 +416,11 @@ export const usePlayer = create<PlayerState>((set, get) => {
     setSpeed(v) {
       set({ speed: v })
       engine.setSpeed(v)
+      save()
+    },
+
+    async setOutputDevice(id) {
+      await engine.setOutputDevice(id)
       save()
     },
   }

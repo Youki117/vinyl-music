@@ -105,6 +105,23 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setBackdrop])
 
+  // 外壳交进来的文件：命令行、「打开方式」、拖到 exe 图标上。
+  // 与拖进窗口走同一条导入路径，导完直接播第一首 —— 用户点开一个 mp3 就是想听它。
+  useEffect(() => {
+    return platform.onOpenFiles((paths) => {
+      void (async () => {
+        const refs = paths
+          .filter((p) => isAudioFile(p))
+          .map((p) => ({ id: p, name: p.split(/[\\/]/).pop() ?? p, size: 0, mtime: 0 }))
+        if (refs.length === 0) return
+        const added = await addFiles(refs)
+        const list = added.length > 0 ? added : refs.map((r) => useLibrary.getState().byId(r.id)!).filter(Boolean)
+        if (list.length > 0) await usePlayer.getState().playFrom(list, 0)
+      })()
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // 媒体键与托盘菜单（F8.4/F8.6）。外壳把来源统一成指令，这里不关心是谁触发的。
   useEffect(() => {
     return platform.onCommand((cmd) => {

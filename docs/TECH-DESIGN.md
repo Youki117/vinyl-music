@@ -185,10 +185,10 @@ WebView2 运行时本机已存在（`151.0.4129.78`），不需要额外安装�
 
 ```
 vinyl-player/
-├─ docs/                       PRD 与本文档
+├─ docs/                       PRD、本文档、与主流播放器的功能对照
 ├─ design-ref/                 目标效果图与 Figma 版本存档（只读参考）
 ├─ src-tauri/
-│  ├─ src/{main.rs, scan.rs, media_controls.rs}
+│  ├─ src/{lib.rs, main.rs, scan.rs, grant.rs, smtc.rs}
 │  ├─ capabilities/default.json    权限清单
 │  ├─ tauri.conf.json
 │  └─ Cargo.toml
@@ -199,19 +199,23 @@ vinyl-player/
 │  │  ├─ Backdrop.tsx          L0 底图
 │  │  ├─ Veil.tsx              L1 蒙版（React 壳）
 │  │  ├─ veil/{renderer.ts, veil.vert, veil.frag}
-│  │  └─ Grain.tsx             L2 颗粒
+│  │  ├─ clock.ts              全应用唯一的 rAF 循环
+│  │  └─ useStageFit.ts
 │  ├─ ui/                      L3 内容层
 │  │  ├─ Masthead.tsx Lyrics.tsx Disc.tsx Waveform.tsx
-│  │  ├─ Progress.tsx Controls.tsx Actions.tsx TitleBar.tsx
-│  │  └─ panels/{Playlist.tsx, Settings.tsx, SkinEditor.tsx}
-│  ├─ audio/{engine.ts, graph.ts, analyser.ts, peaks.ts, metadata.ts}
-│  ├─ lyrics/{parse.ts, index.ts}
+│  │  ├─ Progress.tsx Controls.tsx Actions.tsx TitleBar.tsx VolumeControl.tsx
+│  │  ├─ useDismiss.ts         点浮层外部关闭
+│  │  └─ panels/{Playlist.tsx, Playback.tsx, SkinEditor.tsx, Mix.tsx, Timeline.tsx, AiTab.tsx}
+│  ├─ audio/{engine.ts, analyser.ts, eq.ts, peaks.ts, metadata.ts, clips.ts, layer.ts, useProgress.ts}
+│  ├─ lyrics/parse.ts          LRC 解析（含词级时间戳）
 │  ├─ skin/{model.ts, resolve.ts, palette.ts}
-│  ├─ store/{player.ts, library.ts, skin.ts, settings.ts}
-│  ├─ platform/{fs.ts, media.ts, window.ts}    ← 唯一 import @tauri-apps 的地方
-│  └─ styles/{tokens.css, stage.css}
-├─ tests/                      Vitest 单测
-└─ scripts/compare-visual.mjs  与效果图对拍
+│  ├─ lib/{format.ts, m3u.ts, text.ts}         无依赖小工具
+│  ├─ ai/{config.ts, prompt.ts, generate.ts}
+│  ├─ store/{player.ts, library.ts, skin.ts, mix.ts, ai.ts, shuffle.ts}
+│  ├─ platform/{types.ts, index.ts, tauri.ts, browser.ts}  ← 唯一 import @tauri-apps 的地方
+│  └─ styles/{tokens.css, stage.css, ui.css}
+├─ tests/                      Vitest 单测 + 实测素材
+└─ scripts/                    对拍与端到端验证脚本，见 README §校验
 ```
 
 ---
@@ -545,13 +549,14 @@ const TAG = /\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g
 
 ```
 vinyl-player/
-├─ library.json      曲库：路径、元数据、播放次数、喜欢标记
+├─ library.json      曲库：路径、元数据、播放次数、喜欢标记、歌单
 ├─ skins.json        全部皮肤配置
-├─ settings.json     音量、播放模式、蒙版参数、快捷键、上次播放位置
-├─ skins/            用户导入的底图原图
+├─ settings.json     音量、播放模式、倍速、均衡器、输出设备、上次曲目
+├─ mix.json          每首歌的叠加轨与片段编排
+├─ ai.json           AI 配图配置与已生成图的索引
+├─ skins/            用户导入的底图、AI 生成图、提取出的内嵌封面副本
 └─ cache/
-   ├─ peaks/         波形峰值 .bin，文件名 = 哈希
-   └─ covers/        提取出的内嵌封面
+   └─ peaks-*.bin    波形峰值，文件名 = 内容哈希（平铺，无子目录）
 ```
 
 全部是 JSON，读时一次性载入内存，写时**防抖 1 秒 + 写临时文件再原子 rename**——直接覆写原文件遇到断电会得到一个半截的 JSON，曲库就没了。
@@ -586,14 +591,21 @@ vinyl-player/
 
 ## 10. 状态管理
 
-四个独立的 Zustand store，不互相 import：
+五个 Zustand store。**依赖是单向的，无环**——不是"互不 import"，那个说法在加了混音与 AI 之后就不成立了：
 
-| store | 内容 |
-| --- | --- |
-| `player` | 当前曲目、播放状态、进度、音量、播放模式、队列与洗牌顺序 |
-| `library` | 全部曲目、扫描进度、搜索过滤结果 |
-| `skin` | 当前皮肤、皮肤列表、编辑中的草稿 |
-| `settings` | 输出设备、均衡器、快捷键、F10 强度等 |
+| store | 内容 | 依赖 |
+| --- | --- | --- |
+| `library` | 全部曲目、歌单、扫描进度、搜索过滤排序 | 叶子 |
+| `skin` | 当前皮肤、皮肤列表、取景与配色 | 叶子 |
+| `player` | 当前曲目、播放状态、音量、播放模式、队列与洗牌顺序 | → `library` |
+| `mix` | 叠加轨配置与片段编排 | → `library` |
+| `ai` | AI 配图配置与生成状态 | → `skin` |
+
+播放设置（均衡器、倍速、输出设备、睡眠定时器）没有单独的 store：它们是**引擎的状态**，由 `audio/engine.ts` 自己持有，`player` 只在落盘时读一遍。多一个 store 只会让同一份状态有两个真相。
+
+**进度（`currentTime`）不进 store**。它每秒变化几十次，进 store 会让整棵组件树每秒重渲染几十次。改为：`audio/engine.ts` 暴露一个订阅接口，只有进度条与歌词两个组件直接订阅并用 ref 更新 DOM。这是本项目最重要的一条性能约定。
+
+`mix` 的 `sync()` 中间有 `await layer.load()`，而 `setHost` / `addLayer` / `removeLayer` 都会调它。快速切歌时两次 sync 会交错，必须用代际号把过期那轮丢掉，否则会留下一个不会 tick、也没人回收的 `<audio>`。
 
 **进度（`currentTime`）不进 store**。它每秒变化几十次，进 store 会让整棵组件树每秒重渲染几十次。改为：`audio/engine.ts` 暴露一个订阅接口，只有进度条与歌词两个组件直接订阅并用 ref 更新 DOM。这是本项目最重要的一条性能约定。
 

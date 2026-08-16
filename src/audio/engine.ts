@@ -40,6 +40,9 @@ class Engine {
   private _speed = 1
   private _outputDevice = ""
 
+  /** pause() 的延迟停止计时器。play() 必须把它取消掉，见 pause() 里的说明。 */
+  private pauseTimer = 0
+
   private sleepHandle = 0
   private sleepAt: number | null = null
   private sleepAfterTrack = false
@@ -364,6 +367,8 @@ class Engine {
 
   async play(): Promise<void> {
     this.ensureGraph()
+    // 上一次 pause 的延迟停止还挂着的话先撤掉，否则它会在这次播放之后触发
+    window.clearTimeout(this.pauseTimer)
     if (this.ctx?.state === "suspended") await this.ctx.resume()
     if (!this.el.src) return
 
@@ -390,7 +395,10 @@ class Engine {
       this.gain.gain.cancelScheduledValues(now)
       this.gain.gain.setValueAtTime(this.gain.gain.value, now)
       this.gain.gain.linearRampToValueAtTime(0.0001, now + FADE_MS / 1000)
-      window.setTimeout(() => this.el.pause(), FADE_MS)
+      // 句柄必须留着：淡出的 80ms 内再按一次播放，这个计时器会在 play() 之后
+      // 才触发，把已经在放的元素又暂停掉 —— 界面显示在播放，实际没声音
+      window.clearTimeout(this.pauseTimer)
+      this.pauseTimer = window.setTimeout(() => this.el.pause(), FADE_MS)
     } else {
       this.el.pause()
     }
@@ -402,11 +410,20 @@ class Engine {
     else void this.play()
   }
 
+  /** 跳转监听。系统媒体面板要靠它更新位置 —— 跳转不产生状态变化。 */
+  private seekListeners = new Set<(t: number) => void>()
+
+  onSeek(fn: (t: number) => void): () => void {
+    this.seekListeners.add(fn)
+    return () => this.seekListeners.delete(fn)
+  }
+
   seek(frac: number): void {
     const d = this.duration
     if (d > 0) {
       this.el.currentTime = Math.min(d, Math.max(0, frac * d))
       this.emitProgress()
+      for (const fn of this.seekListeners) fn(this.el.currentTime)
     }
   }
 

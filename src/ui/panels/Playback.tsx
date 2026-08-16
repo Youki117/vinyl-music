@@ -13,6 +13,7 @@ const SLEEP_OPTIONS = [15, 30, 45, 60, 90]
 export default function Playback({ open, onClose }: { open: boolean; onClose: () => void }) {
   const speed = usePlayer((s) => s.speed)
   const setSpeed = usePlayer((s) => s.setSpeed)
+  const setOutputDevice = usePlayer((s) => s.setOutputDevice)
 
   const [eqOn, setEqOn] = useState(engine.eqEnabled)
   const [gains, setGains] = useState<number[]>(engine.eqGains)
@@ -172,7 +173,8 @@ export default function Playback({ open, onClose }: { open: boolean; onClose: ()
             const id = e.target.value
             setDevice(id)
             setDeviceError(null)
-            engine.setOutputDevice(id).catch((err) => setDeviceError(String(err.message ?? err)))
+            // 走 store 而不是直接调 engine：设备选择要跟 EQ、速度一样落盘
+            setOutputDevice(id).catch((err) => setDeviceError(String(err.message ?? err)))
           }}
         >
           <option value="">系统默认</option>
