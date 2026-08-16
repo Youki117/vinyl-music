@@ -19,11 +19,19 @@ export default function Disc({
   const label = useSkin((s) => s.label)
   const focus = useSkin((s) => s.skin.label.focus)
   const status = usePlayer((s) => s.status)
+  const cover = usePlayer((s) => s.current()?.cover ?? null)
   const playing = status === "playing"
 
+  // 贴纸优先级：皮肤指定的图（跟随底图或单独指定）> 曲目内嵌封面 > 空。
+  // 底图联动是核心需求，永远排第一；但还没设过底图时，用曲目自带的专辑封面
+  // 总比留一个空盘好——这也是主流播放器的默认行为。
   const art = label
     ? labelBackground(label.url, focus, label.width, label.height)
-    : undefined
+    : cover
+      ? { backgroundImage: `url(${cover})`, backgroundSize: "cover", backgroundPosition: "center" }
+      : undefined
+
+  const hasArt = Boolean(label || cover)
 
   return (
     <button
@@ -39,7 +47,7 @@ export default function Disc({
     >
       <span className="disc-grooves" />
       <span className="disc-label" style={art}>
-        {!label && <span className="disc-label-empty" />}
+        {!hasArt && <span className="disc-label-empty" />}
       </span>
       <span className="disc-shine" />
       <span className="disc-spindle" />

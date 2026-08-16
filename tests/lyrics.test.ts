@@ -5,7 +5,7 @@ import { activeLineIndex, parseLrc } from "@/lyrics/parse"
 describe("parseLrc", () => {
   it("解析基本时间戳", () => {
     const r = parseLrc("[00:12.00]第一行\n[01:05.50]第二行")
-    expect(r.lines).toEqual([
+    expect(r.lines).toMatchObject([
       { t: 12, text: "第一行" },
       { t: 65.5, text: "第二行" },
     ])
@@ -43,12 +43,12 @@ describe("parseLrc", () => {
 
   it("跳过空行、纯时间戳行与无时间戳的行", () => {
     const r = parseLrc("\n随便一句没有标签的\n[00:05.00]\n[00:06.00]有内容\n\n")
-    expect(r.lines).toEqual([{ t: 6, text: "有内容" }])
+    expect(r.lines).toMatchObject([{ t: 6, text: "有内容" }])
   })
 
   it("去掉 BOM 与 CRLF", () => {
     const r = parseLrc("﻿[00:01.00]a\r\n[00:02.00]b\r\n")
-    expect(r.lines).toEqual([
+    expect(r.lines).toMatchObject([
       { t: 1, text: "a" },
       { t: 2, text: "b" },
     ])

@@ -54,6 +54,11 @@ type PlayerState = {
   appendToQueue(tracks: Track[]): void
   removeFromQueue(i: number): void
   clearQueue(): void
+  /**
+   * 从曲库重新取一遍队列里的可变字段（歌词、收藏）。
+   * 队列存的是曲目副本，曲库那边改了不会自动传过来。
+   */
+  refreshQueueMeta(): void
 
   toggle(): void
   next(auto?: boolean): Promise<void>
@@ -191,6 +196,15 @@ export const usePlayer = create<PlayerState>((set, get) => {
         await engine.play()
         save()
 
+        // 曲库落盘时不存歌词正文，重启后要在这里把外挂 .lrc 补回来
+        void useLibrary
+          .getState()
+          .ensureLyrics(track.id)
+          .then((lrc) => {
+            if (lrc && get().index === i) get().refreshQueueMeta()
+          })
+          .catch(() => {})
+
         // 波形不阻塞播放
         const idle = window.requestIdleCallback ?? ((cb: () => void) => window.setTimeout(cb, 200))
         idle(() => {
@@ -241,6 +255,16 @@ export const usePlayer = create<PlayerState>((set, get) => {
     clearQueue() {
       engine.pause()
       set({ queue: [], index: -1, peaks: null })
+    },
+
+    refreshQueueMeta() {
+      const lib = useLibrary.getState()
+      set((s) => ({
+        queue: s.queue.map((q) => {
+          const t = lib.byId(q.id)
+          return t ? { ...q, lyrics: t.lyrics ?? q.lyrics, liked: t.liked } : q
+        }),
+      }))
     },
 
     toggle() {

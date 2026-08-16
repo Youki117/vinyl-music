@@ -12,6 +12,7 @@
     "core:window:allow-is-fullscreen",
     "core:window:allow-start-dragging",
     "dialog:allow-open",
+    "dialog:allow-save",
     "core:event:default",
     "core:webview:allow-internal-toggle-devtools",
     "fs:allow-read-file",

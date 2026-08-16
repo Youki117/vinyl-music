@@ -64,26 +64,60 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   color: var(--ink-secondary);
   font-family: var(--font-cjk);
   font-size: 11.5px;
   text-align: center;
 }
 
+/*
+ * 折行而不是 nowrap。参考图里是短句中文，208px 够用；换成真实的英文歌词
+ * （"And then comes June, a moon and you"）就会从左边溢出画面、右边压到黑胶上。
+ * 限两行封顶，超长句截断，保证行数固定、版面不被歌词长度撑坏。
+ */
 .lyric-line {
-  display: block;
-  white-space: nowrap;
+  position: relative;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  line-height: 1.35;
   transition:
     opacity 320ms ease,
     color 320ms ease;
 }
 
 .lyric-line[data-active="true"] {
-  color: var(--ink-primary);
   font-size: 12.5px;
   font-weight: 700;
   opacity: 1 !important;
+}
+
+/*
+ * 逐字擦除。亮色副本整行盖在原行之上，按 --fill 从左揭开；底下那层保持可读的
+ * 次级色，所以还没唱到的字不会消失，只是暗一些。
+ *
+ * 用整行副本而不是给每个字包 span：逐字节点在字重切换时宽度会跳，整行副本
+ * 天然与底层像素对齐。行级歌词的 fill 恒为 1，等于整行直接变亮，与改动前一致。
+ *
+ * 已知局限：句子折成两行时，这道竖直擦除带会同时扫过上下两行，严格说不符合
+ * 唱词顺序。窄栏里绝大多数句子是一行，为此去做逐行测量不划算。
+ */
+.lyric-line[data-active="true"] .lyric-fill {
+  position: absolute;
+  inset: 0;
+  /* 折行规则必须与底层完全一致，否则两层文字对不上 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  color: var(--ink-primary);
+  clip-path: inset(0 calc(100% - var(--fill)) 0 0);
+  pointer-events: none;
 }
 
 /* ── E6/E7 黑胶与贴纸 ──────────────────────────────────── */
@@ -945,6 +979,22 @@ header button.danger,
   z-index: 6;
 }
 
+/* 一般性提示（导入结果之类），比报错弱一档 */
+.toast.notice {
+  background: rgba(16, 16, 16, 0.74);
+}
+
+/* 抽屉内的操作回执，点一下消失 */
+.lib-note {
+  margin: 0 12px 6px;
+  padding: 5px 9px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.09);
+  color: #c8c4bd;
+  font-size: 11px;
+  cursor: pointer;
+}
+
 /* ── L4 播放列表抽屉 ───────────────────────────────────── */
 .drawer {
   position: absolute;
@@ -1268,6 +1318,9 @@ header button.danger,
 
 /* 片段时间轴 */
 .timeline {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 5px;
   background: rgba(0, 0, 0, 0.32);

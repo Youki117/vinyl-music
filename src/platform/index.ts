@@ -4,7 +4,14 @@
 import type { FileRef, Platform, PlatformKind, PlayerCommand } from "./types"
 
 export type { FileRef, Platform, PlatformKind, PlayerCommand, WindowControls } from "./types"
-export { AUDIO_EXTENSIONS, isAudioFile } from "./types"
+export {
+  AUDIO_EXTENSIONS,
+  LYRIC_EXTENSIONS,
+  PLAYLIST_EXTENSIONS,
+  isAudioFile,
+  isLyricFile,
+  isPlaylistFile,
+} from "./types"
 
 export const IS_TAURI: boolean =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
@@ -28,6 +35,15 @@ export const platform = {
   pickImage: (): Promise<FileRef | null> => impl().then((p) => p.pickImage()),
 
   readFile: (ref: FileRef): Promise<Uint8Array> => impl().then((p) => p.readFile(ref)),
+  readText: (ref: FileRef): Promise<string> => impl().then((p) => p.readText(ref)),
+  readSidecar: (ref: FileRef, ext: string): Promise<string | null> =>
+    impl().then((p) => p.readSidecar(ref, ext)),
+
+  pickPlaylistFile: (): Promise<FileRef | null> => impl().then((p) => p.pickPlaylistFile()),
+  saveText: (name: string, text: string): Promise<boolean> =>
+    impl().then((p) => p.saveText(name, text)),
+  resolvePath: (baseId: string, entry: string): Promise<FileRef | null> =>
+    impl().then((p) => p.resolvePath(baseId, entry)),
 
   readConfig: <T>(name: string): Promise<T | null> => impl().then((p) => p.readConfig<T>(name)),
   writeConfig: <T>(name: string, value: T): Promise<void> =>

@@ -22,6 +22,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
   const currentId = usePlayer((s) => s.current()?.id ?? null)
   const [menu, setMenu] = useState<{ track: Track; x: number; y: number } | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
+  const [note, setNote] = useState<string | null>(null)
 
   if (!open) return null
 
@@ -30,6 +31,21 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
 
   const importFiles = () => void platform.pickAudioFiles().then(lib.addFiles)
   const importFolder = () => void platform.pickAudioFolder().then(lib.addFiles)
+
+  const importM3u = () =>
+    void (async () => {
+      const ref = await platform.pickPlaylistFile()
+      if (!ref) return
+      const r = await lib.importPlaylist(ref)
+      setNote(
+        r.playlistId
+          ? `已导入 ${r.matched} 首${r.missing > 0 ? `，${r.missing} 首找不到文件` : ""}`
+          : "歌单里的曲目一首都没找到",
+      )
+    })()
+
+  const exportM3u = () =>
+    void lib.exportPlaylist().then((ok) => setNote(ok ? "已导出" : "当前列表是空的"))
 
   return (
     <div className="drawer library-drawer" role="dialog" aria-label="曲库">
@@ -111,6 +127,12 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
           </button>
           <button onClick={importFiles}>加文件</button>
           <button onClick={importFolder}>加文件夹</button>
+          <button onClick={importM3u} title="导入 m3u / m3u8 歌单文件">
+            导入歌单
+          </button>
+          <button onClick={exportM3u} title="把当前列表导出为 m3u8">
+            导出
+          </button>
           {inPlaylist && (
             <button
               className="danger"
@@ -130,6 +152,12 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
             正在导入 {lib.scanning.done} / {lib.scanning.total}
             <span style={{ width: `${(lib.scanning.done / lib.scanning.total) * 100}%` }} />
           </div>
+        )}
+
+        {note && (
+          <p className="lib-note" onClick={() => setNote(null)}>
+            {note}
+          </p>
         )}
 
         <ol onClick={() => setMenu(null)}>

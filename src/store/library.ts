@@ -1,7 +1,9 @@
 import { create } from "zustand"
 
-import { platform, type FileRef } from "@/platform"
+import { isLyricFile, platform, type FileRef } from "@/platform"
 import { readMetadata } from "@/audio/metadata"
+import { formatM3u, matchByName, parseM3u } from "@/lib/m3u"
+import { baseName, stripExt } from "@/lib/text"
 
 export type Track = {
   id: string
@@ -56,6 +58,9 @@ const SCHEMA = 2
 const RECENT_LIMIT = 100
 const MOST_LIMIT = 100
 
+/** 已经找过外挂歌词的曲目。没找到也记下来，避免每次播放都白跑一趟磁盘。 */
+const probedLyrics = new Set<string>()
+
 type LibraryFile = {
   schemaVersion: number
   tracks: Array<Omit<Track, "cover" | "lyrics" | "missing">>
@@ -92,6 +97,18 @@ type LibraryState = {
 
   toggleLike(id: string): void
   recordPlay(id: string): void
+
+  /**
+   * 确保这首歌的歌词就位：内嵌没有就找旁边的同名 .lrc。
+   * 曲库落盘时不存歌词正文，重启后要靠这个补回来。
+   */
+  ensureLyrics(id: string): Promise<string | null>
+  /** 把外挂歌词按同名规则挂到曲目上。返回挂上的数量。 */
+  attachLyrics(refs: FileRef[]): Promise<number>
+  /** 导入 m3u/m3u8，建一个同名歌单。返回结果说明。 */
+  importPlaylist(ref: FileRef): Promise<{ playlistId: string | null; matched: number; missing: number }>
+  /** 把当前视图导出为 m3u8。 */
+  exportPlaylist(): Promise<boolean>
 
   /** 当前视图 + 搜索 + 排序 之后的曲目 */
   visible(): Track[]
@@ -162,6 +179,11 @@ export const useLibrary = create<LibraryState>((set, get) => {
         try {
           const bytes = await platform.readFile(ref)
           const meta = await readMetadata(ref, bytes)
+          // 内嵌歌词优先，没有就找旁边的同名 .lrc —— 网上下到的音频几乎都靠这个
+          let lyrics = meta.lyrics
+          if (!lyrics) {
+            lyrics = await platform.readSidecar(ref, "lrc").catch(() => null)
+          }
           added.push({
             id: ref.id,
             ref,
@@ -170,7 +192,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
             album: meta.album,
             duration: meta.duration,
             cover: meta.cover,
-            lyrics: meta.lyrics,
+            lyrics,
             playCount: 0,
             liked: false,
             lastPlayed: 0,
@@ -198,6 +220,11 @@ export const useLibrary = create<LibraryState>((set, get) => {
 
     removeTracks(ids) {
       const set_ = new Set(ids)
+      // 内嵌封面是 object URL，不主动释放就一直占着内存
+      for (const t of get().tracks) {
+        if (set_.has(t.id) && t.cover) URL.revokeObjectURL(t.cover)
+        if (set_.has(t.id)) probedLyrics.delete(t.id)
+      }
       set((s) => ({
         tracks: s.tracks.filter((t) => !set_.has(t.id)),
         playlists: s.playlists.map((p) => ({ ...p, trackIds: p.trackIds.filter((i) => !set_.has(i)) })),
@@ -293,6 +320,112 @@ export const useLibrary = create<LibraryState>((set, get) => {
         ),
       }))
       save()
+    },
+
+    async ensureLyrics(id) {
+      const track = get().byId(id)
+      if (!track) return null
+      if (track.lyrics) return track.lyrics
+      if (probedLyrics.has(id)) return null
+      probedLyrics.add(id)
+
+      const text = await platform.readSidecar(track.ref, "lrc").catch(() => null)
+      if (!text) return null
+      set((s) => ({ tracks: s.tracks.map((t) => (t.id === id ? { ...t, lyrics: text } : t)) }))
+      return text
+    },
+
+    async attachLyrics(refs) {
+      const lrcs = refs.filter((r) => isLyricFile(r.name))
+      if (lrcs.length === 0) return 0
+
+      // 同名匹配：「歌名.lrc」配「歌名.mp3」
+      const index = new Map<string, string>()
+      for (const t of get().tracks) {
+        const key = stripExt(t.ref.name).toLowerCase()
+        if (!index.has(key)) index.set(key, t.id)
+      }
+
+      const patch = new Map<string, string>()
+      for (const r of lrcs) {
+        const id = index.get(stripExt(r.name).toLowerCase())
+        if (!id) continue
+        try {
+          const text = await platform.readText(r)
+          if (text.trim()) patch.set(id, text)
+        } catch {
+          // 单个歌词读失败不影响其余
+        }
+      }
+      if (patch.size === 0) return 0
+
+      for (const id of patch.keys()) probedLyrics.add(id)
+      set((s) => ({
+        tracks: s.tracks.map((t) => (patch.has(t.id) ? { ...t, lyrics: patch.get(t.id)! } : t)),
+      }))
+      return patch.size
+    },
+
+    async importPlaylist(ref) {
+      const entries = parseM3u(await platform.readText(ref))
+      if (entries.length === 0) return { playlistId: null, matched: 0, missing: 0 }
+
+      // 一、先按真实路径解析。解析得出的文件直接导进曲库（可能本来就不在库里）
+      const resolved = new Map<string, FileRef>()
+      for (const e of entries) {
+        const r = await platform.resolvePath(ref.id, e.path).catch(() => null)
+        if (r) resolved.set(e.path, r)
+      }
+      if (resolved.size > 0) {
+        // addFiles 会把新曲目塞进「当前歌单」，导入过程中先躲开，避免污染
+        const prevView = get().activeView
+        set({ activeView: "all" })
+        await get().addFiles([...resolved.values()])
+        set({ activeView: prevView })
+      }
+
+      // 二、路径失效的退回按文件名匹配 —— 歌单文件常是从别的机器拷来的
+      const tracks = get().tracks
+      const byRefId = new Map(tracks.map((t) => [t.ref.id, t]))
+      const nameHits = matchByName(entries, tracks)
+
+      // 严格按 m3u 里的顺序建歌单
+      const ids: string[] = []
+      let missing = 0
+      for (const e of entries) {
+        const viaPath = resolved.get(e.path)
+        const hit = (viaPath && byRefId.get(viaPath.id)) ?? nameHits.get(e.path)
+        if (!hit) {
+          missing++
+          continue
+        }
+        if (!ids.includes(hit.id)) ids.push(hit.id)
+      }
+      if (ids.length === 0) return { playlistId: null, matched: 0, missing }
+
+      const pid = get().createPlaylist(stripExt(baseName(ref.name)) || "导入的歌单")
+      get().addToPlaylist(pid, ids)
+      return { playlistId: pid, matched: ids.length, missing }
+    },
+
+    async exportPlaylist() {
+      const rows = get().visible()
+      if (rows.length === 0) return false
+      const view = get().activeView
+      const name = isVirtual(view)
+        ? VIEW_LABEL[view]
+        : get().playlists.find((p) => p.id === view)?.name ?? "playlist"
+
+      const text = formatM3u(
+        rows.map((t) => ({
+          // 浏览器实现下 ref.id 是会话内的假 id，写进文件没意义，退回文件名
+          path: /^[a-zA-Z]:[\\/]|^\//.test(t.ref.id) ? t.ref.id : t.ref.name,
+          title: t.title,
+          artist: t.artist,
+          duration: t.duration,
+        })),
+      )
+      return platform.saveText(`${name}.m3u8`, text)
     },
 
     visible() {

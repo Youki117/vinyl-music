@@ -3,11 +3,12 @@ import { useEffect, useRef, useState } from "react"
 import { useProgress } from "@/audio/useProgress"
 import { clipAt, clipEnd, moveClip, trimClip, type Clip } from "@/audio/clips"
 
-const W = 384
 const H = 74
 const PAD = 4
 /** 距离片段边缘多少像素内算作"拖边缘裁剪"而不是"整体移动" */
 const EDGE = 6
+/** 首帧还没量到宽度时的临时值，随即会被 ResizeObserver 覆盖 */
+const W_FALLBACK = 340
 
 type Drag =
   | { kind: "move"; id: string; grabOffset: number }
@@ -40,7 +41,21 @@ export default function Timeline({
   const ref = useRef<HTMLCanvasElement>(null)
   const drag = useRef<Drag>(null)
   const [hoverCursor, setHoverCursor] = useState("default")
+  const [W, setW] = useState(W_FALLBACK)
   const { time } = useProgress()
+
+  // 宽度必须实测。写死 384 会比抽屉的内容区（380 - 28 padding = 352）宽出一截，
+  // 时间轴右端连同曲目结尾一起被裁掉，那段根本点不到。
+  useEffect(() => {
+    const canvas = ref.current
+    if (!canvas) return
+    const ro = new ResizeObserver(([entry]) => {
+      const next = Math.max(120, Math.round(entry.contentRect.width))
+      setW((prev) => (prev === next ? prev : next))
+    })
+    ro.observe(canvas)
+    return () => ro.disconnect()
+  }, [])
 
   const dur = Math.max(1, hostDuration)
   const toX = (t: number) => PAD + (t / dur) * (W - PAD * 2)
@@ -119,10 +134,19 @@ export default function Timeline({
       ctx.lineTo(x, H)
       ctx.stroke()
     }
-  }, [clips, peaks, selectedId, time, dur, sourceDuration])
+  }, [clips, peaks, selectedId, time, dur, sourceDuration, W])
 
-  const localX = (e: React.PointerEvent | React.MouseEvent) =>
-    e.clientX - (e.currentTarget as HTMLCanvasElement).getBoundingClientRect().left
+  /**
+   * 指针位置换算到画布坐标。
+   *
+   * 必须减掉左边框：getBoundingClientRect 给的是边框盒，而位图铺的是内容盒，
+   * 直接相减会让整条时间轴的命中判定偏移一个边框宽度。
+   */
+  const localX = (e: React.PointerEvent | React.MouseEvent) => {
+    const el = e.currentTarget as HTMLCanvasElement
+    const border = Number.parseFloat(getComputedStyle(el).borderLeftWidth) || 0
+    return e.clientX - el.getBoundingClientRect().left - border
+  }
 
   /** 判断指针落在哪个片段的哪个部位 */
   const hit = (x: number): { clip: Clip; part: "start" | "end" | "body" } | null => {
@@ -141,7 +165,7 @@ export default function Timeline({
     <canvas
       ref={ref}
       className="timeline"
-      style={{ width: W, height: H, cursor: hoverCursor }}
+      style={{ width: "100%", height: H, cursor: hoverCursor }}
       onPointerDown={(e) => {
         if (e.button !== 0) return
         const x = localX(e)

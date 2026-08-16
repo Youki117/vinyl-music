@@ -2,7 +2,8 @@
  * Tauri 实现。所有 @tauri-apps/* 的 import 都收敛在本文件里。
  */
 import type { FileRef, Platform, WindowControls } from "./types"
-import { AUDIO_EXTENSIONS } from "./types"
+import { AUDIO_EXTENSIONS, PLAYLIST_EXTENSIONS } from "./types"
+import { decodeText } from "@/lib/text"
 
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
@@ -10,7 +11,7 @@ import { appDataDir } from "@tauri-apps/api/path"
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { getCurrentWebview } from "@tauri-apps/api/webview"
-import { open } from "@tauri-apps/plugin-dialog"
+import { open, save } from "@tauri-apps/plugin-dialog"
 import {
   BaseDirectory,
   exists,
@@ -38,6 +39,16 @@ async function refOf(path: string): Promise<FileRef> {
     size: info.size,
     mtime: info.mtime?.getTime() ?? 0,
   }
+}
+
+/** 取所在目录，不含末尾分隔符。两种分隔符都要认——m3u 里两种都见得到。 */
+function dirOf(path: string): string {
+  const i = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"))
+  return i < 0 ? "" : path.slice(0, i)
+}
+
+function isAbsolute(path: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(path) || path.startsWith("\\\\") || path.startsWith("/")
 }
 
 async function ensureCacheDir(): Promise<void> {
@@ -93,6 +104,54 @@ export function create(): Platform {
 
     async readFile(ref) {
       return fsReadFile(ref.id)
+    },
+
+    async readText(ref) {
+      return decodeText(await fsReadFile(ref.id))
+    },
+
+    async readSidecar(ref, ext) {
+      // 只换扩展名。Windows 文件系统不分大小写，.LRC 也能被 .lrc 找到
+      const path = `${ref.id.replace(/\.[^.\\/]+$/, "")}.${ext}`
+      try {
+        if (!(await exists(path))) return null
+        return decodeText(await fsReadFile(path))
+      } catch {
+        // 落在 fs scope 之外时会抛，这时当作没有外挂歌词
+        return null
+      }
+    },
+
+    async pickPlaylistFile() {
+      const picked = await open({
+        multiple: false,
+        directory: false,
+        filters: [{ name: "播放列表", extensions: [...PLAYLIST_EXTENSIONS] }],
+      })
+      if (!picked || Array.isArray(picked)) return null
+      return refOf(picked)
+    },
+
+    async saveText(suggestedName, text) {
+      const path = await save({
+        defaultPath: suggestedName,
+        filters: [{ name: "播放列表", extensions: [...PLAYLIST_EXTENSIONS] }],
+      })
+      if (!path) return false
+      await writeTextFile(path, text)
+      return true
+    },
+
+    async resolvePath(baseId, entry) {
+      const cleaned = entry.trim().replace(/^file:\/\/\/?/i, "")
+      if (!cleaned) return null
+      const abs = isAbsolute(cleaned) ? cleaned : `${dirOf(baseId)}/${cleaned}`
+      try {
+        if (!(await exists(abs))) return null
+        return await refOf(abs)
+      } catch {
+        return null
+      }
     },
 
     async readConfig<T>(name: string): Promise<T | null> {

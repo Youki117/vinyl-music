@@ -112,7 +112,11 @@ export async function readMetadata(ref: FileRef, bytes: Uint8Array): Promise<Tra
 
   let meta: IAudioMetadata
   try {
-    meta = await parseBlob(new Blob([bytes as BlobPart]))
+    // duration: true 是必须的。Ogg/Vorbis 的时长藏在最后一个页的 granule position 里，
+    // 不开这个选项 music-metadata 只读文件头，format.duration 会是 undefined ——
+    // 实测两个真实 ogg 都拿不到时长，列表里全显示 00:00。MP3 从帧头就能算，不受影响。
+    // 字节本来就已经全部在内存里，多扫一遍只花 CPU，不产生额外磁盘 IO。
+    meta = await parseBlob(new Blob([bytes as BlobPart]), { duration: true })
   } catch {
     return fallback
   }

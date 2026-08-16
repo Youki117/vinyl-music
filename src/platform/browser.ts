@@ -7,10 +7,13 @@
  *  - 窗口控制是空操作。
  */
 import type { FileRef, Platform, WindowControls } from "./types"
-import { isAudioFile } from "./types"
+import { isAudioFile, PLAYLIST_EXTENSIONS } from "./types"
+import { decodeText, stripExt } from "@/lib/text"
 
 /** id -> File。浏览器下没有路径，用这张表把 FileRef 还原成 File。 */
 const handles = new Map<string, File>()
+/** 文件名（小写）-> File。没有目录概念，只能靠同名来找外挂歌词。 */
+const byName = new Map<string, File>()
 const memCache = new Map<string, Uint8Array>()
 
 let seq = 0
@@ -18,6 +21,7 @@ let seq = 0
 function toRef(file: File): FileRef {
   const id = `blob:${++seq}:${file.name}`
   handles.set(id, file)
+  byName.set(file.name.toLowerCase(), file)
   return { id, name: file.name, size: file.size, mtime: file.lastModified }
 }
 
@@ -46,7 +50,13 @@ function openPicker(opts: { accept?: string; multiple?: boolean; directory?: boo
     }
     const onFocus = () => setTimeout(() => finish([]), 500)
 
-    input.addEventListener("change", () => finish(Array.from(input.files ?? [])))
+    input.addEventListener("change", () => {
+      const picked = Array.from(input.files ?? [])
+      // 先全部记名再交给调用方筛选：同一次选中的 .lrc 会被 isAudioFile 滤掉，
+      // 但它正是我们找外挂歌词时要查的东西
+      for (const f of picked) byName.set(f.name.toLowerCase(), f)
+      finish(picked)
+    })
     window.addEventListener("focus", onFocus, { once: true })
     input.click()
   })
@@ -70,7 +80,8 @@ export function create(): Platform {
     kind: "browser",
 
     async pickAudioFiles() {
-      const files = await openPicker({ accept: "audio/*", multiple: true })
+      // accept 里带上 .lrc，用户可以连歌词一起选进来
+      const files = await openPicker({ accept: "audio/*,.lrc", multiple: true })
       return files.filter((f) => isAudioFile(f.name)).map(toRef)
     },
 
@@ -88,6 +99,41 @@ export function create(): Platform {
       const file = handles.get(ref.id)
       if (!file) throw new Error(`浏览器会话中找不到文件句柄：${ref.name}（刷新页面后需重新导入）`)
       return new Uint8Array(await file.arrayBuffer())
+    },
+
+    async readText(ref) {
+      const file = handles.get(ref.id)
+      if (!file) throw new Error(`浏览器会话中找不到文件句柄：${ref.name}`)
+      return decodeText(new Uint8Array(await file.arrayBuffer()))
+    },
+
+    async readSidecar(ref, ext) {
+      // 没有目录概念，只能看这次会话里有没有导入过同名的那个文件
+      const file = byName.get(`${stripExt(ref.name)}.${ext}`.toLowerCase())
+      if (!file) return null
+      return decodeText(new Uint8Array(await file.arrayBuffer()))
+    },
+
+    async pickPlaylistFile() {
+      const [file] = await openPicker({ accept: PLAYLIST_EXTENSIONS.map((e) => `.${e}`).join(",") })
+      return file ? toRef(file) : null
+    },
+
+    async saveText(suggestedName, text) {
+      const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }))
+      const a = document.createElement("a")
+      a.href = url
+      a.download = suggestedName
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 10_000)
+      return true
+    },
+
+    async resolvePath() {
+      // 浏览器下没有真实路径，交给调用方按文件名兜底
+      return null
     },
 
     async readConfig<T>(name: string): Promise<T | null> {

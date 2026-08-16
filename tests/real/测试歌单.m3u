@@ -1,0 +1,12 @@
+#EXTM3U
+#PLAYLIST:手写的测试歌单
+# 这份是故意写得"不干净"的：混用正反斜杠、含一条已失效的路径、
+# 顺序与曲库里的添加顺序不同，用来验证导入的容错与顺序保持。
+#EXTINF:261,ProleteR - Downtown Irony
+ProleteR - Downtown Irony.ogg
+#EXTINF:233,Multi-Panel - Christmas with Mr. Rice
+.\Multi Panel - Christmas With Mr Rice.mp3
+#EXTINF:-1,这首在磁盘上不存在
+E:\某个已经不存在的盘\幽灵曲目.mp3
+#EXTINF:269,ProleteR - April Showers
+D:/别的机器上的路径/ProleteR - April Showers.mp3

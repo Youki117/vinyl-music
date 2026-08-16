@@ -30,6 +30,28 @@ export interface Platform {
   /** 读取文件全部字节。 */
   readFile(ref: FileRef): Promise<Uint8Array>
 
+  /** 读取文本文件，自动判码（UTF-8 / GBK / UTF-16）。 */
+  readText(ref: FileRef): Promise<string>
+
+  /**
+   * 读取与音频同名、只换扩展名的伴随文件（外挂歌词）。不存在返回 null。
+   *
+   * 网上下到的音频九成没有内嵌歌词，`歌名.lrc` 放在旁边才是通行做法。
+   */
+  readSidecar(ref: FileRef, ext: string): Promise<string | null>
+
+  /** 选一个播放列表文件（m3u / m3u8）。用户取消返回 null。 */
+  pickPlaylistFile(): Promise<FileRef | null>
+
+  /** 弹保存对话框写一个文本文件。用户取消返回 false。 */
+  saveText(suggestedName: string, text: string): Promise<boolean>
+
+  /**
+   * 把播放列表里的一条路径解析成 FileRef。
+   * 相对路径按 baseId 所在目录解析；解析不出或文件不存在时返回 null。
+   */
+  resolvePath(baseId: string, entry: string): Promise<FileRef | null>
+
   /** 读取一个 JSON 配置。不存在时返回 null。 */
   readConfig<T>(name: string): Promise<T | null>
   /** 写入一个 JSON 配置（实现需保证原子性）。 */
@@ -80,9 +102,25 @@ export interface WindowControls {
 /** 受支持的音频扩展名，不含点号，全小写。 */
 export const AUDIO_EXTENSIONS = ["mp3", "flac", "wav", "m4a", "aac", "ogg", "opus"] as const
 
-export function isAudioFile(name: string): boolean {
+/** 外挂歌词扩展名 */
+export const LYRIC_EXTENSIONS = ["lrc"] as const
+
+/** 播放列表扩展名 */
+export const PLAYLIST_EXTENSIONS = ["m3u", "m3u8"] as const
+
+function extOf(name: string): string {
   const dot = name.lastIndexOf(".")
-  if (dot < 0) return false
-  const ext = name.slice(dot + 1).toLowerCase()
-  return (AUDIO_EXTENSIONS as readonly string[]).includes(ext)
+  return dot < 0 ? "" : name.slice(dot + 1).toLowerCase()
+}
+
+export function isAudioFile(name: string): boolean {
+  return (AUDIO_EXTENSIONS as readonly string[]).includes(extOf(name))
+}
+
+export function isLyricFile(name: string): boolean {
+  return (LYRIC_EXTENSIONS as readonly string[]).includes(extOf(name))
+}
+
+export function isPlaylistFile(name: string): boolean {
+  return (PLAYLIST_EXTENSIONS as readonly string[]).includes(extOf(name))
 }

@@ -18,7 +18,7 @@ import MixPanel from "@/ui/panels/Mix"
 import { engine } from "@/audio/engine"
 import { usePlayer } from "@/store/player"
 import { useSkin } from "@/store/skin"
-import { isAudioFile, platform } from "@/platform"
+import { isAudioFile, isLyricFile, isPlaylistFile, platform } from "@/platform"
 
 export default function App() {
   const loadSkin = useSkin((s) => s.load)
@@ -34,6 +34,7 @@ export default function App() {
   const [skinOpen, setSkinOpen] = useState(false)
   const [playbackOpen, setPlaybackOpen] = useState(false)
   const [mixOpen, setMixOpen] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
 
   // 导入后队列还是空的话，直接把新导入的曲目接上，省得用户再去列表里点一次
   const importAndQueue = async (files: Parameters<typeof addFiles>[0]) => {
@@ -41,6 +42,11 @@ export default function App() {
     if (added.length > 0 && usePlayer.getState().queue.length === 0) {
       usePlayer.setState({ queue: added, index: 0 })
     }
+  }
+
+  const say = (msg: string) => {
+    setNotice(msg)
+    window.setTimeout(() => setNotice((n) => (n === msg ? null : n)), 3200)
   }
 
   useEffect(() => {
@@ -66,11 +72,30 @@ export default function App() {
   useEffect(() => {
     return platform.onFileDrop((files) => {
       const audio = files.filter((f) => isAudioFile(f.name))
+      const lrc = files.filter((f) => isLyricFile(f.name))
+      const m3u = files.find((f) => isPlaylistFile(f.name))
       const image = files.find((f) => /\.(png|jpe?g|webp|avif|bmp)$/i.test(f.name))
-      if (audio.length > 0) void importAndQueue(audio)
-      if (image) void setBackdrop(image)
+
+      void (async () => {
+        // 歌词要在音频入库之后才挂得上——同名匹配需要曲目已经存在
+        if (audio.length > 0) await importAndQueue(audio)
+        if (lrc.length > 0) {
+          const n = await useLibrary.getState().attachLyrics(lrc)
+          usePlayer.getState().refreshQueueMeta()
+          say(n > 0 ? `已挂上 ${n} 份歌词` : "没有找到同名的曲目，歌词未挂上")
+        }
+        if (m3u) {
+          const r = await useLibrary.getState().importPlaylist(m3u)
+          say(
+            r.playlistId
+              ? `已导入 ${r.matched} 首${r.missing > 0 ? `，${r.missing} 首找不到文件` : ""}`
+              : "歌单里的曲目一首都没找到",
+          )
+        }
+        if (image) await setBackdrop(image)
+      })()
     })
-    // importAndQueue 只读 store 的最新状态，不需要进依赖
+    // importAndQueue / say 只读 store 的最新状态，不需要进依赖
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setBackdrop])
 
@@ -186,6 +211,7 @@ export default function App() {
       )}
 
       {error && <div className="toast">{error}</div>}
+      {notice && !error && <div className="toast notice">{notice}</div>}
 
       <button className="sparkle" onClick={importBackdrop} aria-label="更换底图" title="更换底图">
         <svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true">
