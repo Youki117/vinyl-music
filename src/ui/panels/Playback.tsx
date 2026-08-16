@@ -2,7 +2,9 @@ import { useEffect, useState } from "react"
 
 import { engine } from "@/audio/engine"
 import { EQ_BANDS, EQ_MAX_DB, EQ_MIN_DB, EQ_PRESETS } from "@/audio/eq"
+import { formatTime } from "@/lib/format"
 import { usePlayer } from "@/store/player"
+import { useDismiss } from "../useDismiss"
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 const SLEEP_OPTIONS = [15, 30, 45, 60, 90]
@@ -20,7 +22,11 @@ export default function Playback({ open, onClose }: { open: boolean; onClose: ()
   const [device, setDevice] = useState(engine.outputDevice)
   const [deviceError, setDeviceError] = useState<string | null>(null)
 
+  const [loop, setLoop] = useState(engine.loop)
+  const rootRef = useDismiss<HTMLDivElement>(open, onClose)
+
   useEffect(() => engine.onSleepChange(setRemaining), [])
+  useEffect(() => engine.onLoopChange(setLoop), [])
 
   useEffect(() => {
     if (!open) return
@@ -42,7 +48,7 @@ export default function Playback({ open, onClose }: { open: boolean; onClose: ()
   }
 
   return (
-    <div className="drawer skin-editor" role="dialog" aria-label="播放设置">
+    <div ref={rootRef} className="drawer skin-editor" role="dialog" aria-label="播放设置">
       <header>
         <nav className="tabs">
           <button data-on>播放设置</button>
@@ -62,6 +68,31 @@ export default function Playback({ open, onClose }: { open: boolean; onClose: ()
           ))}
         </div>
         <p className="hint">变速不变调，1.5 倍速也不会把人声唱成花栗鼠。</p>
+
+        <p className="section-title">
+          A-B 循环
+          {loop.a !== null && (
+            <b>
+              {" · "}
+              {formatTime(loop.a)}
+              {loop.b !== null ? ` → ${formatTime(loop.b)}` : " → 等待 B 点"}
+            </b>
+          )}
+        </p>
+        <div className="chip-row">
+          <button onClick={() => engine.cycleLoop()} data-on={loop.a !== null}>
+            {loop.a === null ? "设 A 点" : loop.b === null ? "设 B 点" : "清除区间"}
+          </button>
+          {loop.a !== null && (
+            <button className="danger" onClick={() => engine.setLoop(null, null)}>
+              取消
+            </button>
+          )}
+        </div>
+        <p className="hint">
+          扒歌、练听力用得上：在想复读的段落头尾各点一次，播到 B 点会自动跳回 A 点。
+          按 <code>L</code> 也能设。换歌自动清除。
+        </p>
 
         <p className="section-title">
           睡眠定时器

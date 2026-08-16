@@ -376,7 +376,14 @@
   border-radius: 50%;
   transition:
     color 160ms ease,
+    background 160ms ease,
     transform 160ms ease;
+}
+
+/* 曲库抽屉开着时列表按钮保持点亮 */
+.controls button[data-on="true"] {
+  background: color-mix(in srgb, var(--ink-primary) 16%, transparent);
+  color: var(--ink-primary);
 }
 
 .controls button:hover {
@@ -431,6 +438,12 @@
   place-items: center;
   color: rgba(255, 255, 255, 0.75);
   border-radius: 4px;
+}
+
+/* 面板开着时对应的工具按钮保持点亮，用户才知道当前在哪一页 */
+.titlebar button[data-on="true"] {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
 }
 
 .titlebar button:hover {
@@ -982,6 +995,41 @@ header button.danger,
 /* 一般性提示（导入结果之类），比报错弱一档 */
 .toast.notice {
   background: rgba(16, 16, 16, 0.74);
+}
+
+/* A-B 循环在进度条上的标记 */
+.loop-mark {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 9px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: #b2845f;
+  pointer-events: none;
+}
+
+.loop-span {
+  position: absolute;
+  top: 0;
+  height: 3px;
+  background: rgba(178, 132, 95, 0.5);
+  pointer-events: none;
+}
+
+/* 拖拽排序：被拖的那行淡出，落点画一条线 */
+.lib-main ol li[data-dragging="true"] {
+  opacity: 0.35;
+}
+
+.lib-main ol li[data-drop-before="true"]::before,
+.lib-main ol li[data-drop-after="true"]::after {
+  content: "";
+  display: block;
+  height: 2px;
+  margin: 0 10px;
+  border-radius: 1px;
+  background: #b2845f;
 }
 
 /* 曲库抽屉的操作行。按钮多于一行放得下时自动换行，不去挤压搜索框与关闭按钮 */

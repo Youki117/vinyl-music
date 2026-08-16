@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 
 import { engine } from "@/audio/engine"
 import { useProgress } from "@/audio/useProgress"
@@ -15,6 +15,9 @@ export default function Progress({ children }: { children?: ReactNode }) {
   const barRef = useRef<HTMLDivElement>(null)
   const { frac: progress, time, duration: engineDuration } = useProgress()
   const track = usePlayer((s) => s.current())
+  const [loop, setLoop] = useState(engine.loop)
+
+  useEffect(() => engine.onLoopChange(setLoop), [])
 
   // 曲目还没载入时引擎时长是 0，退回元数据里的时长 ——
   // 否则选中一首歌但没按播放，总时长会一直显示 00:00
@@ -28,7 +31,9 @@ export default function Progress({ children }: { children?: ReactNode }) {
   }
 
   return (
-    <div className="playback">
+    // data-keep-panel：整条传输栏是常驻操控件。混音面板开着时本来就要一边拖
+    // 进度条一边看时间轴，把它算成"面板外的空白处"会让面板一碰就关。
+    <div className="playback" data-keep-panel>
       <div className="wave-row" style={{ ["--playhead" as string]: `${progress * 100}%` }}>
         <Waveform progress={progress} />
       </div>
@@ -55,6 +60,24 @@ export default function Progress({ children }: { children?: ReactNode }) {
         }}
       >
         <div className="progress-fill" style={{ width: `${progress * 100}%` }} />
+
+        {/* A-B 循环区间：在进度条上标出来，否则用户不知道自己设在哪儿了 */}
+        {duration > 0 && loop.a !== null && (
+          <div className="loop-mark loop-a" style={{ left: `${(loop.a / duration) * 100}%` }} title="A 点" />
+        )}
+        {duration > 0 && loop.a !== null && loop.b !== null && (
+          <>
+            <div className="loop-mark loop-b" style={{ left: `${(loop.b / duration) * 100}%` }} title="B 点" />
+            <div
+              className="loop-span"
+              style={{
+                left: `${(loop.a / duration) * 100}%`,
+                width: `${((loop.b - loop.a) / duration) * 100}%`,
+              }}
+            />
+          </>
+        )}
+
         <div className="progress-thumb" style={{ left: `${progress * 100}%` }} />
       </div>
 

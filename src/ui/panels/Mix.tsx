@@ -16,6 +16,7 @@ import { useLibrary } from "@/store/library"
 import { useMix } from "@/store/mix"
 import { usePlayer } from "@/store/player"
 import Timeline from "./Timeline"
+import { useDismiss } from "../useDismiss"
 
 /**
  * 混音面板：在当前曲目之上叠加其他音轨，按片段编排。
@@ -43,6 +44,7 @@ export default function Mix({ open, onClose }: { open: boolean; onClose: () => v
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null)
   const [peaks, setPeaks] = useState<Float32Array | null>(null)
   const { time } = useProgress()
+  const rootRef = useDismiss<HTMLDivElement>(open, onClose)
 
   const layers = mix?.layers ?? []
   const layer = layers.find((l) => l.id === selectedLayerId) ?? layers[0] ?? null
@@ -76,7 +78,7 @@ export default function Mix({ open, onClose }: { open: boolean; onClose: () => v
   const apply = (next: Clip[]) => layer && setClips(layer.id, next)
 
   return (
-    <div className="drawer skin-editor mix-panel" role="dialog" aria-label="混音">
+    <div ref={rootRef} className="drawer skin-editor mix-panel" role="dialog" aria-label="混音">
       <header>
         <nav className="tabs">
           <button data-on>混音</button>

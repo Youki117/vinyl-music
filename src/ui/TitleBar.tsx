@@ -1,20 +1,35 @@
 import { platform } from "@/platform"
 import VolumeControl from "./VolumeControl"
 
-/** E15：无边框窗口的自绘控制条。悬停才显现，不打扰画面。 */
+/**
+ * E15：无边框窗口的自绘控制条。悬停才显现，不打扰画面。
+ *
+ * 整条标记 data-keep-panel：这里是常驻工具栏，点它是"换一个面板"或"调音量"，
+ * 不是"点到面板外面去了"，不该触发关闭。
+ */
 export default function TitleBar({
   onOpenPlayback,
   onOpenSkin,
   onOpenMix,
+  active,
 }: {
   onOpenPlayback?: () => void
   onOpenSkin?: () => void
   onOpenMix?: () => void
+  /** 当前打开的面板，用来给对应按钮加选中态 */
+  active?: string | null
 }) {
   return (
-    <div className="titlebar" data-tauri-drag-region>
+    <div className="titlebar" data-tauri-drag-region data-keep-panel>
       <VolumeControl />
-      <button className="tb-tool" onClick={onOpenPlayback} aria-label="播放设置" title="播放设置 (E)">
+      <button
+        className="tb-tool"
+        data-on={active === "playback"}
+        onClick={onOpenPlayback}
+        aria-label="播放设置"
+        aria-pressed={active === "playback"}
+        title="播放设置 (E)"
+      >
         <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
           <path
             fill="none"
@@ -28,7 +43,14 @@ export default function TitleBar({
           <circle cx="14" cy="17" r="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
         </svg>
       </button>
-      <button className="tb-tool" onClick={onOpenSkin} aria-label="皮肤设置" title="皮肤设置 (S)">
+      <button
+        className="tb-tool"
+        data-on={active === "skin"}
+        onClick={onOpenSkin}
+        aria-label="皮肤设置"
+        aria-pressed={active === "skin"}
+        title="皮肤设置 (S)"
+      >
         <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
           <path
             fill="none"
@@ -40,7 +62,14 @@ export default function TitleBar({
           <path fill="none" stroke="currentColor" strokeWidth="1.6" d="m15 5.5 3.5 3.5" />
         </svg>
       </button>
-      <button className="tb-tool" onClick={onOpenMix} aria-label="混音" title="混音 (X)">
+      <button
+        className="tb-tool"
+        data-on={active === "mix"}
+        onClick={onOpenMix}
+        aria-label="混音"
+        aria-pressed={active === "mix"}
+        title="混音 (X)"
+      >
         <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
           <path
             fill="none"

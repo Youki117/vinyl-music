@@ -4,6 +4,7 @@ import { platform } from "@/platform"
 import { labelBackground } from "@/skin/resolve"
 import { useSkin } from "@/store/skin"
 import AiTab from "./AiTab"
+import { useDismiss } from "../useDismiss"
 
 /**
  * 皮肤面板：导入底图、调整取景框、调蒙版参数、改文案。
@@ -23,6 +24,7 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
   const [tab, setTab] = useState<"image" | "veil" | "text" | "ai">("image")
 
   const dragRef = useRef<{ mode: "backdrop" | "label"; x: number; y: number } | null>(null)
+  const rootRef = useDismiss<HTMLDivElement>(open, onClose)
 
   if (!open) return null
 
@@ -66,7 +68,7 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
   }
 
   return (
-    <div className="drawer skin-editor" role="dialog" aria-label="皮肤设置">
+    <div ref={rootRef} className="drawer skin-editor" role="dialog" aria-label="皮肤设置">
       <header>
         <nav className="tabs">
           <button data-on={tab === "image"} onClick={() => setTab("image")}>

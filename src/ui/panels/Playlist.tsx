@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 
 import { platform } from "@/platform"
 import { formatTime } from "@/lib/format"
@@ -11,6 +11,7 @@ import {
   type Track,
 } from "@/store/library"
 import { usePlayer } from "@/store/player"
+import { useDismiss } from "../useDismiss"
 
 const SORT_KEYS: SortKey[] = ["added", "title", "artist", "album", "duration", "playCount", "lastPlayed"]
 
@@ -23,6 +24,11 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
   const [menu, setMenu] = useState<{ track: Track; x: number; y: number } | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
+  const [drag, setDrag] = useState<{ from: number; to: number } | null>(null)
+  const listRef = useRef<HTMLOListElement>(null)
+  const rootRef = useDismiss<HTMLDivElement>(open, onClose)
+  // 右键菜单点哪儿都该收起来，包括抽屉内部，所以不豁免常驻区
+  const menuRef = useDismiss<HTMLDivElement>(menu !== null, () => setMenu(null), false)
 
   if (!open) return null
 
@@ -47,8 +53,58 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
   const exportM3u = () =>
     void lib.exportPlaylist().then((ok) => setNote(ok ? "已导出" : "当前列表是空的"))
 
+  // 只有自建歌单里"顺序"才是用户定的；虚拟歌单与排序视图下拖动没有意义
+  const canReorder = inPlaylist && lib.sort === "added" && !lib.filter.trim()
+
+  /** 指针落在列表的哪个插入位（0..rows.length） */
+  const dropIndexAt = (clientY: number): number => {
+    const items = Array.from(listRef.current?.querySelectorAll("li") ?? [])
+    for (let i = 0; i < items.length; i++) {
+      const r = items[i].getBoundingClientRect()
+      if (clientY < r.top + r.height / 2) return i
+    }
+    return items.length
+  }
+
+  /**
+   * 按住拖动排序。
+   *
+   * 用指针事件而不是 HTML5 draggable：Tauri 开了 dragDropEnabled 接管系统级拖放，
+   * 页面内的 dragstart 行为不稳；而且自己算插入位才好画落点指示线。
+   *
+   * 超过 4px 才认作拖动，否则会把双击播放一起吃掉。
+   */
+  const beginDrag = (e: React.PointerEvent, from: number) => {
+    if (!canReorder || e.button !== 0) return
+    const startY = e.clientY
+    const el = e.currentTarget as HTMLElement
+    let active = false
+
+    const move = (ev: PointerEvent) => {
+      if (!active && Math.abs(ev.clientY - startY) < 4) return
+      if (!active) {
+        active = true
+        el.setPointerCapture(ev.pointerId)
+      }
+      setDrag({ from, to: dropIndexAt(ev.clientY) })
+    }
+    const up = (ev: PointerEvent) => {
+      document.removeEventListener("pointermove", move)
+      document.removeEventListener("pointerup", up)
+      if (!active) return
+      const to = dropIndexAt(ev.clientY)
+      setDrag(null)
+      // 落在自己原位或紧邻的下一格，位置其实没变
+      if (to !== from && to !== from + 1) {
+        lib.reorderInPlaylist(lib.activeView, from, to > from ? to - 1 : to)
+      }
+    }
+    document.addEventListener("pointermove", move)
+    document.addEventListener("pointerup", up)
+  }
+
   return (
-    <div className="drawer library-drawer" role="dialog" aria-label="曲库">
+    <div ref={rootRef} className="drawer library-drawer" role="dialog" aria-label="曲库">
       <aside className="lib-side">
         <div className="lib-side-group">
           {VIRTUAL_VIEWS.map((v) => (
@@ -165,16 +221,25 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
           </p>
         )}
 
-        <ol onClick={() => setMenu(null)}>
+        <ol ref={listRef} onClick={() => setMenu(null)}>
           {rows.map((t, i) => (
-            <li key={t.id} data-active={t.id === currentId} data-missing={t.missing}>
+            <li
+              key={t.id}
+              data-active={t.id === currentId}
+              data-missing={t.missing}
+              data-dragging={drag?.from === i}
+              data-drop-before={drag?.to === i}
+              data-drop-after={drag !== null && drag.to === rows.length && i === rows.length - 1}
+            >
               <button
                 className="row"
                 onDoubleClick={() => void playFrom(rows, i)}
+                onPointerDown={(e) => beginDrag(e, i)}
                 onContextMenu={(e) => {
                   e.preventDefault()
                   setMenu({ track: t, x: e.clientX, y: e.clientY })
                 }}
+                title={canReorder ? "双击播放，按住拖动可排序" : "双击播放"}
               >
                 <b>{t.title}</b>
                 <span>{t.artist}</span>
@@ -192,7 +257,12 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
       </section>
 
       {menu && (
-        <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={() => setMenu(null)}>
+        <div
+          ref={menuRef}
+          className="ctx-menu"
+          style={{ left: menu.x, top: menu.y }}
+          onClick={() => setMenu(null)}
+        >
           <button onClick={() => void playFrom(rows, rows.indexOf(menu.track))}>播放</button>
           <button onClick={() => playNext(menu.track)}>下一首播放</button>
           <button onClick={() => lib.toggleLike(menu.track.id)}>

@@ -20,6 +20,9 @@ import { usePlayer } from "@/store/player"
 import { useSkin } from "@/store/skin"
 import { isAudioFile, isLyricFile, isPlaylistFile, platform } from "@/platform"
 
+/** 右侧抽屉同一时刻只能开一个 */
+type PanelId = "playlist" | "skin" | "playback" | "mix" | null
+
 export default function App() {
   const loadSkin = useSkin((s) => s.load)
   const setBackdrop = useSkin((s) => s.setBackdrop)
@@ -30,11 +33,14 @@ export default function App() {
   const prev = usePlayer((s) => s.prev)
   const error = usePlayer((s) => s.error)
   const queueLength = usePlayer((s) => s.queue.length)
-  const [playlistOpen, setPlaylistOpen] = useState(false)
-  const [skinOpen, setSkinOpen] = useState(false)
-  const [playbackOpen, setPlaybackOpen] = useState(false)
-  const [mixOpen, setMixOpen] = useState(false)
+  // 四个抽屉都在右侧同一位置，本来就只能显示一个。
+  // 之前用四个布尔量拼 `open={a && !b && !c}`，被盖住的那个状态还是 true，
+  // 关掉上面那个它就自己冒出来了 —— 换成单一状态，互斥是结构自带的。
+  const [panel, setPanel] = useState<PanelId>(null)
   const [notice, setNotice] = useState<string | null>(null)
+
+  const togglePanel = (id: Exclude<PanelId, null>) =>
+    setPanel((cur) => (cur === id ? null : id))
 
   // 导入后队列还是空的话，直接把新导入的曲目接上，省得用户再去列表里点一次
   const importAndQueue = async (files: Parameters<typeof addFiles>[0]) => {
@@ -139,27 +145,29 @@ export default function App() {
         case "M":
           p.toggleMute()
           break
+        case "l":
+        case "L":
+          // 依次是：设 A → 设 B → 清除
+          engine.cycleLoop()
+          break
         case "p":
         case "P":
-          setPlaylistOpen((v) => !v)
+          togglePanel("playlist")
           break
         case "s":
         case "S":
-          setSkinOpen((v) => !v)
+          togglePanel("skin")
           break
         case "e":
         case "E":
-          setPlaybackOpen((v) => !v)
+          togglePanel("playback")
           break
         case "x":
         case "X":
-          setMixOpen((v) => !v)
+          togglePanel("mix")
           break
         case "Escape":
-          setPlaylistOpen(false)
-          setSkinOpen(false)
-          setPlaybackOpen(false)
-          setMixOpen(false)
+          setPanel(null)
           break
       }
     }
@@ -172,21 +180,22 @@ export default function App() {
     const ref = await platform.pickImage()
     if (ref) {
       await setBackdrop(ref)
-      setSkinOpen(true)
+      setPanel("skin")
     }
   }
 
   return (
     <Stage>
       <TitleBar
-        onOpenPlayback={() => setPlaybackOpen(true)}
-        onOpenSkin={() => setSkinOpen(true)}
-        onOpenMix={() => setMixOpen(true)}
+        onOpenPlayback={() => togglePanel("playback")}
+        onOpenSkin={() => togglePanel("skin")}
+        onOpenMix={() => togglePanel("mix")}
+        active={panel}
       />
       <Masthead />
       <Lyrics />
       <div className="disc-ring" />
-      <Disc onToggle={toggle} onContextMenu={() => setSkinOpen(true)} />
+      <Disc onToggle={toggle} onContextMenu={() => setPanel("skin")} />
       <div className="disc-lighting" />
       <Actions />
       <Progress>
@@ -194,7 +203,8 @@ export default function App() {
           onToggle={toggle}
           onPrev={() => void prev()}
           onNext={() => void next()}
-          onOpenPlaylist={() => setPlaylistOpen(true)}
+          onOpenPlaylist={() => togglePanel("playlist")}
+          playlistOpen={panel === "playlist"}
         />
       </Progress>
 
@@ -213,7 +223,14 @@ export default function App() {
       {error && <div className="toast">{error}</div>}
       {notice && !error && <div className="toast notice">{notice}</div>}
 
-      <button className="sparkle" onClick={importBackdrop} aria-label="更换底图" title="更换底图">
+      {/* 常驻操控件，点它不该被当成"点了面板外面" */}
+      <button
+        className="sparkle"
+        data-keep-panel
+        onClick={importBackdrop}
+        aria-label="更换底图"
+        title="更换底图"
+      >
         <svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true">
           <path
             fill="currentColor"
@@ -222,14 +239,10 @@ export default function App() {
         </svg>
       </button>
 
-      {/* 抽屉都在右侧，同时打开会叠在一起，所以互斥 */}
-      <Playlist
-        open={playlistOpen && !skinOpen && !playbackOpen && !mixOpen}
-        onClose={() => setPlaylistOpen(false)}
-      />
-      <SkinEditor open={skinOpen && !playbackOpen && !mixOpen} onClose={() => setSkinOpen(false)} />
-      <Playback open={playbackOpen && !mixOpen} onClose={() => setPlaybackOpen(false)} />
-      <MixPanel open={mixOpen} onClose={() => setMixOpen(false)} />
+      <Playlist open={panel === "playlist"} onClose={() => setPanel(null)} />
+      <SkinEditor open={panel === "skin"} onClose={() => setPanel(null)} />
+      <Playback open={panel === "playback"} onClose={() => setPanel(null)} />
+      <MixPanel open={panel === "mix"} onClose={() => setPanel(null)} />
     </Stage>
   )
 }

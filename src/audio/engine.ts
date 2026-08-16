@@ -261,7 +261,53 @@ class Engine {
   private emitProgress(): void {
     const t = this.currentTime
     const d = this.duration
+
+    // A-B 循环：放到 B 点就跳回 A。判定放在这里而不是 store 里，
+    // 因为 timeupdate 每秒来四次，比 rAF 更省，也不依赖界面是否打开。
+    const { a, b } = this._loop
+    if (a !== null && b !== null && b > a && t >= b) {
+      this.seekSeconds(a)
+      return
+    }
+
     for (const fn of this.progressListeners) fn(t, d)
+  }
+
+  /** A-B 循环区间，秒。两者都设上且 b > a 才生效。 */
+  private _loop: { a: number | null; b: number | null } = { a: null, b: null }
+  private loopListeners = new Set<(loop: { a: number | null; b: number | null }) => void>()
+
+  get loop(): { a: number | null; b: number | null } {
+    return this._loop
+  }
+
+  setLoop(a: number | null, b: number | null): void {
+    this._loop = { a, b }
+    for (const fn of this.loopListeners) fn(this._loop)
+  }
+
+  /** 依次调用：设 A → 设 B → 清除。一个按钮走完整个循环。 */
+  cycleLoop(): void {
+    const { a, b } = this._loop
+    if (a === null) this.setLoop(this.currentTime, null)
+    else if (b === null) {
+      const t = this.currentTime
+      // B 必须在 A 之后；点反了就当作重设 A，别让用户对着一个无效区间发愣
+      if (t > a + 0.5) this.setLoop(a, t)
+      else this.setLoop(t, null)
+    } else this.setLoop(null, null)
+  }
+
+  onLoopChange(fn: (loop: { a: number | null; b: number | null }) => void): () => void {
+    this.loopListeners.add(fn)
+    fn(this._loop)
+    return () => this.loopListeners.delete(fn)
+  }
+
+  /** 跳到绝对秒数 */
+  seekSeconds(sec: number): void {
+    const d = this.duration
+    if (d > 0) this.seek(Math.min(1, Math.max(0, sec / d)))
   }
 
   private revoke(): void {
@@ -288,6 +334,9 @@ class Engine {
 
     const bytes = await platform.readFile(ref)
     this.revoke()
+    // A-B 区间是按秒记的，换了曲目就没有意义了，必须清掉 ——
+    // 否则新歌会在上一首的 B 点位置莫名其妙往回跳
+    this.setLoop(null, null)
     this.objectUrl = URL.createObjectURL(new Blob([bytes as BlobPart]))
     this.el.src = this.objectUrl
 
