@@ -202,6 +202,20 @@ check(
 )
 
 // ── 五、换底图（核心需求）────────────────────────────────────────
+/** 从蒙版画布不透明的那一侧读一个像素，看实际画出来的颜色 */
+const veilPixel = () =>
+  page.evaluate(() => {
+    const c = document.querySelector("canvas.veil")
+    if (!c || !c.width) return null
+    const gl = c.getContext("webgl2", { preserveDrawingBuffer: true })
+    if (!gl) return null
+    const px = new Uint8Array(4)
+    // 左侧 8% 处，蒙版在这一带是接近满不透明的
+    gl.readPixels(Math.round(c.width * 0.08), Math.round(c.height / 2), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px)
+    return [px[0], px[1], px[2], px[3]]
+  })
+
+const tintBefore = await veilPixel()
 const skinBefore = await readSkin(page)
 const c1 = page.waitForEvent("filechooser")
 await page.click('button[aria-label="更换底图"]')
@@ -214,6 +228,46 @@ check("底图铺上去了", skin1.backdropCount > 0)
 check("底图 cover 铺满", skin1.backdropSize === "cover")
 check("唱片贴纸自动跟随底图切换", skin1.labelUrl === skin1.backdropUrl && skin1.labelUrl !== "")
 check("文字配色随底图重推", skin1.inkPrimary !== "" && skin1.inkPrimary !== skinBefore.inkPrimary)
+
+// 蒙版自动取色：默认开启，设了底图就该立刻用底图的主色，不需要用户去开开关
+{
+  const tintAfter = await veilPixel()
+  // 换底图**不会**自动弹面板了（这正是这轮改掉的行为），要自己开
+  await page.keyboard.press("s")
+  await page.waitForTimeout(500)
+  const swatches = await page.evaluate(async () => {
+    const tabs = document.querySelectorAll(".skin-editor .tabs button")
+    tabs[1]?.click() // 蒙版页
+    await new Promise((r) => setTimeout(r, 300))
+    return Array.from(document.querySelectorAll(".tint-swatches span")).map(
+      (e) => getComputedStyle(e).backgroundColor,
+    )
+  })
+  const moved =
+    tintBefore && tintAfter
+      ? Math.max(...[0, 1, 2].map((i) => Math.abs(tintAfter[i] - tintBefore[i])))
+      : 0
+  console.log(`\n蒙版取色：像素 ${tintBefore?.join(",")} → ${tintAfter?.join(",")}（差 ${moved}）`)
+  console.log(`面板色块：${swatches.join("  ")}`)
+
+  // 这条以前写的是 `new Set(swatches).size >= 2`，太松：三个只差一两个通道值的颜色
+  // 也是三个不同字符串，断言照过，而面板上肉眼就是同一个色块 —— 实际就这么漏过去了。
+  // 改成量距离。
+  const rgbOf = (s) => (s.match(/\d+/g) ?? []).map(Number)
+  const pairGaps = []
+  for (let i = 0; i < swatches.length; i++) {
+    for (let j = i + 1; j < swatches.length; j++) {
+      const a = rgbOf(swatches[i])
+      const b = rgbOf(swatches[j])
+      pairGaps.push(Math.round(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])))
+    }
+  }
+  const minGap = pairGaps.length ? Math.min(...pairGaps) : 0
+
+  check("从底图提取出了三个主色", swatches.length === 3, `${swatches.length} 个`)
+  check("三个色块肉眼分得出来（不是三个相邻色阶）", minGap >= 25, `最近两色距离 ${minGap}：${swatches.join(" / ")}`)
+  check("自动取色真的作用到了蒙版画布上（不是只显示在面板里）", moved >= 8, `最大通道差 ${moved}`)
+}
 
 // 再换一张，确认是"可随意切换"而不是只能设一次
 await page.keyboard.press("Escape")

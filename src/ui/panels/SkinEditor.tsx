@@ -22,6 +22,7 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
   const patchVeil = useSkin((s) => s.patchVeil)
   const patchSkin = useSkin((s) => s.patchSkin)
   const skins = useSkin((s) => s.skins)
+  const tintColors = useSkin((s) => s.tintColors)
   const saveAs = useSkin((s) => s.saveAs)
   const activate = useSkin((s) => s.activate)
   const removeSkin = useSkin((s) => s.removeSkin)
@@ -204,13 +205,41 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
               onChange={(ripple) => patchVeil({ ripple })}
             />
             <label className="row-field">
-              <span>蒙版色</span>
+              <span>自动从底图取色</span>
+              <input
+                type="checkbox"
+                checked={skin.tintAuto}
+                onChange={(e) => patchSkin({ tintAuto: e.target.checked })}
+              />
+            </label>
+
+            {skin.tintAuto &&
+              (tintColors.length > 0 ? (
+                <div className="tint-swatches" aria-label="从底图取到的三个主色">
+                  {tintColors.map((c, i) => (
+                    <span key={`${c}-${i}`} style={{ background: c }} title={`第 ${i + 1} 段 ${c}`} />
+                  ))}
+                  <em>按播放进度依次切换，每色 1/3 时长</em>
+                </div>
+              ) : (
+                <p className="hint">还没有底图，取不到色 —— 先在「底图」页选一张图。</p>
+              ))}
+
+            {/* 取色开着时也保留这个色板：动它就是"我要自己来"，patchVeil 会自动把上面
+                那个开关关掉。这比逼用户先找开关再调色顺手。 */}
+            <label className="row-field">
+              <span>蒙版色{skin.tintAuto && "（手动）"}</span>
               <input
                 type="color"
                 value={skin.veil.tint}
                 onChange={(e) => patchVeil({ tint: e.target.value })}
               />
             </label>
+
+            <p className="hint">
+              自动取色只影响蒙版颜色，而且<b>不会写进皮肤</b>。你一旦动了上面的色板，
+              自动取色就自动关掉、以你选的为准；想让它接管回去，把开关打开即可。
+            </p>
             <p className="hint">不透明度上限 0.92：底图必须能透出来，做成纯白就失去层次了。</p>
 
             <p className="section-title">预设</p>

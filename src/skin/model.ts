@@ -37,6 +37,16 @@ export type Skin = {
     focus: LabelFocus
   }
   veil: VeilParams
+  /**
+   * 蒙版色是否自动从底图取。
+   *
+   * 开启时忽略 `veil.tint`，改用从底图提取的三个主色，按播放进度每首歌切三次。
+   * 用户一旦手动调过蒙版色就自动关掉 —— 用户的选择优先级更高，面板上有开关能开回来。
+   *
+   * 放在 Skin 而不是 VeilParams 里：VeilParams 是喂给渲染器的，渲染器不该看见
+   * 一个它永远用不上的开关。预设套用时单独带上它（见 store/skin.ts 的 applyVeilFrom）。
+   */
+  tintAuto: boolean
   ink: Ink
   text: SkinText
 }
@@ -54,6 +64,8 @@ export const DEFAULT_SKIN: Skin = {
   backdropFocus: { x: 0.5, y: 0.5 },
   label: { source: "backdrop", focus: { ...DEFAULT_LABEL_FOCUS } },
   veil: { ...DEFAULT_VEIL },
+  // 默认开：用户导入一张图就该立刻看到蒙版跟着变，不用先去翻设置
+  tintAuto: true,
   ink: {
     auto: true,
     primary: "#3a3a37",

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 
 import { useStageFit } from "./useStageFit"
+import { useTintPhase } from "./useTintPhase"
 import { VeilRenderer } from "./veil/renderer"
 import { useSkin } from "@/store/skin"
 
@@ -25,6 +26,19 @@ export default function Veil() {
   const [fallback, setFallback] = useState(false)
   const fit = useStageFit()
   const veil = useSkin((s) => s.skin.veil)
+
+  /*
+   * 蒙版色：自动取色开着且真的取到了色，就用底图的主色，按播放进度每首歌换三次；
+   * 否则用皮肤里存的 tint。
+   *
+   * 自动色**只在这里生效，不写回皮肤**。写回去的话一首歌要往配置里落三次盘，
+   * 还会把用户存在预设里的颜色悄悄改掉 —— 那正是"用户优先"要防的事。
+   */
+  const tintAuto = useSkin((s) => s.skin.tintAuto)
+  const tintColors = useSkin((s) => s.tintColors)
+  const autoOn = tintAuto && tintColors.length > 0
+  const phase = useTintPhase(autoOn, tintColors.length || 3)
+  const tint = autoOn ? tintColors[Math.min(phase, tintColors.length - 1)] : veil.tint
 
   // 渲染器的生命周期与 canvas 绑定，与参数变化无关
   useEffect(() => {
@@ -55,9 +69,9 @@ export default function Veil() {
     const r = rendererRef.current
     if (!r) return
     r.resize(fit.veilW, fit.veilH)
-    r.setParams(veil)
+    r.setParams({ ...veil, tint })
     r.render()
-  }, [fallback, fit.veilW, fit.veilH, veil])
+  }, [fallback, fit.veilW, fit.veilH, veil, tint])
 
   if (fallback) {
     return (
@@ -65,8 +79,8 @@ export default function Veil() {
         className="layer veil-fallback"
         style={{
           background: `linear-gradient(100deg,
-            ${veil.tint} 0%,
-            ${veil.tint} ${(veil.edgeX - veil.softness) * 100}%,
+            ${tint} 0%,
+            ${tint} ${(veil.edgeX - veil.softness) * 100}%,
             transparent ${(veil.edgeX + veil.softness) * 100}%)`,
           opacity: veil.opacity,
         }}

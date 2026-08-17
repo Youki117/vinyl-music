@@ -3,7 +3,7 @@ import { FastAverageColor } from "fast-average-color"
 
 import { platform, toObjectUrl, type FileRef } from "@/platform"
 import { DEFAULT_SKIN, makeSkin, migrateSkins, SKIN_SCHEMA_VERSION, type Skin, type SkinsFile } from "@/skin/model"
-import { deriveInk } from "@/skin/palette"
+import { deriveInk, dominantColors, veilTintsFrom } from "@/skin/palette"
 import { labelSourceId } from "@/skin/resolve"
 import type { VeilParams } from "@/stage/veil/renderer"
 
@@ -17,6 +17,13 @@ type SkinState = {
   label: LoadedImage | null
   /** 切换底图时的旧图，用于交叉淡入 */
   fading: LoadedImage | null
+  /**
+   * 从当前底图提取的三个主色（已按蒙版可用性调过，见 veilTintFrom）。
+   *
+   * 派生数据，不落盘：底图换了就该重新取，存下来只会和底图对不上。
+   * 没有底图或提取失败时是空数组，此时 tintAuto 形同关闭。
+   */
+  tintColors: string[]
 
   load(): Promise<void>
   setBackdrop(ref: FileRef): Promise<void>
@@ -111,6 +118,7 @@ export const useSkin = create<SkinState>((set, get) => ({
   backdrop: null,
   label: null,
   fading: null,
+  tintColors: [],
 
   async load() {
     const raw = await platform.readConfig<SkinsFile>("skins")
@@ -143,7 +151,16 @@ export const useSkin = create<SkinState>((set, get) => ({
   },
 
   patchVeil(p) {
-    set((s) => ({ skin: { ...s.skin, veil: { ...s.skin.veil, ...p } } }))
+    set((s) => ({
+      skin: {
+        ...s.skin,
+        veil: { ...s.skin.veil, ...p },
+        // 用户手调了蒙版色 → 自动取色让位。规则放在这里而不是面板里，
+        // 这样任何改 tint 的路径都自动遵守，不会漏掉某个入口。
+        // 其余参数（羽化、边缘、起伏）与取色无关，不影响开关。
+        tintAuto: p.tint !== undefined ? false : s.skin.tintAuto,
+      },
+    }))
     scheduleSave(get)
   },
 
@@ -196,11 +213,48 @@ export const useSkin = create<SkinState>((set, get) => ({
   async applyVeilFrom(id) {
     const src = get().skins.find((s) => s.id === id)
     if (!src) return
-    set((s) => ({ skin: { ...s.skin, veil: { ...src.veil } } }))
+    // tintAuto 跟着一起搬：预设如果是在自动取色下存的，里面那个 tint 本来就是算出来的、
+    // 没有意义；反过来如果是手调后存的，就该保持手动。让预设携带它自己的意图。
+    set((s) => ({ skin: { ...s.skin, veil: { ...src.veil }, tintAuto: src.tintAuto } }))
     await refreshImages(set, get)
     scheduleSave(get)
   },
 }))
+
+/**
+ * 从底图左侧区域提取三个可用作蒙版色的主色。
+ *
+ * 缩到 96px 宽再取样：主色调不需要全分辨率，一张 4K 底图逐像素统计要几千万次循环，
+ * 而缩图之后结果几乎一样。只取左 40%，与自动配色保持同一块区域。
+ */
+async function extractTints(img: LoadedImage): Promise<string[]> {
+  try {
+    const W = 96
+    const H = Math.max(1, Math.round((img.height / Math.max(1, img.width)) * W))
+    const canvas = document.createElement("canvas")
+    canvas.width = W
+    canvas.height = H
+    const ctx = canvas.getContext("2d", { willReadFrequently: true })
+    if (!ctx) return []
+
+    const bitmap = new Image()
+    await new Promise<void>((resolve, reject) => {
+      bitmap.onload = () => resolve()
+      bitmap.onerror = () => reject(new Error("取色时图片加载失败"))
+      bitmap.src = img.url
+    })
+    ctx.drawImage(bitmap, 0, 0, W, H)
+
+    const left = Math.max(1, Math.round(W * 0.4))
+    const { data } = ctx.getImageData(0, 0, left, H)
+    // 整组一起过，不是逐个 map：明暗要在三个色之间摊开，逐个处理会全挤到一起
+    return veilTintsFrom(dominantColors(data, 3))
+  } catch (err) {
+    // 取不到色就退回手动 tint，不该让整个换图流程失败
+    console.warn("[skin] 蒙版取色失败", err)
+    return []
+  }
+}
 
 async function refreshImages(
   set: (p: Partial<SkinState>) => void,
@@ -213,6 +267,10 @@ async function refreshImages(
     const backdrop = await loadImage(skin.backdrop)
     const label = await loadImage(labelSourceId(skin))
     set({ backdrop, label })
+
+    // 蒙版自动取色：和下面的自动配色取同一块区域（蒙版盖住的左侧），
+    // 否则会出现"取的是右半边的颜色、盖的是左半边"这种对不上的情况
+    set({ tintColors: backdrop ? await extractTints(backdrop) : [] })
 
     // 自动配色：只看蒙版覆盖的左侧区域，右半区不影响文字可读性
     if (skin.ink.auto && backdrop) {

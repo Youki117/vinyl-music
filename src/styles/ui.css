@@ -1337,6 +1337,27 @@ header button.danger,
   color: #8d8981;
 }
 
+/* ── 自动取色的三个色块 ─────────────────────────────────── */
+.tint-swatches {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tint-swatches span {
+  width: 26px;
+  height: 18px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.tint-swatches em {
+  margin-left: 2px;
+  font-style: normal;
+  font-size: 10px;
+  opacity: 0.6;
+}
+
 /* ── 蒙版预设 ──────────────────────────────────────────── */
 .preset-save {
   display: flex;

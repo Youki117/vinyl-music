@@ -16,6 +16,11 @@ vi.stubGlobal("window", {
 })
 vi.stubGlobal("URL", { createObjectURL: () => "blob:x", revokeObjectURL: () => {} })
 
+// 蒙版取色要 document.createElement("canvas") 画一遍底图再读像素，node 环境里没有。
+// getContext 返回 null 时 extractTints 会干净地返回空数组（等于"没取到色"），
+// 不补的话每个用例都往 stderr 刷一条警告 —— 噪音会让人不再看测试输出。
+vi.stubGlobal("document", { createElement: () => ({ getContext: () => null }) })
+
 // skin.ts 靠 new Image() 量底图尺寸，node 环境里没有这个构造函数。
 // 不补的话每个用例都会往 stderr 刷一条"图片加载失败"，断言仍然过 —— 而这正是
 // 最坏的情况：噪音把真问题埋掉。
@@ -143,6 +148,63 @@ describe("皮肤预设", () => {
     await useSkin.getState().removeSkin("a")
 
     expect(useSkin.getState().skins).toHaveLength(1)
+  })
+
+  it("手调蒙版色 → 自动取色让位（用户优先）", async () => {
+    useSkin.setState({ skin: { ...preset("a", "A", "#ff0000"), tintAuto: true } })
+
+    useSkin.getState().patchVeil({ tint: "#123456" })
+
+    expect(useSkin.getState().skin.tintAuto).toBe(false)
+    expect(useSkin.getState().skin.veil.tint).toBe("#123456")
+  })
+
+  it("调蒙版的其他参数不影响自动取色（只有颜色才算'我要自己来'）", async () => {
+    useSkin.setState({ skin: { ...preset("a", "A", "#ff0000"), tintAuto: true } })
+
+    useSkin.getState().patchVeil({ softness: 0.2 })
+    useSkin.getState().patchVeil({ ripple: 0.5 })
+    useSkin.getState().patchVeil({ edgeX: 0.3 })
+
+    expect(useSkin.getState().skin.tintAuto).toBe(true)
+  })
+
+  it("开关能把自动取色重新打开", async () => {
+    useSkin.setState({ skin: { ...preset("a", "A", "#ff0000"), tintAuto: false } })
+
+    useSkin.getState().patchSkin({ tintAuto: true })
+
+    expect(useSkin.getState().skin.tintAuto).toBe(true)
+  })
+
+  it("只套蒙版会带上预设自己的自动取色状态", async () => {
+    // 预设 b 是用户手调后存的（tintAuto=false），套过去就该保持手动
+    useSkin.setState({
+      skins: [
+        { ...preset("a", "A", "#ff0000"), tintAuto: true },
+        { ...preset("b", "B", "#00ff00"), tintAuto: false },
+      ],
+      skin: { ...preset("a", "A", "#ff0000"), tintAuto: true },
+    })
+
+    await useSkin.getState().applyVeilFrom("b")
+
+    expect(useSkin.getState().skin.tintAuto).toBe(false)
+    expect(useSkin.getState().skin.veil.tint).toBe("#00ff00")
+  })
+
+  it("反过来也成立：从自动模式存的预设，套过去仍是自动", async () => {
+    useSkin.setState({
+      skins: [
+        { ...preset("a", "A", "#ff0000"), tintAuto: false },
+        { ...preset("b", "B", "#00ff00"), tintAuto: true },
+      ],
+      skin: { ...preset("a", "A", "#ff0000"), tintAuto: false },
+    })
+
+    await useSkin.getState().applyVeilFrom("b")
+
+    expect(useSkin.getState().skin.tintAuto).toBe(true)
   })
 
   it("删一个不存在的 id 不会误伤别人", async () => {

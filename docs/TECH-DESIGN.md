@@ -384,15 +384,22 @@ precision highp float;
 in  vec2 vUv;              // 舞台内归一化坐标，(0,0) = 左下
 out vec4 fragColor;
 
-uniform float uTime;       // 秒；M1 阶段恒为 0
+uniform float uTime;       // 秒；只画一次，恒为 0
 uniform float uEdgeX;      // 静止边缘位置，默认 0.52
 uniform float uSoftness;   // 过渡带半宽，默认 0.10（对应 PRD A2 的 ≥12% 全宽）
 uniform float uOpacity;    // 蒙版最大不透明度，默认 0.88（PRD A4 上限 0.92）
-uniform vec3  uTint;       // 蒙版色，默认 #f4f2ec
-uniform float uWaveAmp;    // F10 强度 0..1；M1 阶段恒为 0
-uniform sampler2D uBands;  // 16×1 频谱包络，R 通道；M1 阶段全 0
+uniform vec3  uTint;       // 蒙版色，默认 #f4f2ec；自动取色时由 6.6 决定
+uniform float uRipple;     // 边缘起伏幅度 0..1（静态形状，不随时间变）
 
-float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+// 整数哈希，不用 fract(sin(dot(...)))。后者的结果依赖 GPU 的 sin 精度：
+// 在 Intel Arc 的 ANGLE→D3D11 上，单独调没问题，但 fbm 叠到多个八度后会塌成
+// 少数几个值。噪声格点是 floor(p)，塌了就表现为一片轴对齐的矩形色块。
+uint hashU(uvec2 x){
+  uint h = x.x * 374761393u + x.y * 668265263u;
+  h = (h ^ (h >> 13)) * 1274126177u;
+  return h ^ (h >> 16);
+}
+float hash(vec2 p){ return float(hashU(uvec2(ivec2(p) + 4096))) / 4294967295.0; }
 
 float noise(vec2 p){
   vec2 i = floor(p), f = fract(p);
@@ -600,11 +607,14 @@ export type Skin = {
   backdropFocus: { x: number; y: number }            // 0..1，cover 裁切的焦点
   label: { source: 'backdrop' | string               // 'backdrop' = 跟随底图（F5.3）
            focus: { x: number; y: number; zoom: number } }  // 取景框
-  veil: { edgeX: number; softness: number; opacity: number; tint: string }
+  veil: { edgeX: number; softness: number; opacity: number; tint: string; ripple: number }
+  tintAuto: boolean                                  // 蒙版色自动取自底图（见 6.6），默认 true
   ink:  { auto: boolean; primary: string; secondary: string; accent: string }
   text: { title: string; subtitle: string; year: string; byline: string }
 }
 ```
+
+`tintAuto` 放在 `Skin` 而不是 `veil` 里：`veil` 是直接喂给渲染器的参数包，渲染器不该看见一个它永远用不上的开关。
 
 `label.source === 'backdrop'` 是默认值，正是用户要的"黑胶上的图跟着底图切换"。设成具体路径就脱离联动（F5.4）。
 
@@ -643,6 +653,34 @@ ink.primary = bgL > 0.5 ? '#3a3a37' : '#e8e6e0'
 ### 6.4 切换转场（F5.5）
 
 双 `<img>` 交叉淡入 600ms；同一时刻蒙版的 `uTint` 与文字色用 CSS 自定义属性过渡；贴纸走 F4.3 的短转场（400ms 淡出换图淡入）。三者时长不同是有意的——同时开始、错落结束，比整齐划一更有质感。
+
+### 6.6 蒙版三色自动取色
+
+从底图取 3 个主色当蒙版色，按播放进度每色占 1/3 时长依次切换（不做渐变）。默认开启、直接应用。
+
+**取样**：底图缩到 96px 宽再统计——主色调不需要全分辨率，4K 图逐像素是几千万次循环，缩图后结果几乎一样。只取**左 40%**，和 6.3 的自动配色同一块区域，否则会"取右半边的色、盖左半边"。
+
+**挑色**（`dominantColors`）：RGB 各压到 16 级做 4096 桶直方图，桶内取平均（不取桶心，量化后桶心最多偏 8）。然后在"像素占比 ≥ 0.5% 的桶"里做**最远点采样**。两个约束都是必须的：
+
+- 不用占比门槛 → 最远点会一头撞进几个像素的杂色，那不是主色调
+- 不用最远点、直接取前三名 → 色调统一的照片里第二三名就是第一名的相邻色阶，出来三个看着一样的颜色
+
+**调色**（`veilTintsFrom`）：**必须整组一起处理，不能逐色调用 `veilTintFrom`。** 蒙版是压在左半边、不透明度 0.89 的一大片，所以每个色都要压饱和（上限 0.32）、把亮度收进 `[0.55, 0.86]`（太暗糊死左半边，太亮和默认的近白色没区别）。但**逐色处理会保留色相、抹平明暗，而真实照片的三个主色往往正是同一色相的深浅变化**：
+
+| 底图 | 原始三主色（距离） | 逐色处理（距离） | 整组处理（距离） |
+| --- | --- | --- | --- |
+| backdrop-1 | `#090603` `#dacaa9` `#996628`（176） | `#d5c1ad` `#d5c8ae` `#d3c1ab`（**3**） | `#d5c1ad` `#f2eee6` `#e4d9cc`（36） |
+| backdrop-2（灰度图） | `#878787` `#090909` `#f5f5f5`（191） | `#c4c4c4` `#c4c4c4` `#efefef`（**0**） | `#dbdbdb` `#c4c4c4` `#efefef`（35） |
+
+所以亮度不各自往区间边缘收，而是**按原始明暗次序摊到整个区间上**：最暗的落下沿、最亮的落上沿、中间的居中。区间照守，但三个色在区间里是分开摆的。返回顺序仍跟入参（按出现次数排），只有亮度目标按明暗次序分配。
+
+区间两端都在"深色文字胜出"的一侧（亮度 0.55 对黑字已有 12:1），所以三色轮换不会让 `deriveInk` 的深浅判断来回翻。
+
+**优先级**：用户手调蒙版色即关闭自动取色。这条规则落在 store 的 `patchVeil` 里而不是面板里——任何改 `tint` 的路径都自动遵守，不会漏掉某个入口。面板上留一个开关重新打开。预设套用时 `tintAuto` 跟着预设一起搬（预设携带它自己的意图）。
+
+**取到的色不落盘**：`tintColors` 是运行时派生态。存下来只会和底图对不上。自动色也**不写回 `skin.veil.tint`**——写回去一首歌要落三次盘，还会把用户存在预设里的颜色悄悄改掉。
+
+**开销**：`useTintPhase` 订阅播放进度但只在跨 1/3 边界时 `setState`，一首歌重渲染 3 次，不是每个进度事件一次。
 
 ---
 
