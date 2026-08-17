@@ -25,6 +25,10 @@ type SkinState = {
   patchSkin(p: Partial<Skin>): void
   activate(id: string): Promise<void>
   saveAs(name: string): Promise<void>
+  /** 删除一个预设。只剩一个时不允许删；删掉当前这个会自动切到别的。 */
+  removeSkin(id: string): Promise<void>
+  /** 只套用另一个预设的蒙版参数，保留当前底图与文案 */
+  applyVeilFrom(id: string): Promise<void>
 }
 
 const fac = new FastAverageColor()
@@ -41,6 +45,14 @@ const URL_CACHE_MAX = 6
 
 /** 正在用的图不能被淘汰掉，否则底图会当场变白 */
 let pinnedIds: string[] = []
+
+/**
+ * 正在交叉淡出的旧底图 id，转场那 700ms 里也不能被淘汰。
+ *
+ * 它不在 skin 里（skin.backdrop 已经指向新图了），光钉 skin 上那两张钉不住它 ——
+ * 700ms 内连切六张底图就会把它 revoke 掉，淡入当场闪一下白。概率不高，但代价是一行。
+ */
+let fadingId: string | null = null
 
 function evictImages(): void {
   for (const [id, img] of urlCache) {
@@ -112,11 +124,15 @@ export const useSkin = create<SkinState>((set, get) => ({
 
   async setBackdrop(ref) {
     const prev = get().backdrop
+    fadingId = get().skin.backdrop
     set((s) => ({ skin: { ...s.skin, backdrop: ref.id }, fading: prev }))
     await refreshImages(set, get)
     scheduleSave(get)
-    // 转场结束后丢掉旧图引用
-    window.setTimeout(() => set({ fading: null }), 700)
+    // 转场结束后丢掉旧图引用，同时解除钉住
+    window.setTimeout(() => {
+      fadingId = null
+      set({ fading: null })
+    }, 700)
   },
 
   async setLabelSource(ref) {
@@ -139,15 +155,49 @@ export const useSkin = create<SkinState>((set, get) => ({
   async activate(id) {
     const next = get().skins.find((s) => s.id === id)
     if (!next) return
+    fadingId = get().skin.backdrop
     set((s) => ({ skin: next, fading: s.backdrop }))
     await refreshImages(set, get)
     scheduleSave(get)
-    window.setTimeout(() => set({ fading: null }), 700)
+    window.setTimeout(() => {
+      fadingId = null
+      set({ fading: null })
+    }, 700)
   },
 
   async saveAs(name) {
     const copy = makeSkin({ ...get().skin, id: undefined as unknown as string, name })
     set((s) => ({ skins: [...s.skins, copy], skin: copy }))
+    scheduleSave(get)
+  },
+
+  async removeSkin(id) {
+    const { skins, skin } = get()
+    // 至少留一个，否则界面会没有可用皮肤
+    if (skins.length <= 1) return
+    const rest = skins.filter((s) => s.id !== id)
+    if (rest.length === skins.length) return
+    set({ skins: rest })
+    // 删的正好是当前这个，就切到剩下的第一个（activate 里会顺带落盘）
+    if (skin.id === id) await get().activate(rest[0].id)
+    else scheduleSave(get)
+  },
+
+  /**
+   * 只把另一个预设的**蒙版参数**搬过来，底图、取景、文案、配色都不动。
+   *
+   * 存在的理由：预设存的是整张皮肤，一键套用会连底图一起换掉。而调蒙版时最常见的
+   * 需求是"这套雾的参数不错，换到我现在这张图上看看"。
+   *
+   * 套完要走一遍 refreshImages 重推配色：deriveInk 的输入里就有 veil.tint 和
+   * veil.opacity（底图被蒙版压过之后的混合亮度才决定文字可读性），换了一套差别很大的
+   * 蒙版参数却不重推，文字可能当场变得看不清。
+   */
+  async applyVeilFrom(id) {
+    const src = get().skins.find((s) => s.id === id)
+    if (!src) return
+    set((s) => ({ skin: { ...s.skin, veil: { ...src.veil } } }))
+    await refreshImages(set, get)
     scheduleSave(get)
   },
 }))
@@ -159,7 +209,7 @@ async function refreshImages(
   const { skin } = get()
   try {
     // 先钉住这一轮要用的两张，免得加载第二张时把第一张淘汰掉
-    pinnedIds = [skin.backdrop, labelSourceId(skin)].filter((v): v is string => !!v)
+    pinnedIds = [skin.backdrop, labelSourceId(skin), fadingId].filter((v): v is string => !!v)
     const backdrop = await loadImage(skin.backdrop)
     const label = await loadImage(labelSourceId(skin))
     set({ backdrop, label })

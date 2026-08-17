@@ -4,6 +4,7 @@
 import type { FileRef, Platform, WindowControls } from "./types"
 import { AUDIO_EXTENSIONS, PLAYLIST_EXTENSIONS } from "./types"
 import { decodeText } from "@/lib/text"
+import { isUnderDir, normalizeWin } from "@/lib/path"
 
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
@@ -182,13 +183,13 @@ export function create(): Platform {
 
     async removeFile(path) {
       // 只允许删应用数据目录里的东西 —— 这个方法拿到的是绝对路径，
-      // 万一调用方传错，不该有把用户音乐删掉的可能
+      // 万一调用方传错，不该有把用户音乐删掉的可能。
+      // 归一化 + 边界判定见 isUnderDir，裸 startsWith 挡不住 `..`
       const root = await appDataDir()
-      const normalized = path.replace(/\//g, "\\")
-      if (!normalized.toLowerCase().startsWith(root.replace(/\//g, "\\").toLowerCase())) {
+      if (!isUnderDir(root, path)) {
         throw new Error("拒绝删除应用数据目录之外的文件")
       }
-      await remove(normalized)
+      await remove(normalizeWin(path))
     },
 
     async updateNowPlaying(info) {

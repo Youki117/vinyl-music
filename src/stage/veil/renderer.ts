@@ -1,6 +1,9 @@
 /**
- * 蒙版渲染器。纯 TS，不认识 React、不认识播放器 —— 只接受一组参数和一条 16 段
- * 能量包络，所以可以用假数据单独驱动测试。
+ * 蒙版渲染器。纯 TS，不认识 React、不认识播放器 —— 只接受一组参数，
+ * 所以可以脱离应用单独驱动测试。
+ *
+ * **只在参数变化时画一次**，没有动画循环。因此上下文必须开 preserveDrawingBuffer，
+ * 否则内容被合成一次之后就变成未定义，画面会随机变空。
  */
 import vertSource from "./veil.vert?raw"
 import fragSource from "./veil.frag?raw"
@@ -14,13 +17,22 @@ export type VeilParams = {
   opacity: number
   /** 蒙版色，#rrggbb */
   tint: string
-  /** 音频波动强度 0..1。静态阶段为 0 */
-  waveAmp: number
-  /** 静音时的呼吸底噪 0..1 */
-  breath: number
+  /**
+   * 边缘起伏强度 0..1。
+   *
+   * 旧名 `breath`（配合已删除的音频波动做"静音时的呼吸"）。现在没有任何东西在动，
+   * 它就是一个纯静态的形状参数：控制那条 S 形边缘起伏得多厉害。
+   */
+  ripple: number
   /** 边缘大尺度蜿蜒幅度 */
   wander: number
 }
+
+/**
+ * 渲染相位。曾经是流逝的时间，现在是个常量 —— 蒙版不动了。
+ * 换个值会得到另一副雾的形状，留着这个自由度是为了以后需要时能当风格旋钮用。
+ */
+const PHASE = 0
 
 /**
  * 默认值来自 scripts/analyze-ref.mjs 对参考图的实测，不是估的：
@@ -34,12 +46,9 @@ export const DEFAULT_VEIL: VeilParams = {
   softness: 0.092,
   opacity: 0.89,
   tint: "#f7f5f0",
-  waveAmp: 0,
-  breath: 1,
+  ripple: 1,
   wander: 0.12,
 }
-
-export const BAND_COUNT = 16
 
 /** 允许的 fbm 八度数，越小越省 GPU。降级时从 4 往下走。 */
 export type Octaves = 2 | 3 | 4
@@ -73,8 +82,6 @@ export class VeilRenderer {
   private gl: WebGL2RenderingContext
   private program: WebGLProgram | null = null
   private u: Uniforms = {}
-  private bandTex: WebGLTexture
-  private bandData = new Uint8Array(BAND_COUNT)
   private params: VeilParams = { ...DEFAULT_VEIL }
   private octaves: Octaves = 4
   private disposed = false
@@ -88,6 +95,9 @@ export class VeilRenderer {
       depth: false,
       stencil: false,
       powerPreference: "low-power",
+      // 只画一次就不再画了。不保留绘制缓冲的话，内容被合成一次之后按规范就是未定义的，
+      // 画面会在某些时机（窗口切换、重新合成）随机变空。
+      preserveDrawingBuffer: true,
     })
     if (!gl) return null
     try {
@@ -100,18 +110,6 @@ export class VeilRenderer {
 
   private constructor(gl: WebGL2RenderingContext) {
     this.gl = gl
-
-    const tex = gl.createTexture()
-    if (!tex) throw new Error("createTexture 失败")
-    this.bandTex = tex
-    gl.bindTexture(gl.TEXTURE_2D, tex)
-    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, BAND_COUNT, 1, 0, gl.RED, gl.UNSIGNED_BYTE, this.bandData)
-
     this.buildProgram()
     gl.clearColor(0, 0, 0, 0)
   }
@@ -148,10 +146,8 @@ export class VeilRenderer {
       "uSoftness",
       "uOpacity",
       "uTint",
-      "uWaveAmp",
-      "uBreath",
+      "uRipple",
       "uWander",
-      "uBands",
     ]) {
       this.u[name] = gl.getUniformLocation(prog, name)
     }
@@ -171,26 +167,22 @@ export class VeilRenderer {
     this.params = { ...this.params, ...p }
   }
 
-  /** env 长度须为 BAND_COUNT，取值 0..1。 */
-  setBands(env: ArrayLike<number>): void {
-    for (let i = 0; i < BAND_COUNT; i++) {
-      const v = i < env.length ? env[i] : 0
-      this.bandData[i] = Math.max(0, Math.min(255, Math.round(v * 255)))
-    }
-    const { gl } = this
-    gl.bindTexture(gl.TEXTURE_2D, this.bandTex)
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, BAND_COUNT, 1, gl.RED, gl.UNSIGNED_BYTE, this.bandData)
-  }
-
-  /** 宽高是物理像素，不是 CSS 像素。 */
-  resize(width: number, height: number): void {
+  /**
+   * 宽高是物理像素，不是 CSS 像素。
+   *
+   * 返回是否真的改了尺寸 —— 改 canvas 的 width/height 会清空绘制缓冲，调用方据此
+   * 决定要不要补一次 render()。以前每帧都画，丢一帧无所谓；现在不补就是一直空着。
+   */
+  resize(width: number, height: number): boolean {
     const c = this.gl.canvas as HTMLCanvasElement
-    if (c.width === width && c.height === height) return
+    if (c.width === width && c.height === height) return false
     c.width = width
     c.height = height
+    return true
   }
 
-  render(timeSec: number): void {
+  /** 画一帧。参数或尺寸变了才需要调，没有动画循环。 */
+  render(): void {
     if (this.disposed || !this.program) return
     const { gl, u, params } = this
     const c = gl.canvas as HTMLCanvasElement
@@ -198,18 +190,13 @@ export class VeilRenderer {
     gl.clear(gl.COLOR_BUFFER_BIT)
     gl.useProgram(this.program)
 
-    gl.uniform1f(u.uTime!, timeSec)
+    gl.uniform1f(u.uTime!, PHASE)
     gl.uniform1f(u.uEdgeX!, params.edgeX)
     gl.uniform1f(u.uSoftness!, params.softness)
     gl.uniform1f(u.uOpacity!, Math.min(params.opacity, 0.92))
     gl.uniform3fv(u.uTint!, hexToRgb(params.tint))
-    gl.uniform1f(u.uWaveAmp!, params.waveAmp)
-    gl.uniform1f(u.uBreath!, params.breath)
+    gl.uniform1f(u.uRipple!, params.ripple)
     gl.uniform1f(u.uWander!, params.wander)
-
-    gl.activeTexture(gl.TEXTURE0)
-    gl.bindTexture(gl.TEXTURE_2D, this.bandTex)
-    gl.uniform1i(u.uBands!, 0)
 
     gl.drawArrays(gl.TRIANGLES, 0, 3)
   }
@@ -219,7 +206,6 @@ export class VeilRenderer {
     this.disposed = true
     const { gl } = this
     if (this.program) gl.deleteProgram(this.program)
-    gl.deleteTexture(this.bandTex)
 
     // 刻意不调 WEBGL_lose_context.loseContext()：canvas 元素与 GL 上下文是
     // 一一绑定的，一旦丢弃，后续在同一个 canvas 上 getContext('webgl2') 拿回的

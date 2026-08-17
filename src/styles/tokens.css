@@ -17,6 +17,11 @@
   --font-cjk: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", "Source Han Sans SC", sans-serif;
   --font-ui: "Segoe UI", var(--font-cjk), sans-serif;
 
+  /* 右侧工具栏的宽度。抽屉必须给它让出这条轨道，否则一开面板就把按钮盖住，
+     而那几个按钮的用处恰恰是在面板之间互相切换。这个数在 .sidebar 和每个抽屉的
+     宽度里都要用到，只在这里写一次。 */
+  --rail-w: 44px;
+
   /* 文字色由 Stage 从皮肤注入，这里只是兜底 */
   --ink-primary: #3a3a37;
   --ink-secondary: #7b7975;

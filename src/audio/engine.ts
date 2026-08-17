@@ -1,5 +1,5 @@
 import { platform, type FileRef } from "@/platform"
-import { BandAnalyser } from "./analyser"
+
 import { Equalizer } from "./eq"
 
 /**
@@ -7,8 +7,10 @@ import { Equalizer } from "./eq"
  * 流式解码、currentTime 跳转与缓冲管理，一首 FLAC 不必整个解码进内存。
  *
  * 节点图：
- *   <audio> → MediaElementSource → GainNode → destination
- *                                      └─→ AnalyserNode（旁路）
+ *   <audio> → MediaElementSource → Equalizer → GainNode → destination
+ *
+ * 曾经在 GainNode 上旁路挂过一个 AnalyserNode，给蒙版提供 16 段频谱包络。
+ * 蒙版律动删除后已一并移除（见 src/stage/Veil.tsx 的说明）。
  */
 
 const FADE_MS = 80
@@ -23,7 +25,6 @@ class Engine {
   private _el: HTMLAudioElement | null = null
   private ctx: AudioContext | null = null
   private gain: GainNode | null = null
-  private analyser: BandAnalyser | null = null
   private objectUrl: string | null = null
 
   private progressListeners = new Set<Listener>()
@@ -87,10 +88,6 @@ class Engine {
   get duration(): number {
     return Number.isFinite(this.el.duration) ? this.el.duration : 0
   }
-  get bands(): Float32Array | null {
-    return this.analyser?.bands ?? null
-  }
-
   /**
    * Web Audio 图必须在用户手势之后才能建，否则 AudioContext 会是 suspended。
    * 这里惰性初始化，第一次真正播放时才建。
@@ -101,27 +98,24 @@ class Engine {
     const src = ctx.createMediaElementSource(this.el)
     const eq = new Equalizer(ctx)
     const gain = ctx.createGain()
-    const analyser = new BandAnalyser(ctx)
 
     src.connect(eq.input)
     eq.output.connect(gain)
     gain.connect(ctx.destination)
-    // 分析器旁路，不影响输出
-    gain.connect(analyser.node)
+    // 这里原本还旁路挂着一个 AnalyserNode，给蒙版提供 16 段频谱包络。
+    // 蒙版律动删掉之后没人要这份数据了，整条链（audio/analyser.ts）一并移除。
 
     gain.gain.value = this.effectiveVolume()
     this.ctx = ctx
     this.gain = gain
-    this.analyser = analyser
     this.eq = eq
   }
 
   /**
    * 给叠加轨挂一路输入，返回它自己的增益节点。
    *
-   * 接在主增益之前，所以主音量与频谱分析都会把叠加轨算进去 —— 蒙版波动理应
-   * 跟着"听到的东西"走，而不是只跟主音轨走。均衡器不作用于叠加轨，那是给主
-   * 音轨调音色用的。
+   * 接在主增益之前，所以主音量会把叠加轨一起管住。均衡器不作用于叠加轨，
+   * 那是给主音轨调音色用的。
    */
   attachLayer(el: HTMLAudioElement): GainNode | null {
     this.ensureGraph()
@@ -452,12 +446,6 @@ class Engine {
   }
   get error(): string | null {
     return this._error
-  }
-
-  /** 每帧刷新频谱包络。播放中取实时值，否则自然衰减。 */
-  tickBands(): Float32Array | null {
-    if (!this.analyser) return null
-    return this._status === "playing" ? this.analyser.tick() : this.analyser.decay()
   }
 
   /**

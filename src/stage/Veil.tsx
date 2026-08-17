@@ -1,16 +1,23 @@
 import { useEffect, useRef, useState } from "react"
 
-import { engine } from "@/audio/engine"
-import { subscribe, onSustainedSlowdown } from "./clock"
 import { useStageFit } from "./useStageFit"
-import { VeilRenderer, type Octaves } from "./veil/renderer"
+import { VeilRenderer } from "./veil/renderer"
 import { useSkin } from "@/store/skin"
 
 /**
  * L1 白色蒙版。
  *
- * 渲染器是被动的：本组件负责把参数喂进去并按时钟驱动它，渲染器自己不认识
- * React 也不认识播放器。
+ * **没有动画循环 —— 只在参数或尺寸变化时画一帧。**
+ *
+ * 原来这里挂着一条时钟订阅，按 0.5/12/60fps 三档持续重画，60fps 那档还每帧从引擎
+ * 取一次频谱包络喂给着色器（蒙版跟随音乐波动）。实测那套逐帧驱动要吃掉播放时约
+ * 四分之一的 CPU（scripts/perf/dbg-veil-cpu.mjs：律动开 38.6% vs 关 27.8%），而观感
+ * 达不到预期，所以整条驱动链连同 audio/analyser.ts 一起删掉了。
+ *
+ * 保留着色器而不是换成一张静态 PNG：边缘位置、羽化、蜿蜒、颜色四个参数都还要能调，
+ * 三色自动取色也是靠改颜色参数生效的。一次性渲染的开销本来就和贴张图差不多。
+ *
+ * 渲染器仍然是被动的：本组件负责把参数喂进去并决定何时画，渲染器不认识 React。
  */
 export default function Veil() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -37,48 +44,20 @@ export default function Veil() {
     }
   }, [])
 
+  /*
+   * 尺寸和参数合并成同一个效果：两者都必须触发重画，而且顺序有讲究 ——
+   * 改 canvas 的 width/height 会清空绘制缓冲，先 resize 再 render 才不会留下空白。
+   *
+   * 依赖里带上 fallback，是因为首帧可能还没建出渲染器（create 失败会走降级），
+   * 这个效果要在渲染器就位之后再跑一次。
+   */
   useEffect(() => {
-    rendererRef.current?.resize(fit.deviceW, fit.deviceH)
-  }, [fit.deviceW, fit.deviceH])
-
-  useEffect(() => {
-    rendererRef.current?.setParams(veil)
-  }, [veil])
-
-  // 掉帧自动降级：先降八度数，再降分辨率（技术文档 §11）
-  useEffect(() => {
-    return onSustainedSlowdown(() => {
-      const r = rendererRef.current
-      if (!r) return
-      const next = (r.currentOctaves - 1) as Octaves
-      if (next >= 2) {
-        console.warn(`[veil] 持续掉帧，fbm 八度降至 ${next}`)
-        r.setOctaves(next)
-      }
-    })
-  }, [])
-
-  useEffect(() => {
-    if (fallback) return
-    // 蒙版静止时（waveAmp=0 且 breath=0）没必要 60fps 重画同样的画面
-    const still = veil.waveAmp === 0 && veil.breath === 0
-    const reactive = veil.waveAmp > 0
-
-    return subscribe(
-      (t) => {
-        const r = rendererRef.current
-        if (!r) return
-        if (reactive) {
-          // 频谱 → 16 段包络 → uBands。暂停时 tickBands 返回自然衰减的包络，
-          // 画面平滑回到呼吸态，不需要额外处理。
-          const bands = engine.tickBands()
-          if (bands) r.setBands(bands)
-        }
-        r.render(t)
-      },
-      still ? 0.5 : reactive ? 60 : 12,
-    )
-  }, [fallback, veil.waveAmp, veil.breath])
+    const r = rendererRef.current
+    if (!r) return
+    r.resize(fit.veilW, fit.veilH)
+    r.setParams(veil)
+    r.render()
+  }, [fallback, fit.veilW, fit.veilH, veil])
 
   if (fallback) {
     return (

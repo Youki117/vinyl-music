@@ -8,6 +8,7 @@ import Progress from "@/ui/Progress"
 import Controls from "@/ui/Controls"
 import Actions from "@/ui/Actions"
 import TitleBar from "@/ui/TitleBar"
+import Sidebar from "@/ui/Sidebar"
 import Playlist from "@/ui/panels/Playlist"
 import SkinEditor from "@/ui/panels/SkinEditor"
 import Playback from "@/ui/panels/Playback"
@@ -18,7 +19,7 @@ import MixPanel from "@/ui/panels/Mix"
 import { engine } from "@/audio/engine"
 import { usePlayer } from "@/store/player"
 import { useSkin } from "@/store/skin"
-import { isAudioFile, isLyricFile, isPlaylistFile, platform } from "@/platform"
+import { isAudioFile, isLyricFile, isPlaylistFile, platform, type FileRef } from "@/platform"
 
 /** 右侧抽屉同一时刻只能开一个 */
 type PanelId = "playlist" | "skin" | "playback" | "mix" | null
@@ -110,9 +111,14 @@ export default function App() {
   useEffect(() => {
     return platform.onOpenFiles((paths) => {
       void (async () => {
-        const refs = paths
-          .filter((p) => isAudioFile(p))
-          .map((p) => ({ id: p, name: p.split(/[\\/]/).pop() ?? p, size: 0, mtime: 0 }))
+        // 必须走 platform 拿真实的 size/mtime，不能手搓 FileRef：size 缺省成 0 会让
+        // engine 里的 200MB 上限判定恒不成立（命令行开一个超大 wav 就直接放行），
+        // 而波形磁盘缓存的键含 size|mtime —— 缺省值会让同一个文件从命令行和从对话框
+        // 导入算出两个键，各存一份。resolvePath 顺带做了能力域放行和存在性检查。
+        const audio = paths.filter((p) => isAudioFile(p))
+        const refs = (await Promise.all(audio.map((p) => platform.resolvePath(p, p)))).filter(
+          (r): r is FileRef => r !== null,
+        )
         if (refs.length === 0) return
         const added = await addFiles(refs)
         const list = added.length > 0 ? added : refs.map((r) => useLibrary.getState().byId(r.id)!).filter(Boolean)
@@ -192,18 +198,22 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey)
   }, [])
 
-  // 黑胶右键直接换底图，是 PRD §6.2 要求的三步内完成的主路径
+  /**
+   * 换底图的快捷路径：**选完图直接换掉，不弹面板**。
+   *
+   * 原来换完会顺手 `setPanel("skin")` 把皮肤面板打开。但这个按钮的意思就是"我要换张图"，
+   * 换完弹出一整列设置项属于多做一步 —— 想调蒙版/文案/取景的人本来就会去点左上角那个
+   * 皮肤按钮。两条路各干各的：右下角＝直接换图，左上角＝打开面板慢慢调。
+   */
   const importBackdrop = async () => {
     const ref = await platform.pickImage()
-    if (ref) {
-      await setBackdrop(ref)
-      setPanel("skin")
-    }
+    if (ref) await setBackdrop(ref)
   }
 
   return (
     <Stage>
-      <TitleBar
+      <TitleBar />
+      <Sidebar
         onOpenPlayback={() => togglePanel("playback")}
         onOpenSkin={() => togglePanel("skin")}
         onOpenMix={() => togglePanel("mix")}
@@ -240,18 +250,37 @@ export default function App() {
       {error && <div className="toast">{error}</div>}
       {notice && !error && <div className="toast notice">{notice}</div>}
 
-      {/* 常驻操控件，点它不该被当成"点了面板外面" */}
+      {/*
+        常驻操控件，点它不该被当成"点了面板外面"。
+        图标用相框而不是原来的四角星：四角星在这套界面里已经代表 AI（皮肤面板有
+        「AI 配图」标签页），而这个按钮做的是"选一张本地图片换底图"，用星星会指错。
+      */}
       <button
-        className="sparkle"
+        className="skin-quick"
         data-keep-panel
         onClick={importBackdrop}
         aria-label="更换底图"
-        title="更换底图"
+        title="更换底图（选图后直接生效）"
       >
-        <svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
+          <rect
+            x="3"
+            y="5"
+            width="18"
+            height="14"
+            rx="2.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+          />
+          <circle cx="8.6" cy="10" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
           <path
-            fill="currentColor"
-            d="M12 2.6c.7 3.9 2.9 6.1 6.8 6.8-3.9.7-6.1 2.9-6.8 6.8-.7-3.9-2.9-6.1-6.8-6.8 3.9-.7 6.1-2.9 6.8-6.8Z"
+            d="M4.2 17.4 9.6 12l3.3 3.3L16.3 12l3.5 3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
           />
         </svg>
       </button>

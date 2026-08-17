@@ -2,7 +2,6 @@ import { create } from "zustand"
 
 import { platform } from "@/platform"
 import { engine, type EngineStatus } from "@/audio/engine"
-import { loadPeaks } from "@/audio/peaks"
 import { useLibrary, type Track } from "./library"
 import { ShuffleOrder } from "./shuffle"
 
@@ -45,7 +44,6 @@ type PlayerState = {
   muted: boolean
   mode: RepeatMode
   speed: number
-  peaks: Float32Array | null
 
   current(): Track | null
   init(): Promise<void>
@@ -96,23 +94,23 @@ let smtcKey = ""
 const coverPaths = new Map<string, string>()
 
 /**
- * 报给系统媒体面板。切歌、播放/暂停时调用。
+ * 上报原因。三种情况对去重与节流的要求不一样，用一个 boolean 的 force 区分不开：
  *
- * @param force 封面是异步解出来的，解完要再报一次，这时曲目与状态都没变，
- *              必须绕过去重判断，否则任务栏那格永远是空的
+ * - `state` 切歌、播放/暂停：按 曲目|状态 去重，位置每秒变四次不该跟着报
+ * - `cover` 封面异步解出来后补报：曲目与状态都没变，必须绕过去重，否则任务栏那格
+ *   永远是空的。频率极低，直发
+ * - `seek`  跳转：也要绕过去重（否则面板位置停在旧值直到下次暂停或切歌），但拖进度条
+ *   时每个 pointermove 都会触发一次，直发等于几秒内上百次 IPC 打进 COM，必须节流
  */
-function pushNowPlaying(
-  track: Track | null,
-  playing: boolean,
-  position: number,
-  force = false,
-): void {
-  if (!track) return
-  // 只在曲目或播放状态变了时才重报；位置每秒变四次，跟着报纯属浪费 IPC
-  const key = `${track.id}|${playing}`
-  if (!force && key === smtcKey) return
-  smtcKey = key
+type PushReason = "state" | "cover" | "seek"
 
+/** 拖动时的上报间隔。给足平滑感，又不至于把 IPC 打爆 */
+const SEEK_PUSH_MS = 250
+let seekTimer = 0
+let seekPending: { track: Track; playing: boolean; position: number } | null = null
+
+function sendNowPlaying(track: Track, playing: boolean, position: number): void {
+  smtcKey = `${track.id}|${playing}`
   void platform.updateNowPlaying({
     title: track.title,
     artist: track.artist,
@@ -122,6 +120,35 @@ function pushNowPlaying(
     position,
     coverPath: coverPaths.get(track.id) ?? null,
   })
+}
+
+/** 报给系统媒体面板。 */
+function pushNowPlaying(
+  track: Track | null,
+  playing: boolean,
+  position: number,
+  reason: PushReason = "state",
+): void {
+  if (!track) return
+
+  if (reason === "seek") {
+    // 首尾都发：首帧让面板立刻跟上，尾帧保证松手后的最终位置一定落地 ——
+    // 只做前沿节流的话，拖完停在哪儿面板是不知道的
+    seekPending = { track, playing, position }
+    if (seekTimer) return
+    seekPending = null
+    sendNowPlaying(track, playing, position)
+    seekTimer = window.setTimeout(() => {
+      seekTimer = 0
+      const p = seekPending
+      seekPending = null
+      if (p) sendNowPlaying(p.track, p.playing, p.position)
+    }, SEEK_PUSH_MS)
+    return
+  }
+
+  if (reason === "state" && `${track.id}|${playing}` === smtcKey) return
+  sendNowPlaying(track, playing, position)
 }
 
 export const usePlayer = create<PlayerState>((set, get) => {
@@ -153,7 +180,6 @@ export const usePlayer = create<PlayerState>((set, get) => {
     muted: false,
     mode: "all",
     speed: 1,
-    peaks: null,
 
     current() {
       const { queue, index } = get()
@@ -169,7 +195,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
       // 跳转不改变播放状态，不在这里补一刀的话，系统媒体面板的位置会一直停在
       // 旧值，直到下次暂停或切歌
       engine.onSeek((t) => {
-        pushNowPlaying(get().current(), engine.status === "playing", t, true)
+        pushNowPlaying(get().current(), engine.status === "playing", t, "seek")
       })
 
       engine.onProgress((t, d) => {
@@ -244,7 +270,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
       const { queue } = get()
       if (i < 0 || i >= queue.length) return
       const track = queue[i]
-      set({ index: i, peaks: null })
+      set({ index: i })
       resetPlayCounter()
 
       try {
@@ -265,21 +291,16 @@ export const usePlayer = create<PlayerState>((set, get) => {
           // 封面要等解出来、落盘之后才报给系统媒体面板，否则任务栏那格是空的
           if (cover?.path) {
             coverPaths.set(track.id, cover.path)
-            pushNowPlaying(get().current(), engine.status === "playing", engine.currentTime, true)
+            pushNowPlaying(get().current(), engine.status === "playing", engine.currentTime, "cover")
           }
         })
 
         pushNowPlaying(track, true, 0)
 
-        // 波形不阻塞播放
-        const idle = window.requestIdleCallback ?? ((cb: () => void) => window.setTimeout(cb, 200))
-        idle(() => {
-          void loadPeaks(track.ref, bytes)
-            .then((p) => {
-              if (get().index === i) set({ peaks: p })
-            })
-            .catch(() => {})
-        })
+        // 这里原本还会顺手算一遍波形峰值缓存起来。进度条上方那段小波形删掉之后，
+        // 播放路径已经没人要这份数据了 —— 而算它要把整首歌解码一遍（约 16MB PCM）。
+        // 混音面板仍然用得上波形，但它自己会惰性取（audio/peaks.ts 的 loadPeaks
+        // 支持传取字节的函数，缓存命中时连文件都不读）。
       } catch {
         useLibrary.getState().markMissing(track.id)
         // 连续 3 首失败则停止，避免整个列表都坏时无限跳转
@@ -320,15 +341,20 @@ export const usePlayer = create<PlayerState>((set, get) => {
 
     clearQueue() {
       engine.pause()
-      set({ queue: [], index: -1, peaks: null })
+      set({ queue: [], index: -1 })
     },
 
+    /**
+     * 队列里刻意**不**同步封面：封面的唯一来源是曲库（Disc 按曲目 id 直接从那里读）。
+     * 队列再存一份的话，曲库那边按 LRU 淘汰并 revoke 之后，这份副本就成了指向死
+     * URL 的悬空引用，唱片贴纸会变成一个裂图。
+     */
     refreshQueueMeta() {
       const lib = useLibrary.getState()
       set((s) => ({
         queue: s.queue.map((q) => {
           const t = lib.byId(q.id)
-          return t ? { ...q, lyrics: t.lyrics ?? q.lyrics, cover: t.cover ?? q.cover, liked: t.liked } : q
+          return t ? { ...q, lyrics: t.lyrics ?? q.lyrics, liked: t.liked } : q
         }),
       }))
     },

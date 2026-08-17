@@ -21,7 +21,13 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
   const setLabelSource = useSkin((s) => s.setLabelSource)
   const patchVeil = useSkin((s) => s.patchVeil)
   const patchSkin = useSkin((s) => s.patchSkin)
+  const skins = useSkin((s) => s.skins)
+  const saveAs = useSkin((s) => s.saveAs)
+  const activate = useSkin((s) => s.activate)
+  const removeSkin = useSkin((s) => s.removeSkin)
+  const applyVeilFrom = useSkin((s) => s.applyVeilFrom)
   const [tab, setTab] = useState<"image" | "veil" | "text" | "ai">("image")
+  const [presetName, setPresetName] = useState("")
 
   const dragRef = useRef<{ mode: "backdrop" | "label"; x: number; y: number } | null>(null)
   const rootRef = useDismiss<HTMLDivElement>(open, onClose)
@@ -60,6 +66,12 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
   const startDrag = (mode: "backdrop" | "label") => (e: React.PointerEvent) => {
     e.currentTarget.setPointerCapture(e.pointerId)
     dragRef.current = { mode, x: e.clientX, y: e.clientY }
+  }
+
+  // 名字留空就按序号给一个，不拦着用户存
+  const savePreset = () => {
+    void saveAs(presetName.trim() || `预设 ${skins.length + 1}`)
+    setPresetName("")
   }
 
   const onLabelWheel = (e: React.WheelEvent) => {
@@ -185,18 +197,11 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
               onChange={(wander) => patchVeil({ wander })}
             />
             <Slider
-              label="呼吸强度"
-              value={skin.veil.breath}
+              label="边缘起伏"
+              value={skin.veil.ripple}
               min={0}
               max={1}
-              onChange={(breath) => patchVeil({ breath })}
-            />
-            <Slider
-              label="随音乐波动"
-              value={skin.veil.waveAmp}
-              min={0}
-              max={1}
-              onChange={(waveAmp) => patchVeil({ waveAmp })}
+              onChange={(ripple) => patchVeil({ ripple })}
             />
             <label className="row-field">
               <span>蒙版色</span>
@@ -207,6 +212,54 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
               />
             </label>
             <p className="hint">不透明度上限 0.92：底图必须能透出来，做成纯白就失去层次了。</p>
+
+            <p className="section-title">预设</p>
+            <div className="preset-save">
+              <input
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                placeholder={`预设 ${skins.length + 1}`}
+                aria-label="预设名称"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") savePreset()
+                }}
+              />
+              <button onClick={savePreset}>保存当前</button>
+            </div>
+
+            <ul className="preset-list">
+              {skins.map((p) => (
+                <li key={p.id} data-on={p.id === skin.id}>
+                  <span title={p.name}>{p.name}</span>
+                  <button
+                    onClick={() => void applyVeilFrom(p.id)}
+                    title="只把这个预设的蒙版参数搬过来，保留当前底图与文案"
+                  >
+                    只套蒙版
+                  </button>
+                  <button
+                    onClick={() => void activate(p.id)}
+                    title="套用整张皮肤，底图与文案也会一起换"
+                    disabled={p.id === skin.id}
+                  >
+                    全部套用
+                  </button>
+                  <button
+                    className="danger"
+                    onClick={() => void removeSkin(p.id)}
+                    aria-label={`删除预设 ${p.name}`}
+                    title="删除这个预设"
+                    disabled={skins.length <= 1}
+                  >
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <p className="hint">
+              预设存的是<b>整张皮肤</b>（底图、取景、蒙版、文案、配色）。只想换雾的感觉就点
+              「只套蒙版」—— 它会保留你当前的底图，并按新的蒙版参数重推一次文字配色。
+            </p>
           </>
         )}
 

@@ -12,6 +12,7 @@ import {
   type Clip,
 } from "@/audio/clips"
 import { formatTime } from "@/lib/format"
+import { platform } from "@/platform"
 import { useLibrary } from "@/store/library"
 import { useMix } from "@/store/mix"
 import { usePlayer } from "@/store/player"
@@ -58,8 +59,8 @@ export default function Mix({ open, onClose }: { open: boolean; onClose: () => v
     let alive = true
     void (async () => {
       try {
-        const bytes = await (await import("@/platform")).platform.readFile(sourceTrack.ref)
-        const p = await loadPeaks(sourceTrack.ref, bytes)
+        // 惰性传字节：波形缓存命中时（换层来回切基本都命中）连文件都不用读
+        const p = await loadPeaks(sourceTrack.ref, () => platform.readFile(sourceTrack.ref))
         if (alive) setPeaks(p)
       } catch {
         // 算不出波形不影响编辑，只是看不见形状

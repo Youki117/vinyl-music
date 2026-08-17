@@ -424,13 +424,14 @@ for (const [key, label, least] of [
   check(`${label}面板的 ✕ 能关闭`, (await panelOf()) === null)
 }
 
-// 标题栏与传输栏（排除窗口关闭）
+// 标题栏、右侧工具栏与传输栏（排除窗口关闭）
 {
   const before = errors.length
-  const n = await sweepButtons(page, ".titlebar, .playback, .actions", SKIP)
-  console.log(`标题栏与传输栏：点了 ${n} 个控件，新增报错 ${errors.length - before}`)
-  check("标题栏与传输栏按钮全点一遍不报错", errors.length === before, errors.slice(before, before + 2).join(" | "))
-  check("标题栏与传输栏确实扫到了控件（≥8）", n >= 8, `${n} 个`)
+  // .sidebar 是后来从标题栏拆出去的右侧工具栏；漏掉它这轮扫描的覆盖会悄悄缩水
+  const n = await sweepButtons(page, ".titlebar, .sidebar, .playback, .actions", SKIP)
+  console.log(`标题栏/侧栏/传输栏：点了 ${n} 个控件，新增报错 ${errors.length - before}`)
+  check("这三处的按钮全点一遍不报错", errors.length === before, errors.slice(before, before + 2).join(" | "))
+  check("确实扫到了控件（≥8）", n >= 8, `${n} 个`)
 }
 await page.keyboard.press("Escape")
 await page.waitForTimeout(300)

@@ -3,13 +3,18 @@ import { useEffect, useRef, useState, type ReactNode } from "react"
 import { engine } from "@/audio/engine"
 import { useProgress } from "@/audio/useProgress"
 import { formatTime, usePlayer } from "@/store/player"
-import Waveform from "./Waveform"
 
 /**
  * E9/E10：进度条、时间与曲名。
  *
  * 控制条作为 children 放进来，与进度条共用同一个定位容器 —— 二者在效果图里
  * 左右对齐，拆成两个独立定位的块只会让两处坐标各自漂移。
+ *
+ * 进度条上方原本还有一小段波形（118px 宽、覆盖播放头前后各 20 秒），**已删除**。
+ * 它是照参考图加的，但参考图是单帧：那一帧里波形恰好和播放头重合，实现据此推断
+ * "波形跟着播放头走"，于是整个窗口在屏幕上横向滑动，窗口内部又在滚 —— 双重运动，
+ * 没有任何主流播放器是这样的，看着像故障。删掉它同时也省掉了每首歌一次纯为画它
+ * 而做的音频解码（混音面板要用波形时自己惰性算，见 audio/peaks.ts）。
  */
 export default function Progress({ children }: { children?: ReactNode }) {
   const barRef = useRef<HTMLDivElement>(null)
@@ -34,9 +39,8 @@ export default function Progress({ children }: { children?: ReactNode }) {
     // data-keep-panel：整条传输栏是常驻操控件。混音面板开着时本来就要一边拖
     // 进度条一边看时间轴，把它算成"面板外的空白处"会让面板一碰就关。
     <div className="playback" data-keep-panel>
-      <div className="wave-row" style={{ ["--playhead" as string]: `${progress * 100}%` }}>
-        <Waveform progress={progress} />
-      </div>
+      {/* 波形删掉了，但这段留白要保住：进度条与上方元素的间距是照效果图定的 */}
+      <div className="wave-row" />
 
       <div
         ref={barRef}

@@ -1,6 +1,7 @@
 /* 舞台与图层栈。z 序：底图 → 蒙版 → 颗粒 → 内容 → 浮层 */
 
 .viewport {
+  position: relative;
   width: 100%;
   height: 100%;
   display: grid;
@@ -9,11 +10,35 @@
   overflow: hidden;
 }
 
+/*
+ * 黑边里的底图延伸（见 Stage.tsx）。
+ *
+ * 模糊 + 压暗是必须的：不模糊的话黑边里是一张清晰的照片，会和舞台内容抢视线，
+ * 反而比黑边更吵。scale(1.12) 是为了盖住 blur 在元素边缘产生的透明衰减带。
+ *
+ * ⚠ 全屏 CSS 模糊在这个技术栈上是要付内存的（实测一层全屏 blur(40px) 约 +76MB，
+ * 见 docs/TECH-DESIGN.md §1.2.1）。这里的取舍是：它只在用户真的设了底图时才存在，
+ * 且换来的是"黑边消失"这个每一帧都看得见的观感。真嫌贵就把 filter 里的 blur 去掉，
+ * 只留 brightness —— 清晰但压暗的延伸，代价接近零。
+ */
+.viewport-bleed {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  filter: blur(34px) brightness(0.42) saturate(0.85);
+  transform: scale(1.12);
+  pointer-events: none;
+}
+
 .stage {
   position: relative;
   overflow: hidden;
   isolation: isolate;
   background: #101010;
+  /* 舞台垫在模糊底图上时要有边界感，否则两者糊成一片分不清哪儿是画面。
+     没有底图时背后是纯黑，这道阴影看不见，不影响原来的观感。 */
+  box-shadow: 0 8px 48px rgba(0, 0, 0, 0.55);
 }
 
 .layer {

@@ -30,6 +30,28 @@ export type Playlist = {
   createdAt: number
 }
 
+/**
+ * 导入时同时处理几个文件。
+ *
+ * 串行导入 1000 首实测 72 秒（scripts/perf/dbg-library.mjs，合成曲库每首约 0.6MB），
+ * 而 PRD 定的是 15 秒 —— 每首 72ms 里真正的磁盘读只占极小一块，大头是"读整个文件
+ * 过一次 IPC"的往返延迟，串着等就是纯浪费。
+ *
+ * **这个数是量出来的，不是拍的**（1000 首，每首约 0.6MB，整棵进程树的 Private Bytes）：
+ *
+ *   并发 1（原来）  72.4s   峰值  868MB
+ *   并发 2          50.2s   峰值  701MB  ← 时间和峰值同时更优，没有取舍
+ *   并发 4          38.3s   峰值 4253MB  ← 再快 24%，峰值涨六倍
+ *
+ * 并发 4 那 4253MB 事后强制回收能回落到 844MB，说明是垃圾不是泄漏 —— 但峰值就是峰值，
+ * 内存小的机器上会当场崩掉，不能拿"反正能回收"当借口。每导一首要把整个文件过一遍 IPC
+ * 再解析，产生的临时垃圾远大于文件本身；并发把分配速率乘上去，V8 的回收就跟不上了。
+ *
+ * 取 2 是因为它严格优于串行（两项都赢），而不是因为它是个折中。想再快得先别读整个
+ * 文件（readSlice，见 docs/TECH-DESIGN.md 的待办）—— 那才是治本的。
+ */
+const IMPORT_CONCURRENCY = 2
+
 /** 虚拟歌单由数据算出来，不落盘 */
 export const VIRTUAL_VIEWS = ["all", "liked", "recent", "most"] as const
 export type VirtualView = (typeof VIRTUAL_VIEWS)[number]
@@ -64,6 +86,10 @@ const probedLyrics = new Set<string>()
 const probedCovers = new Set<string>()
 /** 曲目 id → 落盘后的封面文件路径，给系统媒体面板用 */
 const coverFiles = new Map<string, string>()
+/** 已物化封面的曲目 id，数组顺序即 LRU（末尾最新）。见 rememberCover */
+const coverLru: string[] = []
+/** 同时最多留几张封面的 object URL。只显示一张，留 8 张是为了来回切歌时不用重解 */
+const COVER_CACHE_MAX = 8
 
 /** FNV-1a，只用来给封面文件起个稳定的短名字 */
 function hashId(s: string): string {
@@ -77,6 +103,14 @@ function hashId(s: string): string {
 
 type LibraryFile = {
   schemaVersion: number
+  /**
+   * 曲目 id → 落盘的封面副本路径。
+   *
+   * 存这张表是为了**不用为了拿封面把整个音频文件再解析一遍**：内嵌封面本身不进
+   * JSON（那是二进制），但它已经被抄到 skins/ 下了，记住路径下次直接读那张小图。
+   * 少一次 parseBlob 就少一份整文件拷贝，一首 10MB 的歌就是 10MB。
+   */
+  coverFiles?: Record<string, string>
   tracks: Array<Omit<Track, "cover" | "lyrics" | "missing">>
   playlists: Playlist[]
   activeView: ViewId
@@ -144,6 +178,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
       const s = get()
       const file: LibraryFile = {
         schemaVersion: SCHEMA,
+        coverFiles: Object.fromEntries(coverFiles),
         tracks: s.tracks.map(({ cover: _c, lyrics: _l, missing: _m, ...rest }) => rest),
         playlists: s.playlists,
         activeView: s.activeView,
@@ -152,6 +187,35 @@ export const useLibrary = create<LibraryState>((set, get) => {
       }
       void platform.writeConfig("library", file)
     }, 1000)
+  }
+
+  /**
+   * 记下这首歌的封面已物化，并按 LRU 淘汰旧的。
+   *
+   * 封面只有当前播放的那一首会显示（Disc），但 ensureCover 会把 URL 写回曲目就再也
+   * 不撒手。连播八小时约 160 首，每张三四百 KB，就是几十 MB 只涨不落 —— 正好顶在
+   * PRD「连续播放 8 小时增长 < 50MB」的线上。做法照抄 skin.ts 的图片缓存。
+   *
+   * 淘汰是安全的，前提是**界面只从曲库读封面**：Disc 按曲目 id 从这里取，播放队列里
+   * 那份副本不再作为显示来源，所以 revoke 之后不会有谁还指着一个死 URL。回切到被淘汰
+   * 的曲目时 ensureCover 会重新解一份（磁盘上还留着几十 KB 的副本，很便宜）。
+   */
+  const rememberCover = (id: string) => {
+    const at = coverLru.indexOf(id)
+    if (at >= 0) coverLru.splice(at, 1)
+    coverLru.push(id)
+    if (coverLru.length <= COVER_CACHE_MAX) return
+
+    const victims = coverLru.splice(0, coverLru.length - COVER_CACHE_MAX)
+    set((s) => ({
+      tracks: s.tracks.map((t) => {
+        if (!victims.includes(t.id) || !t.cover) return t
+        URL.revokeObjectURL(t.cover)
+        // 连同"已探测过"的标记一起清掉，否则回切时 ensureCover 会直接返回 null
+        probedCovers.delete(t.id)
+        return { ...t, cover: null }
+      }),
+    }))
   }
 
   return {
@@ -165,6 +229,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
 
     async load() {
       const raw = await platform.readConfig<LibraryFile>("library")
+      for (const [id, path] of Object.entries(raw?.coverFiles ?? {})) coverFiles.set(id, path)
       if (!raw?.tracks) return
       // v1 没有 playlists / addedAt / lastPlayed，补默认值即可，不洗掉用户数据
       const tracks: Track[] = raw.tracks.map((t, i) => ({
@@ -196,11 +261,11 @@ export const useLibrary = create<LibraryState>((set, get) => {
       if (fresh.length === 0) return []
 
       set({ scanning: { done: 0, total: fresh.length } })
-      const added: Track[] = []
       const now = Date.now()
+      // 按下标回填而不是 push：并发下完成顺序是乱的，但入库顺序必须还是用户选的顺序
+      const slots: (Track | null)[] = new Array(fresh.length).fill(null)
 
-      for (let i = 0; i < fresh.length; i++) {
-        const ref = fresh[i]
+      const readOne = async (ref: FileRef, i: number): Promise<void> => {
         try {
           const bytes = await platform.readFile(ref)
           const meta = await readMetadata(ref, bytes)
@@ -209,29 +274,42 @@ export const useLibrary = create<LibraryState>((set, get) => {
           if (!lyrics) {
             lyrics = await platform.readSidecar(ref, "lrc").catch(() => null)
           }
-          added.push({
+          slots[i] = {
             id: ref.id,
             ref,
             title: meta.title,
             artist: meta.artist,
             album: meta.album,
             duration: meta.duration,
-            cover: meta.cover,
+            // 导入不物化封面，首播时由 ensureCover 补（理由见 TrackMeta 的说明）
+            cover: null,
             lyrics,
             playCount: 0,
             liked: false,
             lastPlayed: 0,
             addedAt: now + i,
             missing: false,
-          })
+          }
         } catch {
           // 单个文件失败不中断整批导入
         }
-        set({ scanning: { done: i + 1, total: fresh.length } })
-        // 让出主线程，导入几百首时界面不冻住
-        if (i % 8 === 7) await new Promise((r) => setTimeout(r, 0))
       }
 
+      let cursor = 0
+      let done = 0
+      const worker = async (): Promise<void> => {
+        while (cursor < fresh.length) {
+          const i = cursor++
+          await readOne(fresh[i], i)
+          done++
+          set({ scanning: { done, total: fresh.length } })
+          // 让出主线程，导入几百首时界面不冻住
+          if (done % 8 === 0) await new Promise((r) => setTimeout(r, 0))
+        }
+      }
+      await Promise.all(Array.from({ length: Math.min(IMPORT_CONCURRENCY, fresh.length) }, worker))
+
+      const added = slots.filter((t): t is Track => t !== null)
       set((s) => ({ tracks: [...s.tracks, ...added], scanning: null }))
 
       // 导入到某个具体歌单时，顺带加进去
@@ -372,13 +450,40 @@ export const useLibrary = create<LibraryState>((set, get) => {
       const track = get().byId(id)
       if (!track) return null
       const known = coverFiles.get(id)
-      if (track.cover) return { url: track.cover, path: known ?? null }
+      if (track.cover) {
+        rememberCover(id) // 命中也要挪到 LRU 末尾，否则正在听的这首反而先被淘汰
+        return { url: track.cover, path: known ?? null }
+      }
       if (probedCovers.has(id)) return null
       probedCovers.add(id)
+
+      // 上次已经把封面抄到 skins/ 下了，直接读那张几十 KB 的小图。
+      // 走 readCover 意味着要为了一张封面把整个音频文件再解析一遍 ——
+      // 一首 10MB 的歌就白白多出 10MB 的临时拷贝。
+      if (known) {
+        try {
+          const bytes2 = await platform.readFile({ id: known, name: known, size: 0, mtime: 0 })
+          // 扩展名是我们自己按 pic.mime 写下去的（见下方 saveImage），照它反推即可。
+          // 硬编码 jpeg 的话 png 封面会被贴错 MIME —— <img> 会嗅探内容所以看不出来，
+          // 但这个 blob 一旦喂给认 MIME 的地方就会翻车
+          const url = URL.createObjectURL(
+            new Blob([bytes2 as BlobPart], {
+              type: /\.png$/i.test(known) ? "image/png" : "image/jpeg",
+            }),
+          )
+          set((s) => ({ tracks: s.tracks.map((t) => (t.id === id ? { ...t, cover: url } : t)) }))
+          rememberCover(id)
+          return { url, path: known }
+        } catch {
+          // 副本被删了就退回重解一次
+          coverFiles.delete(id)
+        }
+      }
 
       const pic = await readCover(bytes)
       if (!pic) return null
       set((s) => ({ tracks: s.tracks.map((t) => (t.id === id ? { ...t, cover: pic.url } : t)) }))
+      rememberCover(id)
 
       // 顺手落一份到磁盘：系统媒体面板读不了 blob:，只认真实文件路径。
       // 文件名带曲目哈希，避免复用同一个名字时被系统占着写不进去。
@@ -548,14 +653,23 @@ export function selectTracks({ tracks, playlists, view, sort, sortDesc, filter }
   return sortDesc ? sorted.reverse() : sorted
 }
 
+/**
+ * 中文排序器。
+ *
+ * 必须提到模块级：`localeCompare(x, "zh-Hans-CN")` 每调一次都要在内部现建一个 ICU
+ * collator，而排序里它被调用 O(n log n) 次 —— 一万首歌约 13 万次，单次排序能烧掉几百
+ * 毫秒。复用同一个 Intl.Collator 排序结果完全一致，只是不再重复建对象。
+ */
+const collator = new Intl.Collator("zh-Hans-CN")
+
 function compare(a: Track, b: Track, key: SortKey): number {
   switch (key) {
     case "title":
-      return a.title.localeCompare(b.title, "zh-Hans-CN")
+      return collator.compare(a.title, b.title)
     case "artist":
-      return a.artist.localeCompare(b.artist, "zh-Hans-CN")
+      return collator.compare(a.artist, b.artist)
     case "album":
-      return a.album.localeCompare(b.album, "zh-Hans-CN")
+      return collator.compare(a.album, b.album)
     case "duration":
       return a.duration - b.duration
     case "playCount":

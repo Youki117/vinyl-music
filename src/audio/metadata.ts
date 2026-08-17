@@ -2,13 +2,20 @@ import { parseBlob, type IAudioMetadata } from "music-metadata"
 
 import type { FileRef } from "@/platform"
 
+/**
+ * 导入时要落进曲目的元数据。
+ *
+ * 这里**故意没有封面**。导入路径不该物化封面：全项目只有 Disc 显示封面，而且只显示
+ * 当前播放的那一首（`usePlayer(s => s.current()?.cover)`），列表行根本不画图。导入一千首
+ * 就建一千个 object URL，等于为「一次只显示一张」的需求常驻几百兆的图，还让每首歌多一次
+ * blob 拷贝、拖慢导入。封面改由 `library.ensureCover` 在首播时解 —— 那条路径本来就存在：
+ * 曲库落盘不存封面，所以**重启之后一直是这个行为**，跑得好好的。
+ */
 export type TrackMeta = {
   title: string
   artist: string
   album: string
   duration: number
-  /** 内嵌封面的 object URL，调用方负责 revoke */
-  cover: string | null
   lyrics: string | null
 }
 
@@ -136,7 +143,6 @@ export async function readMetadata(ref: FileRef, bytes: Uint8Array): Promise<Tra
     artist: "未知艺术家",
     album: "",
     duration: 0,
-    cover: null,
     lyrics: null,
   }
 
@@ -152,15 +158,7 @@ export async function readMetadata(ref: FileRef, bytes: Uint8Array): Promise<Tra
   }
 
   const common = meta.common
-  let cover: string | null = null
-  const pic = common.picture?.[0]
-  if (pic) {
-    try {
-      cover = URL.createObjectURL(new Blob([pic.data as BlobPart], { type: pic.format }))
-    } catch {
-      cover = null
-    }
-  }
+  // 封面在这里**不取**（见 TrackMeta 的说明），首播时走 library.ensureCover
 
   // 内嵌歌词：不同容器放在不同字段，逐个试
   const lyricsEntry = common.lyrics?.[0]
@@ -185,7 +183,6 @@ export async function readMetadata(ref: FileRef, bytes: Uint8Array): Promise<Tra
     artist: pick(wav.artist, common.artist, fallback.artist),
     album: pick(wav.album, common.album, ""),
     duration: meta.format.duration ?? 0,
-    cover,
     lyrics: typeof lyrics === "string" ? lyrics : null,
   }
 }

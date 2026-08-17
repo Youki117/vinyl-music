@@ -2,7 +2,7 @@
  * 端到端验证播放链路（PRD F1–F3）。
  *
  * 用 ffmpeg 生成的五种格式测试音频真跑一遍：导入 → 解析元数据 → 播放 → 计时
- * → 切歌 → 跳转 → 频谱。这是此前唯一没有实测覆盖的部分。
+ * → 切歌 → 跳转 → 蒙版出图。这是此前唯一没有实测覆盖的部分。
  *
  * 前置：npm run dev 已在 1420 端口运行；tests/fixtures/ 下有测试音频
  * （由 scripts/make-fixtures.ps1 生成，见 README）。
@@ -91,8 +91,7 @@ const checks = [
   ["点击唱片后进入播放态", playing.playing],
   ["唱片开始旋转", playing.discSpinning],
   ["播放进度在推进", parseTime(playing.elapsed) > 0],
-  ["波形峰值已算出并渲染", playing.hasPeaks],
-  ["频谱分析拿到非零数据（Blob 路径未被污染）", playing.bandsNonZero],
+  ["蒙版画布确实画出了内容（一次性渲染没漏画）", playing.veilHasPixels],
   ["点击进度条能跳转", parseTime(seeked.elapsed) > parseTime(playing.elapsed) + 1],
   ["切下一首后曲名改变", next.title !== imported.title],
   ["切歌后仍在播放", next.playing],
@@ -129,22 +128,21 @@ async function readState(page) {
     const q = (s) => document.querySelector(s)
     const disc = q(".disc")
     const spans = document.querySelectorAll(".timing span")
-    const canvas = q("canvas.waveform")
-    let hasPeaks = false
-    if (canvas) {
-      const ctx = canvas.getContext("2d")
-      const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data
-      for (let i = 3; i < d.length; i += 4) {
-        if (d[i] > 0) {
-          hasPeaks = true
-          break
-        }
+    // 蒙版是否真的画出了东西。
+    //
+    // 这里原来的断言叫"频谱分析拿到非零数据"，但实现只看了画布宽高不为 0 —— 名不副实。
+    // 蒙版改成"只在参数变化时画一帧"之后，画布空白反而成了真实风险（少补一次 render
+    // 就一直空着），所以这次真去读像素。
+    let veilHasPixels = false
+    const veil = q("canvas.veil")
+    if (veil && veil.width > 0) {
+      const gl = veil.getContext("webgl2", { preserveDrawingBuffer: true })
+      if (gl) {
+        const px = new Uint8Array(4 * 64)
+        gl.readPixels(0, Math.floor(veil.height / 2), 64, 1, gl.RGBA, gl.UNSIGNED_BYTE, px)
+        veilHasPixels = px.some((v) => v > 0)
       }
     }
-    // 蒙版画布上取一行像素，确认着色器真的在出图
-    let bandsNonZero = false
-    const veil = q("canvas.veil")
-    if (veil) bandsNonZero = veil.width > 0 && veil.height > 0
 
     return {
       title: q(".timing b")?.textContent ?? "",
@@ -152,8 +150,7 @@ async function readState(page) {
       total: spans[1]?.textContent ?? "",
       playing: disc?.getAttribute("data-playing") === "true",
       discSpinning: disc ? getComputedStyle(disc).animationPlayState === "running" : false,
-      hasPeaks,
-      bandsNonZero,
+      veilHasPixels,
     }
   })
 }

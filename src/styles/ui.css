@@ -5,13 +5,32 @@
   position: absolute;
   left: 26px;
   top: 2px;
+  /* 定宽是给自动缩字号用的：Masthead.tsx 拿这个宽度当上限。
+     参考图里 FASHION 占 424px，留到 470px 是为了让稍长的歌名也能保持满字号，
+     再长就自动往下缩。右边界不能再往外推，否则会压到黑胶上。 */
+  width: 470px;
   color: var(--ink-accent);
   font-family: var(--font-display);
   line-height: 0.95;
 }
 
+/* 中文标题另走一套字体栈：展示字体只子集化了拉丁字母，中文会掉到宋体。
+   先试思源/宋体系的衬线中文，都没有再退到雅黑 —— 大字号下雅黑也比宋体耐看。 */
+.masthead [data-cjk="true"] {
+  font-family: "Source Han Serif SC", "Noto Serif SC", "Songti SC", STSong, var(--font-cjk);
+}
+
 /* 字号与字距实测自 design-ref/target/ref-veil-primary.png：
    FASHION 占 424px 宽、SELP-PORTRAIT 占 252px */
+/* 标题与副标题都不折行：折了行会把下面整排版式顶下去。
+   先按 Masthead.tsx 的测量缩字号，缩到下限还放不下才截断加省略号。 */
+.masthead h1,
+.masthead p {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .masthead h1 {
   margin: 0;
   font-size: 97px;
@@ -56,19 +75,43 @@
 }
 
 /* ── E5 歌词 ───────────────────────────────────────────── */
+/*
+ * 视口。高度按参考图的六行取，超出的部分裁掉 —— 当前行靠滚动送到固定槽位，
+ * 而不是靠切片。overflow: hidden 下 scrollTop 依然可以用脚本设置，滚动条不会出现。
+ */
 .lyrics {
   position: absolute;
   left: 8px;
   top: 268px;
   width: 208px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
+  height: 152px;
+  overflow: hidden;
   color: var(--ink-secondary);
   font-family: var(--font-cjk);
   font-size: 11.5px;
   text-align: center;
+  /*
+   * 上下渐隐收边。参考图里全是短中文句，六行正好排满；但英文歌词一句折成两行，
+   * 底部那行就会被硬切成半截字，很难看。用遮罩淡出而不是把高度调大 —— 调大会
+   * 撞到下面的进度条，而且当前行的槽位是照参考图定死的，不能动。
+   */
+  mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 22px), transparent 100%);
+}
+
+/*
+ * padding-top 就是"当前行槽位"距视口顶部的距离，Lyrics.tsx 直接读它来算滚动量 ——
+ * 这个数只在这里写一次。51px ≈ 两行的高度，于是当前行上方留 2 行、下方 3 行，
+ * 与 design-ref 的两张参考图一致。
+ *
+ * padding-bottom 要够最后一行也能滚到该槽位（视口高 - 槽位偏移），否则整首歌的
+ * 最后几句会卡在栏底不动。
+ */
+.lyrics-track {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 51px 0 101px;
 }
 
 /*
@@ -292,17 +335,10 @@
   color: var(--ink-secondary);
 }
 
+/* 原来这里是一小段波形，已删（理由见 Progress.tsx）。
+   留白保留：进度条与上方元素的间距是照效果图定的，去掉会让整条传输栏往上跳。 */
 .wave-row {
-  position: relative;
   height: 36px;
-}
-
-/* 波形窗口跟着播放头走，与参考图一致 */
-.waveform {
-  position: absolute;
-  bottom: 0;
-  left: calc(var(--playhead) - 10px);
-  color: var(--ink-secondary);
 }
 
 .progress {
@@ -401,13 +437,34 @@
 }
 
 /* ── E14 装饰星标 ──────────────────────────────────────── */
-.sparkle {
+/*
+ * 换底图的快捷按钮。位置沿用效果图里那颗四角星的位置，但做成了真正的按钮：
+ * 它永远压在底图上（而底图是用户自己选的任意照片），裸图标在浅色背景上会直接消失，
+ * 所以给一层半透明底 + 轻微模糊把它从画面里托起来。
+ */
+.skin-quick {
   position: absolute;
   right: 22px;
   bottom: 28px;
   width: 34px;
   height: 34px;
-  color: rgba(220, 220, 220, 0.72);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: rgba(245, 245, 245, 0.82);
+  background: rgba(20, 20, 20, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(6px);
+  transition:
+    color 160ms ease,
+    background 160ms ease,
+    border-color 160ms ease;
+}
+
+.skin-quick:hover {
+  color: #fff;
+  background: rgba(20, 20, 20, 0.46);
+  border-color: rgba(255, 255, 255, 0.32);
 }
 
 /* ── E15 窗口控制：悬停才显现，不打扰画面 ───────────────── */
@@ -460,19 +517,68 @@
   height: 100%;
 }
 
-.tb-tool {
-  width: 26px;
-  height: 22px;
-  margin-left: 4px;
-  display: grid;
-  place-items: center;
-  border-radius: 5px;
-  background: rgba(20, 20, 20, 0.55);
-  color: rgba(255, 255, 255, 0.8);
+/* ── 右侧工具栏：常隐，碰到右边缘才显现 ─────────────────── */
+/*
+ * 显隐机制与标题栏完全一致（opacity 0 → 1，200ms）。opacity 为 0 的元素照样收指针
+ * 事件，所以"碰边缘就出来"是天然的，不用额外做命中区。
+ *
+ * 底边留出 76px：右下角那个换底图的快捷按钮在 bottom: 28px，不留空的话鼠标去点它
+ * 会顺带把整条侧栏勾出来，两个东西叠在一起闪。
+ */
+/*
+ * 侧栏和抽屉抢的是同一条右边缘。抽屉 z-index 是 7，一开就把侧栏盖住，工具按钮
+ * 直接点不到 —— 而这几个按钮的用处恰恰是"面板之间互相切换"。
+ *
+ * 所以侧栏压在抽屉之上（z-index 8），同时所有抽屉给它让出 --rail-w 的轨道
+ * （见下方 .drawer 的 padding-right）。抽屉背景仍然铺到窗口边缘，只是内容不进这条轨道。
+ */
+.sidebar {
+  position: absolute;
+  top: 34px;
+  right: 0;
+  bottom: 76px;
+  width: var(--rail-w);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  opacity: 0;
+  transition: opacity 200ms ease;
+  z-index: 8;
 }
 
-.tb-tool:hover {
-  background: rgba(255, 255, 255, 0.2);
+.sidebar:hover,
+.sidebar:focus-within {
+  opacity: 1;
+}
+
+.sb-tool {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(20, 20, 20, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(6px);
+  transition:
+    background 160ms ease,
+    color 160ms ease,
+    border-color 160ms ease;
+}
+
+.sb-tool:hover {
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+
+/* 面板开着时对应按钮保持点亮，用户才知道当前在哪一页 */
+.sb-tool[data-on="true"] {
+  background: rgba(255, 255, 255, 0.26);
+  border-color: rgba(255, 255, 255, 0.42);
   color: #fff;
 }
 
@@ -502,7 +608,7 @@
 
 /* ── 曲库抽屉：左歌单右曲目 ────────────────────────────── */
 .library-drawer {
-  width: 560px;
+  width: calc(560px + var(--rail-w));
   flex-direction: row;
 }
 
@@ -794,7 +900,7 @@ header button.danger,
 
 /* ── 混音面板 ──────────────────────────────────────────── */
 .mix-panel {
-  width: 420px;
+  width: calc(420px + var(--rail-w));
 }
 
 .host-name b {
@@ -1072,12 +1178,18 @@ header button.danger,
 }
 
 /* ── L4 播放列表抽屉 ───────────────────────────────────── */
+/*
+ * 抽屉一律给右侧工具栏让出 --rail-w 的轨道：背景仍然铺到窗口边缘（不留缝），
+ * 但内容不进那条轨道，所以侧栏浮在上面时不会压住面板里的任何控件（尤其是 ✕）。
+ * 各个抽屉的 width 都写成「内容宽 + 轨道宽」，box-sizing 是 border-box。
+ */
 .drawer {
   position: absolute;
   right: 0;
   top: 0;
   bottom: 0;
-  width: 380px;
+  width: calc(380px + var(--rail-w));
+  padding-right: var(--rail-w);
   z-index: 7;
   display: flex;
   flex-direction: column;
@@ -1225,9 +1337,73 @@ header button.danger,
   color: #8d8981;
 }
 
+/* ── 蒙版预设 ──────────────────────────────────────────── */
+.preset-save {
+  display: flex;
+  gap: 6px;
+}
+
+.preset-save input {
+  flex: 1;
+  min-width: 0;
+}
+
+.preset-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.preset-list li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* 当前正在用的那个高亮，否则列表长了分不清自己在哪 */
+.preset-list li[data-on="true"] {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.preset-list li > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preset-list button {
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #ddd9d2;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.preset-list button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.preset-list button:disabled {
+  opacity: 0.35;
+}
+
+.preset-list button.danger:hover:not(:disabled) {
+  background: #a33;
+  color: #fff;
+}
+
 /* ── 皮肤面板 ──────────────────────────────────────────── */
 .skin-editor {
-  width: 330px;
+  width: calc(330px + var(--rail-w));
 }
 
 .skin-editor .tabs {

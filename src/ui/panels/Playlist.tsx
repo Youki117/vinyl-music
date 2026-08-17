@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 
 import { platform } from "@/platform"
 import { formatTime } from "@/lib/format"
@@ -6,6 +6,7 @@ import {
   SORT_LABEL,
   VIEW_LABEL,
   VIRTUAL_VIEWS,
+  selectTracks,
   useLibrary,
   type SortKey,
   type Track,
@@ -15,9 +16,39 @@ import { useDismiss } from "../useDismiss"
 
 const SORT_KEYS: SortKey[] = ["added", "title", "artist", "album", "duration", "playCount", "lastPlayed"]
 
+/** 抽屉关着时的占位。提到模块级是为了引用恒定，否则 useMemo 每次都算"变了" */
+const NO_ROWS: Track[] = []
+
 /** L4 曲库抽屉：左边歌单，右边曲目。默认收起，不占画面。 */
 export default function Playlist({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const lib = useLibrary()
+  // 逐片订阅，不要 `useLibrary()` 订整棵树。整店订阅的代价在导入时才现形：
+  // addFiles 每处理完一个文件就 set 一次 scanning，整店订阅会让这里跟着重渲染一次，
+  // 而每次重渲染又重跑一遍筛选+排序 —— 面板开着导 1000 首就是 O(n²)。
+  const tracks = useLibrary((s) => s.tracks)
+  const playlists = useLibrary((s) => s.playlists)
+  const activeView = useLibrary((s) => s.activeView)
+  const sort = useLibrary((s) => s.sort)
+  const sortDesc = useLibrary((s) => s.sortDesc)
+  const filter = useLibrary((s) => s.filter)
+  const scanning = useLibrary((s) => s.scanning)
+  // 动作在 zustand 里引用恒定，订阅它们只会白白扩大重渲染面
+  const {
+    addFiles,
+    addToPlaylist,
+    createPlaylist,
+    deletePlaylist,
+    exportPlaylist,
+    importPlaylist,
+    removeFromPlaylist,
+    removeTracks,
+    renamePlaylist,
+    reorderInPlaylist,
+    setFilter,
+    setSort,
+    setView,
+    toggleLike,
+  } = useLibrary.getState()
+
   const playFrom = usePlayer((s) => s.playFrom)
   const playNext = usePlayer((s) => s.playNext)
   const currentId = usePlayer((s) => s.current()?.id ?? null)
@@ -30,19 +61,27 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
   // 右键菜单点哪儿都该收起来，包括抽屉内部，所以不豁免常驻区
   const menuRef = useDismiss<HTMLDivElement>(menu !== null, () => setMenu(null), false)
 
+  // 筛选+排序是纯函数，按输入缓存即可。导入期间 tracks 直到最后才整体替换，
+  // 所以这段在导入全程一次都不会重算 —— 这正是上面那条 O(n²) 的解药。
+  // 关着的时候不算：抽屉默认收起，没必要为看不见的列表付筛选排序的钱。
+  const rows = useMemo(
+    () =>
+      open ? selectTracks({ tracks, playlists, view: activeView, sort, sortDesc, filter }) : NO_ROWS,
+    [open, tracks, playlists, activeView, sort, sortDesc, filter],
+  )
+
   if (!open) return null
 
-  const rows = lib.visible()
-  const inPlaylist = !(VIRTUAL_VIEWS as readonly string[]).includes(lib.activeView)
+  const inPlaylist = !(VIRTUAL_VIEWS as readonly string[]).includes(activeView)
 
-  const importFiles = () => void platform.pickAudioFiles().then(lib.addFiles)
-  const importFolder = () => void platform.pickAudioFolder().then(lib.addFiles)
+  const importFiles = () => void platform.pickAudioFiles().then(addFiles)
+  const importFolder = () => void platform.pickAudioFolder().then(addFiles)
 
   const importM3u = () =>
     void (async () => {
       const ref = await platform.pickPlaylistFile()
       if (!ref) return
-      const r = await lib.importPlaylist(ref)
+      const r = await importPlaylist(ref)
       setNote(
         r.playlistId
           ? `已导入 ${r.matched} 首${r.missing > 0 ? `，${r.missing} 首找不到文件` : ""}`
@@ -51,10 +90,10 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
     })()
 
   const exportM3u = () =>
-    void lib.exportPlaylist().then((ok) => setNote(ok ? "已导出" : "当前列表是空的"))
+    void exportPlaylist().then((ok) => setNote(ok ? "已导出" : "当前列表是空的"))
 
   // 只有自建歌单里"顺序"才是用户定的；虚拟歌单与排序视图下拖动没有意义
-  const canReorder = inPlaylist && lib.sort === "added" && !lib.filter.trim()
+  const canReorder = inPlaylist && sort === "added" && !filter.trim()
 
   /** 指针落在列表的哪个插入位（0..rows.length） */
   const dropIndexAt = (clientY: number): number => {
@@ -96,7 +135,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
       setDrag(null)
       // 落在自己原位或紧邻的下一格，位置其实没变
       if (to !== from && to !== from + 1) {
-        lib.reorderInPlaylist(lib.activeView, from, to > from ? to - 1 : to)
+        reorderInPlaylist(activeView, from, to > from ? to - 1 : to)
       }
     }
     document.addEventListener("pointermove", move)
@@ -108,7 +147,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
       <aside className="lib-side">
         <div className="lib-side-group">
           {VIRTUAL_VIEWS.map((v) => (
-            <button key={v} data-on={lib.activeView === v} onClick={() => lib.setView(v)}>
+            <button key={v} data-on={activeView === v} onClick={() => setView(v)}>
               {VIEW_LABEL[v]}
             </button>
           ))}
@@ -117,7 +156,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
         <div className="lib-side-title">
           歌单
           <button
-            onClick={() => setRenaming(lib.createPlaylist(`新建歌单 ${lib.playlists.length + 1}`))}
+            onClick={() => setRenaming(createPlaylist(`新建歌单 ${playlists.length + 1}`))}
             aria-label="新建歌单"
             title="新建歌单"
           >
@@ -126,14 +165,14 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
         </div>
 
         <div className="lib-side-group">
-          {lib.playlists.map((p) =>
+          {playlists.map((p) =>
             renaming === p.id ? (
               <input
                 key={p.id}
                 autoFocus
                 defaultValue={p.name}
                 onBlur={(e) => {
-                  lib.renamePlaylist(p.id, e.target.value.trim() || p.name)
+                  renamePlaylist(p.id, e.target.value.trim() || p.name)
                   setRenaming(null)
                 }}
                 onKeyDown={(e) => {
@@ -144,8 +183,8 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
             ) : (
               <button
                 key={p.id}
-                data-on={lib.activeView === p.id}
-                onClick={() => lib.setView(p.id)}
+                data-on={activeView === p.id}
+                onClick={() => setView(p.id)}
                 onDoubleClick={() => setRenaming(p.id)}
                 title={`${p.name}（${p.trackIds.length} 首，双击重命名）`}
               >
@@ -154,23 +193,23 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
               </button>
             ),
           )}
-          {lib.playlists.length === 0 && <p className="lib-side-empty">还没有歌单</p>}
+          {playlists.length === 0 && <p className="lib-side-empty">还没有歌单</p>}
         </div>
       </aside>
 
       <section className="lib-main">
         <header>
           <input
-            value={lib.filter}
-            onChange={(e) => lib.setFilter(e.target.value)}
-            placeholder={`在 ${VIRTUAL_VIEWS.includes(lib.activeView as never) ? VIEW_LABEL[lib.activeView as never] : lib.playlists.find((p) => p.id === lib.activeView)?.name ?? ""} 中搜索`}
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder={`在 ${VIRTUAL_VIEWS.includes(activeView as never) ? VIEW_LABEL[activeView as never] : playlists.find((p) => p.id === activeView)?.name ?? ""} 中搜索`}
             aria-label="搜索曲目"
           />
           <select
-            value={lib.sort}
-            onChange={(e) => lib.setSort(e.target.value as SortKey)}
+            value={sort}
+            onChange={(e) => setSort(e.target.value as SortKey)}
             aria-label="排序方式"
-            title={`排序：${SORT_LABEL[lib.sort]}${lib.sortDesc ? "（降序）" : ""}`}
+            title={`排序：${SORT_LABEL[sort]}${sortDesc ? "（降序）" : ""}`}
           >
             {SORT_KEYS.map((k) => (
               <option key={k} value={k}>
@@ -178,8 +217,8 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
               </option>
             ))}
           </select>
-          <button onClick={() => lib.setSort(lib.sort)} aria-label="切换升降序" title="切换升降序">
-            {lib.sortDesc ? "↓" : "↑"}
+          <button onClick={() => setSort(sort)} aria-label="切换升降序" title="切换升降序">
+            {sortDesc ? "↓" : "↑"}
           </button>
           <button className="drawer-close" onClick={onClose} aria-label="关闭">
             ✕
@@ -200,7 +239,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
           {inPlaylist && (
             <button
               className="danger"
-              onClick={() => lib.deletePlaylist(lib.activeView)}
+              onClick={() => deletePlaylist(activeView)}
               title="删除当前歌单（不删除文件）"
             >
               删歌单
@@ -208,10 +247,10 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
           )}
         </div>
 
-        {lib.scanning && (
+        {scanning && (
           <div className="drawer-progress">
-            正在导入 {lib.scanning.done} / {lib.scanning.total}
-            <span style={{ width: `${(lib.scanning.done / lib.scanning.total) * 100}%` }} />
+            正在导入 {scanning.done} / {scanning.total}
+            <span style={{ width: `${(scanning.done / scanning.total) * 100}%` }} />
           </div>
         )}
 
@@ -250,7 +289,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
           ))}
           {rows.length === 0 && (
             <li className="drawer-empty">
-              {lib.tracks.length === 0 ? "还没有音乐，把文件拖进窗口，或点上面的按钮" : "这里是空的"}
+              {tracks.length === 0 ? "还没有音乐，把文件拖进窗口，或点上面的按钮" : "这里是空的"}
             </li>
           )}
         </ol>
@@ -265,22 +304,22 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
         >
           <button onClick={() => void playFrom(rows, rows.indexOf(menu.track))}>播放</button>
           <button onClick={() => playNext(menu.track)}>下一首播放</button>
-          <button onClick={() => lib.toggleLike(menu.track.id)}>
+          <button onClick={() => toggleLike(menu.track.id)}>
             {menu.track.liked ? "取消收藏" : "收藏"}
           </button>
           <hr />
-          {lib.playlists.map((p) => (
-            <button key={p.id} onClick={() => lib.addToPlaylist(p.id, [menu.track.id])}>
+          {playlists.map((p) => (
+            <button key={p.id} onClick={() => addToPlaylist(p.id, [menu.track.id])}>
               加入「{p.name}」
             </button>
           ))}
           {inPlaylist && (
-            <button onClick={() => lib.removeFromPlaylist(lib.activeView, menu.track.id)}>
+            <button onClick={() => removeFromPlaylist(activeView, menu.track.id)}>
               从本歌单移除
             </button>
           )}
           <hr />
-          <button className="danger" onClick={() => lib.removeTracks([menu.track.id])}>
+          <button className="danger" onClick={() => removeTracks([menu.track.id])}>
             从曲库移除（不删文件）
           </button>
         </div>

@@ -1,6 +1,6 @@
 import { DEFAULT_VEIL, type VeilParams } from "@/stage/veil/renderer"
 
-export const SKIN_SCHEMA_VERSION = 1
+export const SKIN_SCHEMA_VERSION = 2
 
 export type Focus = { x: number; y: number }
 
@@ -87,15 +87,38 @@ export function makeSkin(patch: Partial<Skin> = {}): Skin {
   }
 }
 
+/**
+ * v1 → v2：蒙版律动删除后的字段变更。
+ *
+ * - `veil.breath` 更名为 `veil.ripple`。它原本是"静音时的呼吸底噪"，现在没有任何东西
+ *   在动了，就是一个纯静态的边缘起伏强度。名字不改的话，下一个读代码的人会去找
+ *   哪里在"呼吸"。
+ * - `veil.waveAmp`（跟随音乐的波动强度）整个删除。
+ *
+ * 不直接把旧值丢掉：用户可能把 breath 调过，迁移过来能保住他调好的形状。
+ */
+function v1ToV2(skin: unknown): unknown {
+  if (!skin || typeof skin !== "object") return skin
+  const s = skin as { veil?: Record<string, unknown> }
+  if (!s.veil || typeof s.veil !== "object") return skin
+  const { breath, waveAmp: _dropped, ...rest } = s.veil
+  return { ...s, veil: { ...rest, ripple: typeof breath === "number" ? breath : rest.ripple } }
+}
+
 /** 迁移链。加载旧版配置时按 schemaVersion 逐级升级，不洗掉用户数据。 */
 export function migrateSkins(raw: unknown): SkinsFile | null {
   if (!raw || typeof raw !== "object") return null
   const file = raw as Partial<SkinsFile>
   if (!Array.isArray(file.skins)) return null
-  // v1 是当前版本，暂无历史版本需要迁移
+
+  // 版本号缺失的一律按 v1 处理：v1 那会儿写盘就没有可靠的版本标记
+  const from = typeof file.schemaVersion === "number" ? file.schemaVersion : 1
+  let skins: unknown[] = file.skins
+  if (from < 2) skins = skins.map(v1ToV2)
+
   return {
     schemaVersion: SKIN_SCHEMA_VERSION,
     activeId: file.activeId ?? DEFAULT_SKIN.id,
-    skins: file.skins.map((s) => makeSkin(s)),
+    skins: skins.map((s) => makeSkin(s as Partial<Skin>)),
   }
 }

@@ -113,8 +113,21 @@ await playTrack(page, lib, (t) => t.title === "April Showers")
 const playing = await readPlayback(page)
 check("真实 MP3 能播放", playing.playing)
 check("进度在推进", playing.time > 0.5, `${playing.time.toFixed(2)}s`)
-check("波形峰值算出来了", playing.hasPeaks)
+// 进度条上方那段小波形已删（见 src/ui/Progress.tsx），播放路径不再算峰值
 check("没有内嵌封面的曲目留空盘，不会串用上一首的封面", !playing.labelHasImage)
+
+// 大标题：在播时显示曲目信息而不是皮肤的装饰文案。
+// 原来画面上最大的字永远是 FASHION，真正的歌名只有进度条底下 10px 的小字。
+const head = await readMasthead(page)
+console.log(`\n大标题：「${head.title}」${head.titlePx}px / 「${head.subtitle}」/「${head.third}」`)
+check("在播时大标题换成歌名", head.title === "April Showers", head.title)
+check("副标题换成艺术家", head.subtitle === "ProleteR", head.subtitle)
+check(
+  "歌名比装饰文案长，字号自动缩过（不再是 97px）",
+  head.titlePx > 0 && head.titlePx < 97,
+  `${head.titlePx}px`,
+)
+check("缩完仍在容器内，没压到黑胶上", head.overflow <= 1, `溢出 ${head.overflow}px`)
 
 // ── 三、外挂歌词 ──────────────────────────────────────────────────
 // April Showers 的歌词第一句是 [01:02.27]，第二句 [01:03.96]，跳到两者之间
@@ -132,6 +145,25 @@ await page.screenshot({ path: `${OUT}/real-lyrics.png` })
 await seekTo(page, 68)
 const atNext = await readLyrics(page)
 check("时间前进后当前行跟着换", atNext.active !== atVerse.active, `${atVerse.active} → ${atNext.active}`)
+
+// 当前行必须钉在同一个高度，歌词从它下面滚过去 —— 这是和主流播放器观感差距最大的一点。
+// 原实现按 active±3 切片渲染，歌刚开始时当前行贴在栏顶，唱到第四句才挪到中间。
+// 这个 bug 对拍脚本一直发现不了：占位歌词把 active 硬编码成 2，截图里永远是居中的。
+await seekTo(page, 240) // 歌快唱完，当前行序号很大
+const atLate = await readLyrics(page)
+console.log(`当前行 y：01:03 处 ${atVerse.activeY}px，01:08 处 ${atNext.activeY}px，04:00 处 ${atLate.activeY}px`)
+check(
+  "当前行始终固定在同一高度（整首歌不漂移）",
+  atVerse.activeY !== null &&
+    Math.abs(atNext.activeY - atVerse.activeY) <= 2 &&
+    (atLate.activeY === null || Math.abs(atLate.activeY - atVerse.activeY) <= 2),
+  `${atVerse.activeY} / ${atNext.activeY} / ${atLate.activeY}`,
+)
+check(
+  "当前行上方留出了两行的位置，不是贴着栏顶",
+  atVerse.activeY >= 40 && atVerse.activeY <= 62,
+  `${atVerse.activeY}px`,
+)
 
 // 间奏：01:21.72 唱完，下一句要到 02:03。这段时间不该继续高亮
 await seekTo(page, 95)
@@ -198,6 +230,50 @@ console.log(`配色变化：${skinBefore.inkPrimary} → ${skin1.inkPrimary} →
 check("第二次换图同样生效", skin2.backdropUrl !== skin1.backdropUrl)
 check("贴纸第二次也跟着换", skin2.labelUrl === skin2.backdropUrl)
 check("蒙版仍由 WebGL 画（没退化成 CSS 兜底）", skin2.veilIsShader)
+
+// 黑边填充。舞台是固定 1243×688 等比缩放居中的，窗口比例一变就多出黑边；
+// 本脚本平时用的视口正好是设计比例，所以这条路以前一次都没走到过。
+// 换成 16:10（笔记本上最常见的比例之一，理论上约 11% 的上下黑边）来验。
+{
+  const { PNG } = await import("pngjs")
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.waitForTimeout(600)
+
+  const box = await page.evaluate(() => {
+    const v = document.querySelector(".viewport")?.getBoundingClientRect()
+    const s = document.querySelector(".stage")?.getBoundingClientRect()
+    const b = document.querySelector(".viewport-bleed")
+    return {
+      barY: v && s ? Math.round(v.height - s.height) : 0,
+      stageTop: s ? Math.round(s.top) : 0,
+      hasBleed: !!b,
+      bleedCoversAll:
+        b && v
+          ? b.getBoundingClientRect().width >= v.width && b.getBoundingClientRect().height >= v.height
+          : false,
+    }
+  })
+  console.log(`\n16:10 视口下上下黑边合计 ${box.barY}px，舞台顶边在 y=${box.stageTop}`)
+  check("换成 16:10 后确实出现了letterbox（否则这条用例没测到东西）", box.barY > 40, `${box.barY}px`)
+  check("底图延伸层已渲染并铺满整个窗口", box.hasBleed && box.bleedCoversAll)
+
+  // 真正的证据：黑边区域里取一个像素，它不该还是纯黑
+  await page.screenshot({ path: `${OUT}/real-letterbox.png` })
+  const shot = PNG.sync.read(await page.screenshot())
+  const y = Math.max(2, Math.round(box.stageTop / 2)) // 上方黑边的中间
+  const px = (x) => {
+    const i = (y * shot.width + x) * 4
+    return [shot.data[i], shot.data[i + 1], shot.data[i + 2]]
+  }
+  const samples = [px(80), px(640), px(1200)]
+  const brightest = Math.max(...samples.flat())
+  console.log(`黑边取样 y=${y}：${samples.map((s) => s.join(",")).join("  |  ")}`)
+  check("黑边已被底图填掉，不再是纯黑", brightest > 12, `最亮通道 ${brightest}`)
+
+  await page.setViewportSize({ width: 1243, height: 688 })
+  await page.waitForTimeout(500)
+}
+
 await page.keyboard.press("Escape")
 await page.waitForTimeout(300)
 
@@ -342,17 +418,6 @@ async function readPlayback(page) {
   return page.evaluate(() => {
     const disc = document.querySelector(".disc")
     const el = document.querySelector("audio")
-    const canvas = document.querySelector("canvas.waveform")
-    let hasPeaks = false
-    if (canvas) {
-      const d = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data
-      for (let i = 3; i < d.length; i += 4) {
-        if (d[i] > 0) {
-          hasPeaks = true
-          break
-        }
-      }
-    }
     const label = document.querySelector(".disc-label")
     const bg = label ? getComputedStyle(label).backgroundImage : ""
     const m = /url\("?([^")]+)"?\)/.exec(bg || "")
@@ -362,10 +427,26 @@ async function readPlayback(page) {
     return {
       playing: disc?.getAttribute("data-playing") === "true",
       time: el?.currentTime ?? 0,
-      hasPeaks,
       labelHasImage: labelUrl !== "",
       labelUrl,
       labelIsCover: labelUrl !== "" && labelSize === "cover",
+    }
+  })
+}
+
+async function readMasthead(page) {
+  return page.evaluate(() => {
+    const box = document.querySelector(".masthead")
+    if (!box) return null
+    const px = (el) => (el ? Math.round(parseFloat(getComputedStyle(el).fontSize)) : 0)
+    const h1 = box.querySelector("h1")
+    return {
+      title: h1?.textContent ?? "",
+      subtitle: box.querySelector("p")?.textContent ?? "",
+      third: box.querySelector("small")?.textContent ?? "",
+      titlePx: px(h1),
+      // 缩完字号之后仍然不能超出容器，否则会压到黑胶上
+      overflow: h1 ? h1.scrollWidth - box.clientWidth : 0,
     }
   })
 }
@@ -376,10 +457,17 @@ async function readLyrics(page) {
     const textOf = (n) => Array.from(n.childNodes).find((c) => c.nodeType === 3)?.nodeValue ?? ""
     const nodes = Array.from(document.querySelectorAll(".lyric-line"))
     const act = nodes.filter((n) => n.dataset.active === "true")
+    const box = document.querySelector(".lyrics")
     return {
       lines: nodes.map(textOf),
       active: act[0] ? textOf(act[0]) : "",
       activeCount: act.length,
+      // 当前行相对歌词栏顶部的 y。参考图里当前行永远在同一个高度，
+      // 所以这个值在整首歌里必须是常数
+      activeY:
+        act[0] && box
+          ? Math.round(act[0].getBoundingClientRect().top - box.getBoundingClientRect().top)
+          : null,
     }
   })
 }

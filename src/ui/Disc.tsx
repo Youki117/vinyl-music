@@ -1,6 +1,7 @@
 import { useSkin } from "@/store/skin"
 import { labelBackground } from "@/skin/resolve"
 import { usePlayer } from "@/store/player"
+import { useLibrary } from "@/store/library"
 
 /**
  * E6/E7：黑胶与唱片贴纸。
@@ -19,7 +20,10 @@ export default function Disc({
   const label = useSkin((s) => s.label)
   const focus = useSkin((s) => s.skin.label.focus)
   const status = usePlayer((s) => s.status)
-  const cover = usePlayer((s) => s.current()?.cover ?? null)
+  // 封面从曲库读，不读队列里那份副本 —— 曲库是唯一来源，它按 LRU 淘汰并 revoke 时
+  // 这里会跟着变 null，而副本不会，那样贴纸就指着一个死 URL 了
+  const currentId = usePlayer((s) => s.current()?.id ?? null)
+  const cover = useLibrary((s) => (currentId ? (s.byId(currentId)?.cover ?? null) : null))
   const playing = status === "playing"
 
   // 贴纸优先级：皮肤指定的图（跟随底图或单独指定）> 曲目内嵌封面 > 空。

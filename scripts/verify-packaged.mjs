@@ -111,8 +111,14 @@ const app = spawn(EXE, [ARG_FILE], {
   env: {
     ...process.env,
     // 这个环境变量会**覆盖** tauri.conf.json 里的 additionalBrowserArgs，
-    // 所以那边的开关要原样带上，否则测出来的行为和用户装机后的不一样
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT} --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,MediaSessionService`,
+    // 所以那边的开关要原样带上，否则测出来的行为和用户装机后的不一样。
+    // 对照源：src-tauri/tauri.conf.json → app.windows[0].additionalBrowserArgs
+    // 试省内存的启动参数时用 VINYL_EXTRA_ARGS 追加，例如
+    //   VINYL_EXTRA_ARGS="--in-process-gpu" node scripts/verify-packaged.mjs
+    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:
+      `--remote-debugging-port=${PORT} ` +
+      `--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,MediaSessionService ` +
+      (process.env.VINYL_EXTRA_ARGS ?? ""),
   },
 })
 app.unref()
