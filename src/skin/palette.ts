@@ -70,50 +70,108 @@ export function dominantColors(rgba: ArrayLike<number>, count = 3): string[] {
   const ranked = [...buckets.values()].sort((a, b) => b.n - a.n)
   if (ranked.length === 0) return []
 
-  // 候选池。要挡的是"几个像素的杂色"—— 那种颜色离得最远，最远点采样会一头撞上去，
-  // 但它根本不是这张图的主色调。
-  //
-  // 门槛按**像素占比**而不是名次：名次只在桶很多时才起过滤作用，桶少的时候
-  // 杂色照样排进前几名。占比不吃这个亏。名次上限只是顺带削掉长尾，省点循环。
   const total = ranked.reduce((n, e) => n + e.n, 0)
-  const MIN_SHARE = 0.005
-  const POOL = 48
-  const pool = ranked
-    .filter((e, i) => i === 0 || e.n / total >= MIN_SHARE) // 第一名无条件保留，避免池子空掉
-    .slice(0, POOL)
-    .map((e) => [e.r / e.n, e.g / e.n, e.b / e.n] as [number, number, number])
-
   const gap = (a: [number, number, number], b: [number, number, number]) =>
     Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
 
-  const picked: [number, number, number][] = [pool[0]] // 最常见的那个先占位
-  while (picked.length < count && picked.length < pool.length) {
-    let best: [number, number, number] | null = null
-    let bestGap = -1
-    for (const c of pool) {
-      if (picked.includes(c)) continue
-      const d = Math.min(...picked.map((p) => gap(p, c)))
-      if (d > bestGap) {
-        bestGap = d
-        best = c
+  // 先聚类，再过占比门槛。
+  //
+  // 量化会把一片渐变打散成几十个小桶 —— 火星飞溅的红、草丛里的橙花都是这种形状。
+  // 每个小桶单独都够不着门槛，于是整个强调色凭空消失。而人眼说的"最鲜明的颜色"
+  // 恰恰常常正是这类面积不大的强调色，不是面积最大的那片背景。
+  //
+  // 簇的代表色取**簇内最常见的那个桶**，不取全簇平均：平均会把强调色朝周围的
+  // 背景色拉回去，等于又抹平一次。
+  // 60 而不是 40：一片背景的明暗过渡（近黑 → 暗栗 → 灰栗）在感知上就是"那片暗底"，
+  // 分成三个簇的话它们会各自带着不低的分数去抢名额，三个位置全被同一片暗底占掉。
+  const MERGE = 60
+  const clusters: { rgb: [number, number, number]; n: number }[] = []
+  for (const e of ranked) {
+    const c: [number, number, number] = [e.r / e.n, e.g / e.n, e.b / e.n]
+    const hit = clusters.find((k) => gap(k.rgb, c) < MERGE)
+    if (hit) hit.n += e.n
+    else clusters.push({ rgb: c, n: e.n })
+  }
+  clusters.sort((a, b) => b.n - a.n) // 合并改了权重，重排
+
+  // 先过资格线，再按"显眼程度"排 —— 不是按面积排。
+  //
+  // 按面积排是错的：面积最大的几乎总是背景。实测那张暗色人物图，近黑的 #0b0809
+  // 占了 85.51%，于是它必然是第一名，后面两个也只能在剩下的面积顺序里挑。
+  // 而人在说"这张图最明显的三个颜色"时，指的是最跳眼的那几个，不是铺得最满的那个。
+  //
+  // 资格线仍然按面积（挡几个像素的杂色），且随饱和度下调：越鲜艳，占的面积可以越小。
+  // 画面上一小片发光的火星按面积一刀切正好会被滤掉，只剩大片暗色。
+  // ABS_MIN 给这个让步兜底 —— 再鲜艳，几个像素也还是杂色。
+  const MIN_SHARE = 0.008
+  const ABS_MIN = 0.0025
+  const satOf = (c: [number, number, number]) => rgbToHsl(c[0], c[1], c[2])[1]
+
+  // 面积开根号压一下：不压的话一片背景的权重能盖过一切，压过头又会挑到犄角旮旯。
+  const score = (k: { rgb: [number, number, number]; n: number }) =>
+    0.6 * satOf(k.rgb) + 0.4 * Math.sqrt(k.n / total)
+
+  const qualified = clusters.filter(
+    (k, i) => i === 0 || k.n / total >= Math.max(ABS_MIN, MIN_SHARE * (1 - 0.75 * satOf(k.rgb))),
+  )
+  const POOL = 8
+  const pool = [...qualified]
+    .sort((a, b) => score(b) - score(a))
+    .slice(0, POOL)
+    .map((k) => k.rgb)
+
+  // 后两个也按显眼程度挑，距离只当**去重护栏**用，不当目标。
+  //
+  // 只按距离挑（纯最远点采样）会挑错：那张暗色人物图里血红 #551718 就在候选里，
+  // 但离黑底只有 88，而一块浅灰粉离黑底有 266，纯比距离就把浅灰粉挑走了 —— 一张
+  // 满屏血红的图，取出来的三个色里没有红。
+  // 所以距离超过 DIVERSITY 之后就不再加分（够分得开就行），剩下的交给显眼程度。
+  // 除了颜色要分得开，**明暗也要分得开**。
+  //
+  // 只看 RGB 距离不够：两个深色天生就挨得近，于是一张暗调图会把三个名额全给暗色，
+  // 画面上那块亮的（人物的衣服、高光）永远选不上 —— 而那恰恰是人一眼会看到的第三个色。
+  // 所以再加一道明暗护栏，和颜色护栏一样只到阈值为止，够开就不再加分。
+  const DIVERSITY = 90
+  const LUM_SPREAD = 0.1
+  const picked: [number, number, number][] = [pool[0]] // 最显眼的那个先占位
+  const rest = qualified.filter((k) => k.rgb !== pool[0])
+  while (picked.length < count && rest.length > 0) {
+    let best = -1
+    let bestScore = -1
+    rest.forEach((k, i) => {
+      const near = Math.min(...picked.map((p) => gap(p, k.rgb)))
+      const lum = relativeLuminance(...k.rgb)
+      const nearLum = Math.min(...picked.map((p) => Math.abs(relativeLuminance(...p) - lum)))
+      const s =
+        score(k) * Math.min(1, near / DIVERSITY) * Math.min(1, nearLum / LUM_SPREAD)
+      if (s > bestScore) {
+        bestScore = s
+        best = i
       }
-    }
-    if (!best) break
-    picked.push(best)
+    })
+    if (best < 0) break
+    picked.push(rest[best].rgb)
+    rest.splice(best, 1)
   }
 
   return picked.map(([r, g, b]) => rgbToHex(r, g, b))
 }
 
 /**
- * 把一个主色调整成"能当蒙版用"的样子。
+ * 把一个主色调整成"能当蒙版用"的样子。**基本是原样放行，只挡两个极端。**
  *
- * 直接拿原色当蒙版会翻车：蒙版是压在底图左半边、不透明度 0.89 的一大片，
- * 高饱和的原色铺这么大一片会非常刺眼，很暗的原色则会把整个左半边糊死。
- * 所以压饱和、把亮度抬进一个可用区间 —— 保留色相（认得出是从图里来的），
- * 但不喧宾夺主。
+ * 这里前后错了三版，根子都是同一个：想当然地认为蒙版必须是浅色，于是把亮度硬压进
+ * 一个窄而浅的区间。结果是取出来的色再准也没用 —— 实测四张底图十二个色，
+ * 没有一个不是淡的：
+ *   #a65927（饱满的铁锈橙）→ #f4ede9（近白）
+ *   #0b0808 #543737 #2c2224（黑 + 血红，正是人眼看到的）→ 三个几乎一样的淡粉
+ * 而用户自己手调的蒙版色是 #5e0d0d，亮度 0.028 —— 想要的方向和那个区间正相反。
  *
- * 文字对比度不用在这里操心：deriveInk 会拿最终的 tint 重新推一遍配色。
+ * 所以现在只做两件事：把饱和度压到不刺眼（挡霓虹），把亮度挡在纯黑纯白之外
+ * （纯黑丢色相，纯白等于没蒙版）。中间一律原样。
+ *
+ * 文字可读性不在这里管：Stage 会拿**当前生效的** tint 走一遍 deriveInk，
+ * 蒙版变深文字就跟着变浅。
  */
 export function veilTintFrom(hex: string): string {
   const [h, s0, l0] = rgbToHsl(...hexToRgb(hex))
@@ -128,39 +186,18 @@ export function veilTintFrom(hex: string): string {
 }
 
 /**
- * 一次处理一组主色 —— 自动取色**必须**走这个，不能对每个色单独调 veilTintFrom。
+ * 一组主色一起过滤。
  *
- * 逐色处理会在真实照片上垮掉，因为它保留色相、抹平明暗和饱和，而大多数照片的三个主色
- * 恰恰是同一个色相的深浅变化：
- *   backdrop-1 取到 #090603 / #dacaa9 / #996628（原始距离 176）—— 全是同一种暖色
- *   backdrop-2 取到 #878787 / #090909 / #f5f5f5 —— 灰度图，压根没有色相
- * 逐色处理完分别是 #d5c1ad/#d5c8ae/#d3c1ab（距离 3）和 #c4c4c4/#c4c4c4/#efefef（距离 0），
- * 面板上就是一个色块。**明暗正是这些图唯一的信息，不能抹掉。**
+ * 上一版这里做的是"把三个色按明暗次序摊到亮度区间上"，那是为了补救区间太窄导致
+ * 三色撞在一起。区间放开之后这个补救就不需要了，而且有害：三个色原始亮度挤在
+ * 0.03/0.13/0.15 时，硬摊开会把只亮了一点点的那个推到区间顶端 —— 铁锈橙变白就是
+ * 这么来的。**保真优先于拉开差异**：原图里差多少，出来就差多少。
  *
- * 所以亮度不再各自往区间边缘收，而是按原始明暗次序摊到整个区间上：最暗的落到区间下沿、
- * 最亮的落到上沿、中间的居中。区间本身还是要守（蒙版是压在左半边、不透明度 0.89 的
- * 一大片，太暗糊死、太亮等于没取色），但同一个区间里三个色是分开摆的，不是叠在一起。
- *
- * 返回顺序与入参一致（入参是按出现次数排的，第一个是最主要的色），只有亮度目标按明暗
- * 次序分配。
+ * 保留这个函数而不是让调用方自己 map，是因为"整组一起看"这个约束值得留在类型上：
+ * 以后要加"三色太接近时轻推一下"之类的规则，入口在这里。
  */
 export function veilTintsFrom(hexes: string[]): string[] {
-  if (hexes.length <= 1) return hexes.map(veilTintFrom)
-
-  const prepped = hexes.map((hex, i) => {
-    const [h, s0] = rgbToHsl(...hexToRgb(hex))
-    return { i, h, s: Math.min(s0, VEIL_TINT_MAX_SAT), lum: lumOf(hex) }
-  })
-
-  const out: string[] = new Array(hexes.length)
-  const span = VEIL_TINT_MAX_LUM - VEIL_TINT_MIN_LUM
-  ;[...prepped]
-    .sort((a, b) => a.lum - b.lum)
-    .forEach((c, rank, all) => {
-      const target = VEIL_TINT_MIN_LUM + span * (rank / (all.length - 1))
-      out[c.i] = hslToHex(c.h, c.s, solveLightness(c.h, c.s, target))
-    })
-  return out
+  return hexes.map(veilTintFrom)
 }
 
 /**
@@ -184,17 +221,20 @@ function solveLightness(h: number, s: number, target: number): number {
 /**
  * 自动取色后蒙版色的取值范围。看着不满意先调这三个数。
  *
- * 亮度区间用的是 **WCAG 相对亮度**而不是 HSL 明度：后者不是感知量，
- * 同样 L=0.62 的黄色看着比蓝色亮得多，三个色摆一起会明暗不齐。
- * 蒙版是压在左半边、不透明度 0.89 的一大片，太暗会把整个左半边糊死；
- * 太亮又和默认的近白色（#f7f5f0，亮度约 0.90）没区别，等于白取一趟色。
+ * 这是**护栏，不是风格**——区间开得很宽，绝大多数颜色原样通过。三个数各挡一件事：
  *
- * 区间两端都远在"深色文字胜出"的一侧（亮度 0.55 对黑字对比度已有 12:1），
- * 所以三色轮换不会让 deriveInk 的深浅判断来回翻，文字不会一段黑一段白。
+ * - MIN_LUM：纯黑没有色相，铺一大片就是个黑块，看不出是从图里来的。只要抬离纯黑，
+ *   不要抬到"看得出变亮"—— 0.004 大约相当于 #0d0d0d。这个数放大到 0.015 就已经会
+ *   把 #0b0808 顶到 #2c2224 身上，两个原本差 50 的色挤成差 7，保真度当场就没了。
+ * - MAX_LUM：太亮就和没有蒙版没区别（默认色 #f7f5f0 亮度约 0.90）。
+ * - MAX_SAT：0.89 不透明度、占屏幕小一半的一整片纯色，饱和度拉满会刺眼。0.7 只挡霓虹。
+ *
+ * 亮度用 **WCAG 相对亮度**而不是 HSL 明度：后者不是感知量，同样 L=0.62 的黄色
+ * 看着比蓝色亮得多。
  */
-const VEIL_TINT_MIN_LUM = 0.55
-const VEIL_TINT_MAX_LUM = 0.86
-const VEIL_TINT_MAX_SAT = 0.32
+const VEIL_TINT_MIN_LUM = 0.004
+const VEIL_TINT_MAX_LUM = 0.9
+const VEIL_TINT_MAX_SAT = 0.7
 
 const lumOf = (hex: string): number => relativeLuminance(...hexToRgb(hex))
 

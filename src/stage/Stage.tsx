@@ -1,8 +1,10 @@
-import type { ReactNode } from "react"
+import { useMemo, type ReactNode } from "react"
 
 import Backdrop from "./Backdrop"
 import Veil from "./Veil"
+import { useActiveTint } from "./useActiveTint"
 import { DESIGN_H, DESIGN_W, useStageFit } from "./useStageFit"
+import { deriveInk } from "@/skin/palette"
 import { useSkin } from "@/store/skin"
 
 /**
@@ -15,8 +17,25 @@ import { useSkin } from "@/store/skin"
  */
 export default function Stage({ children }: { children: ReactNode }) {
   const fit = useStageFit()
-  const ink = useSkin((s) => s.skin.ink)
   const backdrop = useSkin((s) => s.backdrop)
+  const baseInk = useSkin((s) => s.skin.ink)
+  const veil = useSkin((s) => s.skin.veil)
+  const backdropAvg = useSkin((s) => s.backdropAvg)
+  const tint = useActiveTint()
+
+  /*
+   * 文字配色在这里现算，而不是换图时算一次存进皮肤。
+   *
+   * 自动取色会让蒙版色在一首歌里换三次，而且色一放开就可能很深（血红、近黑）。
+   * 配色的输入里就有蒙版色 —— 底图被蒙版压过之后的混合亮度才决定文字读不读得清 ——
+   * 所以蒙版一变，配色必须跟着变，否则会出现深底深字。
+   *
+   * 成本是每首歌三次重算，deriveInk 只有几十次循环，可以忽略。
+   */
+  const ink = useMemo(
+    () => (baseInk.auto ? deriveInk(backdropAvg, { ...veil, tint }, baseInk) : baseInk),
+    [baseInk, backdropAvg, veil, tint],
+  )
 
   return (
     <div className="viewport">

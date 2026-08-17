@@ -264,7 +264,9 @@ check("文字配色随底图重推", skin1.inkPrimary !== "" && skin1.inkPrimary
   }
   const minGap = pairGaps.length ? Math.min(...pairGaps) : 0
 
-  check("从底图提取出了三个主色", swatches.length === 3, `${swatches.length} 个`)
+  // 允许 2 个：色调很窄的图聚类后本来就凑不满三个，硬塞一个看不出差别的更糟，
+  // 三色轮换会自动退化成两段（见 useTintPhase 用的是 tintColors.length）
+  check("从底图提取出了主色", swatches.length >= 2 && swatches.length <= 3, `${swatches.length} 个`)
   check("三个色块肉眼分得出来（不是三个相邻色阶）", minGap >= 25, `最近两色距离 ${minGap}：${swatches.join(" / ")}`)
   check("自动取色真的作用到了蒙版画布上（不是只显示在面板里）", moved >= 8, `最大通道差 ${moved}`)
 }

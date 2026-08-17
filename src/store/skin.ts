@@ -3,7 +3,7 @@ import { FastAverageColor } from "fast-average-color"
 
 import { platform, toObjectUrl, type FileRef } from "@/platform"
 import { DEFAULT_SKIN, makeSkin, migrateSkins, SKIN_SCHEMA_VERSION, type Skin, type SkinsFile } from "@/skin/model"
-import { deriveInk, dominantColors, veilTintsFrom } from "@/skin/palette"
+import { dominantColors, veilTintsFrom } from "@/skin/palette"
 import { labelSourceId } from "@/skin/resolve"
 import type { VeilParams } from "@/stage/veil/renderer"
 
@@ -24,6 +24,15 @@ type SkinState = {
    * 没有底图或提取失败时是空数组，此时 tintAuto 形同关闭。
    */
   tintColors: string[]
+
+  /**
+   * 底图**左侧 40%**（蒙版覆盖区）的平均色，给 deriveInk 算文字对比度用。
+   *
+   * 存下来是因为文字配色不能再在换图时算一次就完事：自动取色会让蒙版色在一首歌里
+   * 换三次，深浅可能差很多，文字得跟着走。所以这里只存输入，配色在 Stage 里按
+   * 当前生效的蒙版色现算。同样是派生数据，不落盘。
+   */
+  backdropAvg: [number, number, number] | null
 
   load(): Promise<void>
   setBackdrop(ref: FileRef): Promise<void>
@@ -119,6 +128,7 @@ export const useSkin = create<SkinState>((set, get) => ({
   label: null,
   fading: null,
   tintColors: [],
+  backdropAvg: null,
 
   async load() {
     const raw = await platform.readConfig<SkinsFile>("skins")
@@ -222,10 +232,10 @@ export const useSkin = create<SkinState>((set, get) => ({
 }))
 
 /**
- * 从底图左侧区域提取三个可用作蒙版色的主色。
+ * 从整张底图提取三个可用作蒙版色的主色。
  *
  * 缩到 96px 宽再取样：主色调不需要全分辨率，一张 4K 底图逐像素统计要几千万次循环，
- * 而缩图之后结果几乎一样。只取左 40%，与自动配色保持同一块区域。
+ * 而缩图之后结果几乎一样。
  */
 async function extractTints(img: LoadedImage): Promise<string[]> {
   try {
@@ -245,9 +255,7 @@ async function extractTints(img: LoadedImage): Promise<string[]> {
     })
     ctx.drawImage(bitmap, 0, 0, W, H)
 
-    const left = Math.max(1, Math.round(W * 0.4))
-    const { data } = ctx.getImageData(0, 0, left, H)
-    // 整组一起过，不是逐个 map：明暗要在三个色之间摊开，逐个处理会全挤到一起
+    const { data } = ctx.getImageData(0, 0, W, H)
     return veilTintsFrom(dominantColors(data, 3))
   } catch (err) {
     // 取不到色就退回手动 tint，不该让整个换图流程失败
@@ -268,12 +276,17 @@ async function refreshImages(
     const label = await loadImage(labelSourceId(skin))
     set({ backdrop, label })
 
-    // 蒙版自动取色：和下面的自动配色取同一块区域（蒙版盖住的左侧），
-    // 否则会出现"取的是右半边的颜色、盖的是左半边"这种对不上的情况
+    // 蒙版自动取色：看**整张图**。
+    //
+    // 原来这里只采左 40%，理由是"取的区域要和盖的区域一致"。那个理由对配色成立、
+    // 对取色不成立 —— 人是看着整张图说"这图的主色是黑、血红、盔甲白"的，而这类图
+    // 主体往往在右边，左边只是背景。实测那张暗红角色图，左 40% 全是黑烟，三个主色
+    // 的原始距离只有 9；整张图才能取到 #543737 那块血红。
     set({ tintColors: backdrop ? await extractTints(backdrop) : [] })
 
-    // 自动配色：只看蒙版覆盖的左侧区域，右半区不影响文字可读性
-    if (skin.ink.auto && backdrop) {
+    // 文字配色的输入：只看蒙版覆盖的左侧区域，右半区不影响文字可读性。
+    // 这里只算平均色存起来，配色本身在 Stage 按当前生效的蒙版色现算（见 backdropAvg）。
+    if (backdrop) {
       const color = await fac.getColorAsync(backdrop.url, {
         left: 0,
         top: 0,
@@ -281,8 +294,9 @@ async function refreshImages(
         height: backdrop.height,
         algorithm: "dominant",
       })
-      const ink = deriveInk([color.value[0], color.value[1], color.value[2]], skin.veil, skin.ink)
-      set({ skin: { ...get().skin, ink } })
+      set({ backdropAvg: [color.value[0], color.value[1], color.value[2]] })
+    } else {
+      set({ backdropAvg: null })
     }
   } catch (err) {
     // 保留上一张底图，不让画面塌掉（技术文档 §12）

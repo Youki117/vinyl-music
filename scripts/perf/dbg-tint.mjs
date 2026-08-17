@@ -13,8 +13,15 @@ import { chromium } from "playwright"
 import { readdirSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 
+// 不给参数就跑 tests/real/ 的素材；给了就跑指定的图（用来诊断用户实际在用的底图）
+const args = process.argv.slice(2)
 const REAL = resolve("tests/real")
-const images = readdirSync(REAL).filter((f) => /\.(jpe?g|png|webp)$/i.test(f))
+const images =
+  args.length > 0
+    ? args.map((a) => resolve(a))
+    : readdirSync(REAL)
+        .filter((f) => /\.(jpe?g|png|webp)$/i.test(f))
+        .map((f) => resolve(REAL, f))
 if (images.length === 0) {
   console.error("tests/real/ 里没有图片")
   process.exit(1)
@@ -28,8 +35,9 @@ await page.goto(process.env.VINYL_URL ?? "http://localhost:1420/", { waitUntil: 
 const gap = (a, b) => Math.round(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]))
 const toRgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
 
-for (const name of images) {
-  const b64 = readFileSync(resolve(REAL, name)).toString("base64")
+for (const path of images) {
+  const name = path.split(/[\\/]/).pop()
+  const b64 = readFileSync(path).toString("base64")
   const ext = name.split(".").pop().toLowerCase()
   const mime = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg"
 
@@ -53,6 +61,54 @@ for (const name of images) {
       const left = Math.max(1, Math.round(W * 0.4))
       const grab = (w) => Array.from(ctx.getImageData(0, 0, w, H).data)
 
+      // 换个分辨率再采一遍：小面积的高饱和强调色（发光的火星）在低分辨率下会被
+      // 周围的暗背景平均掉，采样宽度本身就可能是"取不到那个红"的原因
+      const hi = 320
+      const hiH = Math.max(1, Math.round((img.naturalHeight / img.naturalWidth) * hi))
+      const c2 = document.createElement("canvas")
+      c2.width = hi
+      c2.height = hiH
+      const ctx2 = c2.getContext("2d", { willReadFrequently: true })
+      ctx2.drawImage(img, 0, 0, hi, hiH)
+      const rawHi = dominantColors(Array.from(ctx2.getImageData(0, 0, hi, hiH).data), 3)
+
+      // 把候选簇直接列出来。"为什么没取到那个红"只有两种可能：它压根不在候选里
+      // （面积太小 / 被合并掉了），还是在候选里但没被最远点选中。列出来才分得清。
+      const px = grab(W)
+      const buckets = new Map()
+      for (let i = 0; i + 3 < px.length; i += 4) {
+        if (px[i + 3] < 128) continue
+        const key = ((px[i] >> 4) << 8) | ((px[i + 1] >> 4) << 4) | (px[i + 2] >> 4)
+        const e = buckets.get(key)
+        if (e) {
+          e.n++
+          e.r += px[i]
+          e.g += px[i + 1]
+          e.b += px[i + 2]
+        } else buckets.set(key, { n: 1, r: px[i], g: px[i + 1], b: px[i + 2] })
+      }
+      const rk = [...buckets.values()].sort((a, b) => b.n - a.n)
+      const tot = rk.reduce((n, e) => n + e.n, 0)
+      const gp = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
+      const cl = []
+      for (const e of rk) {
+        const c = [e.r / e.n, e.g / e.n, e.b / e.n]
+        const hit = cl.find((k) => gp(k.rgb, c) < 40)
+        if (hit) hit.n += e.n
+        else cl.push({ rgb: c, n: e.n })
+      }
+      cl.sort((a, b) => b.n - a.n)
+      const dump = cl.slice(0, 12).map((k) => {
+        const [r, g, b] = k.rgb.map(Math.round)
+        const mx = Math.max(r, g, b)
+        const mn = Math.min(r, g, b)
+        return {
+          hex: `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`,
+          share: ((k.n / tot) * 100).toFixed(2),
+          sat: mx === 0 ? "0.00" : ((mx - mn) / mx).toFixed(2),
+        }
+      })
+
       const rawLeft = dominantColors(grab(left), 3)
       const rawFull = dominantColors(grab(W), 3)
       return {
@@ -61,6 +117,9 @@ for (const name of images) {
         tintLeft: veilTintsFrom(rawLeft),
         rawFull,
         tintFull: veilTintsFrom(rawFull),
+        rawHi,
+        tintHi: veilTintsFrom(rawHi),
+        dump,
       }
     },
     { dataUrl: `data:${mime};base64,${b64}` },
@@ -77,8 +136,12 @@ for (const name of images) {
   console.log(`\n${name}  (${out.dims})`)
   line("左40% 原始主色", out.rawLeft)
   line("左40% 过滤后", out.tintLeft)
-  line("整张 原始主色", out.rawFull)
-  line("整张 过滤后", out.tintFull)
+  line("整张96 原始主色", out.rawFull)
+  line("整张96 过滤后", out.tintFull)
+  line("整张320 原始主色", out.rawHi)
+  line("整张320 过滤后", out.tintHi)
+  console.log(`  候选簇（整张96，按面积降序）`)
+  for (const d of out.dump) console.log(`    ${d.hex}  占比 ${d.share.padStart(5)}%  饱和 ${d.sat}`)
 }
 
 await browser.close()

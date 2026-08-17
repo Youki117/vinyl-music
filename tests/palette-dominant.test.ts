@@ -47,7 +47,7 @@ describe("dominantColors", () => {
    * 面板上三个色块看着是同一个。上面那条"三个色彼此拉得开"是绿的，因为它喂的是
    * 红/蓝/黄这种一眼分得开的合成数据，照不到这个分支。
    */
-  it("色调很窄的图，也要挑出它能给出的最大差异（而不是三个相邻色阶）", () => {
+  it("色调很窄的图：宁可少给几个，也不给三个看着一样的", () => {
     // 一大片暖米色的细微色阶（模拟真实照片），外加两小块偏离得多一些的颜色
     const px = pixels(
       [213, 193, 173, 300],
@@ -59,9 +59,13 @@ describe("dominantColors", () => {
       [232, 222, 214, 40],
     )
     const got = dominantColors(px, 3)
-    expect(got).toHaveLength(3)
-    // 不要求达到"红蓝黄"那种距离，图里本来就没有；但必须明显好过相邻色阶（差值个位数）
-    const gaps = [dist(got[0], got[1]), dist(got[0], got[2]), dist(got[1], got[2])]
+    // 凑不满三个是可以接受的结果：三色轮换会自动变成两段，比硬塞一个看不出差别的强
+    expect(got.length).toBeGreaterThanOrEqual(2)
+    expect(got.length).toBeLessThanOrEqual(3)
+    // 但给出来的每一对都必须真的分得开
+    const gaps: number[] = []
+    for (let i = 0; i < got.length; i++)
+      for (let j = i + 1; j < got.length; j++) gaps.push(dist(got[i], got[j]))
     expect(Math.min(...gaps)).toBeGreaterThan(30)
   })
 
@@ -92,37 +96,58 @@ describe("dominantColors", () => {
   })
 })
 
+/**
+ * 这一组的核心是**保真**，不是"把颜色调进某个区间"。
+ *
+ * 前三版都错在同一个想当然上：认定蒙版必须是浅色，于是把亮度硬压进一条窄而浅的带子。
+ * 后果是取色再准也没用 —— 实测四张真实底图十二个色，没有一个不是淡的：
+ * 饱满的铁锈橙 #a65927 变成近白的 #f4ede9，"黑 + 血红"的一组变成三个几乎一样的淡粉。
+ * 现在只挡纯黑、纯白和霓虹，中间一律原样放行。
+ */
 describe("veilTintFrom", () => {
-  // 蒙版是压在左半边、不透明度 0.89 的一大片，原色直接上去不是刺眼就是糊死
-  const range = (hex: string) => {
-    const [r, g, b] = hexToRgb(veilTintFrom(hex))
-    return relativeLuminance(r, g, b)
-  }
+  const lumOf = (hex: string) => relativeLuminance(...hexToRgb(veilTintFrom(hex)))
 
-  // 区间见 palette.ts 的 VEIL_TINT_MIN_LUM / MAX_LUM
-  it("很暗的色被抬进可用区间（乘系数抬不动，必须混合）", () => {
-    expect(range("#101018")).toBeGreaterThan(0.5)
-  })
-
-  it("很亮的色被压下来，不至于和默认的近白色没区别", () => {
-    expect(range("#fffef8")).toBeLessThan(0.9)
-    expect(veilTintFrom("#fffef8")).not.toBe("#ffffff")
-  })
-
-  it("不管输入多极端，输出都落在同一个区间里", () => {
-    for (const c of ["#000000", "#ffffff", "#ff0000", "#003300", "#fefefe"]) {
-      const l = range(c)
-      expect(l).toBeGreaterThan(0.5)
-      expect(l).toBeLessThan(0.9)
+  it("深色保持深 —— 这正是之前最大的毛病", () => {
+    // 那张暗红角色图整张取到的三个主色，人眼看就是"黑 + 血红"
+    for (const c of ["#0b0808", "#543737", "#2c2224"]) {
+      expect(lumOf(c)).toBeLessThan(0.12)
     }
   })
 
-  it("压饱和：输出比输入更接近灰", () => {
-    const spread = (hex: string) => {
+  it("血红还是血红，不会变成玫瑰粉", () => {
+    const [r, g, b] = hexToRgb(veilTintFrom("#5e0d0d")) // 用户自己手调过的蒙版色
+    expect(lumOf("#5e0d0d")).toBeLessThan(0.08)
+    expect(r).toBeGreaterThan(g * 2)
+    expect(r).toBeGreaterThan(b * 2)
+  })
+
+  it("饱满的中间调不会被冲白", () => {
+    expect(lumOf("#a65927")).toBeLessThan(0.3) // 铁锈橙。旧实现给出近白的 #f4ede9
+  })
+
+  it("没到上限的饱和度与亮度原样放行（只容 HSL 往返的舍入误差）", () => {
+    // 旧实现把饱和度一律压到 0.32，那是三色发灰的元凶之一
+    expect(dist(veilTintFrom("#7a6a55"), "#7a6a55")).toBeLessThanOrEqual(2)
+  })
+
+  it("纯黑被抬离纯黑（纯黑没有色相），但仍然是黑", () => {
+    expect(veilTintFrom("#000000")).not.toBe("#000000")
+    expect(lumOf("#000000")).toBeLessThan(0.05)
+  })
+
+  it("纯白被压下来，不至于和没有蒙版没区别", () => {
+    expect(veilTintFrom("#ffffff")).not.toBe("#ffffff")
+    expect(lumOf("#fffef8")).toBeLessThan(0.92)
+  })
+
+  it("霓虹被压饱和：一整片纯色铺 0.89 不透明度会刺眼", () => {
+    const sat = (hex: string) => {
       const [r, g, b] = hexToRgb(hex)
-      return Math.max(r, g, b) - Math.min(r, g, b)
+      const mx = Math.max(r, g, b)
+      const mn = Math.min(r, g, b)
+      return mx === 0 ? 0 : (mx - mn) / mx
     }
-    expect(spread(veilTintFrom("#c81e1e"))).toBeLessThan(spread("#c81e1e"))
+    expect(sat(veilTintFrom("#ff0000"))).toBeLessThan(sat("#ff0000"))
   })
 
   it("保留色相：暖色出来还是暖的，冷色还是冷的", () => {
@@ -130,30 +155,6 @@ describe("veilTintFrom", () => {
     const cool = hexToRgb(veilTintFrom("#0064c8")) // 蓝
     expect(warm[0]).toBeGreaterThan(warm[2])
     expect(cool[2]).toBeGreaterThan(cool[0])
-  })
-
-  /**
-   * 这条是补的，也是最该有的一条。
-   *
-   * 之前的实现单看每个颜色都"合格"（亮度在区间内、色相没丢），但三个色一起处理完
-   * 全被挤进一条窄灰带：实测 rgb(199,199,199) / (203,199,197) / (208,199,188)，
-   * 摆在面板上肉眼分不出来 —— 功能等于没做，而所有单色断言都是绿的。
-   * 端到端跑起来才发现。所以约束必须落在"三个色之间"，不能只看单个。
-   */
-  it("三个拉开距离的输入，处理完仍然分得出来", () => {
-    const src = ["#c81e1e", "#1e64c8", "#c8b41e"] // 红 / 蓝 / 黄
-    const out = src.map(veilTintFrom)
-    expect(new Set(out).size).toBe(3)
-    for (let i = 0; i < out.length; i++) {
-      for (let j = i + 1; j < out.length; j++) {
-        expect(dist(out[i], out[j])).toBeGreaterThan(25)
-      }
-    }
-  })
-
-  it("感知亮度对齐：不同色相处理完亮度接近，不会一个刺眼一个发暗", () => {
-    const lums = ["#c81e1e", "#1e64c8", "#c8b41e"].map((c) => range(c))
-    expect(Math.max(...lums) - Math.min(...lums)).toBeLessThan(0.2)
   })
 
   it("输出永远是合法的 #rrggbb", () => {
@@ -164,10 +165,8 @@ describe("veilTintFrom", () => {
 })
 
 /**
- * 整组处理。这一组用例喂的全是**真实底图上实测到的主色**，不是合成数据 ——
- * 上面 veilTintFrom 那些单色断言全绿，端到端却出来三个一模一样的色块，
- * 就是因为合成数据（红/蓝/黄）照不到真实照片的形状：真实照片的三个主色
- * 往往同一个色相、只差明暗，而 veilTintFrom 保的正是色相、抹的正是明暗。
+ * 整组处理。用例喂的全是**真实底图上实测到的主色**，不是合成数据 ——
+ * 合成的红/蓝/黄照不到真实照片的形状，之前几次翻车全是这么漏过去的。
  */
 describe("veilTintsFrom（整组）", () => {
   const minGap = (hexes: string[]) => {
@@ -177,37 +176,32 @@ describe("veilTintsFrom（整组）", () => {
     return Math.min(...gaps)
   }
 
-  it("同色相只差明暗的三个主色，处理完仍分得出来（backdrop-1 实测值）", () => {
-    // 逐个 veilTintFrom 的结果是 #d5c1ad / #d5c8ae / #d3c1ab，最近距离 3
-    const src = ["#090603", "#dacaa9", "#996628"]
-    expect(minGap(src.map(veilTintFrom))).toBeLessThan(10) // 先钉住旧行为确实是坏的
-    expect(minGap(veilTintsFrom(src))).toBeGreaterThan(25)
+  // 那张暗红角色图整张取到的三个主色，原始最近距离 49
+  const DARK_RED = ["#0b0808", "#543737", "#2c2224"]
+
+  it("保真：原图里拉得开，出来也拉得开", () => {
+    expect(minGap(veilTintsFrom(DARK_RED))).toBeGreaterThan(20)
   })
 
-  it("灰度图没有色相可留，靠明暗也要分得出来（backdrop-2 实测值）", () => {
-    // 逐个处理时 #878787 和 #090909 会撞成同一个 #c4c4c4
-    const src = ["#878787", "#090909", "#f5f5f5"]
-    expect(new Set(src.map(veilTintFrom)).size).toBeLessThan(3) // 旧行为：三个色只剩两个
-    const out = veilTintsFrom(src)
+  it("不再把整组摊到一条浅带子上", () => {
+    // 旧实现给出 #d1bfbf / #f4eeee / #e1d8da —— 三个淡粉，亮度全在 0.55 以上
+    for (const c of veilTintsFrom(DARK_RED)) {
+      expect(relativeLuminance(...hexToRgb(c))).toBeLessThan(0.2)
+    }
+  })
+
+  it("灰度图三个色仍然分得出来（靠的是它本来就有的明暗差）", () => {
+    const out = veilTintsFrom(["#878787", "#090909", "#f5f5f5"])
     expect(new Set(out).size).toBe(3)
     expect(minGap(out)).toBeGreaterThan(25)
   })
 
   it("返回顺序跟入参走（入参按出现次数排，第一个是主色）", () => {
-    const src = ["#878787", "#090909", "#f5f5f5"]
-    const out = veilTintsFrom(src)
-    // 入参 0 是中间调，所以它出来也该是三个里的中间调，而不是被排序挪走
+    const out = veilTintsFrom(["#878787", "#090909", "#f5f5f5"])
+    // 入参 0 是中间调，出来也该还是中间调，而不是被排序挪走
     const lum = out.map((c) => relativeLuminance(...hexToRgb(c)))
     expect(lum[1]).toBeLessThan(lum[0])
     expect(lum[0]).toBeLessThan(lum[2])
-  })
-
-  it("每个色仍落在蒙版可用的亮度区间里", () => {
-    for (const c of veilTintsFrom(["#000000", "#7f7f7f", "#ffffff"])) {
-      const l = relativeLuminance(...hexToRgb(c))
-      expect(l).toBeGreaterThanOrEqual(0.54)
-      expect(l).toBeLessThanOrEqual(0.87)
-    }
   })
 
   it("色相不丢：暖色组出来还是暖的", () => {
