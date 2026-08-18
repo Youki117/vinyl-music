@@ -23,5 +23,8 @@
     "paths": { "@/*": ["src/*"] },
     "types": ["vite/client", "node"]
   },
-  "include": ["src", "tests", "vite.config.ts"]
+  "include": ["src", "tests", "vite.config.ts"],
+  // 上游原样引入的代码不参与类型检查：它依赖 lx-music 自己的全局命名空间（LX），
+  // 而且原则是「不要改」（见 src/vendor/lx-music/UPSTREAM.md）。适配一律走垫片层。
+  "exclude": ["src/vendor"]
 }
