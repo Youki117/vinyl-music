@@ -1,3 +1,6 @@
+// 必须排在所有其它 import 之前：给 musicSdk 补上 Buffer/process 全局，理由见该文件注释
+import "./polyfill"
+
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 

@@ -2,7 +2,9 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "主窗口所需的最小权限集。fs 的 scope 限制在应用数据目录与用户音乐目录，不开全盘读权限；域外路径由 allow_paths 命令按用户的实际动作逐个放行。注意 read-text-file / write-text-file 是独立命令，不被 read-file / write-file 覆盖，少了它们所有 JSON 配置会在打包后静默失败。",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-minimize",
@@ -27,21 +29,44 @@
     {
       "identifier": "http:default",
       "allow": [
-        { "url": "https://*" },
-        { "url": "http://localhost:*" },
-        { "url": "http://127.0.0.1:*" }
+        {
+          "url": "https://*"
+        },
+        {
+          "url": "http://*"
+        },
+        {
+          "url": "http://localhost:*"
+        },
+        {
+          "url": "http://127.0.0.1:*"
+        }
       ]
     },
     {
       "identifier": "fs:scope",
       "allow": [
-        { "path": "$APPDATA/**" },
-        { "path": "$AUDIO/**" },
-        { "path": "$HOME/Music/**" },
-        { "path": "$DOWNLOAD/**" },
-        { "path": "$PICTURE/**" },
-        { "path": "$DESKTOP/**" },
-        { "path": "$DOCUMENT/**" }
+        {
+          "path": "$APPDATA/**"
+        },
+        {
+          "path": "$AUDIO/**"
+        },
+        {
+          "path": "$HOME/Music/**"
+        },
+        {
+          "path": "$DOWNLOAD/**"
+        },
+        {
+          "path": "$PICTURE/**"
+        },
+        {
+          "path": "$DESKTOP/**"
+        },
+        {
+          "path": "$DOCUMENT/**"
+        }
       ]
     }
   ]
