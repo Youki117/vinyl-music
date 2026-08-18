@@ -13,6 +13,17 @@ export interface LoadedScript {
   sources: InitedSources
 }
 
+/**
+ * 调试钩子。音源脚本出问题时，唯一有用的信息是"它发了什么请求、收到了什么"——
+ * 这些请求走 Rust 侧，浏览器的网络面板里看不到，所以必须在这里留个出口。
+ */
+export type SourceDebug = (ev: { dir: "req" | "res" | "note"; detail: unknown }) => void
+let debugFn: SourceDebug | null = null
+export const setSourceDebug = (fn: SourceDebug | null): void => {
+  debugFn = fn
+}
+const dbg = (dir: "req" | "res" | "note", detail: unknown) => debugFn?.({ dir, detail })
+
 let worker: Worker | null = null
 let reqSeq = 0
 const reqPending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
@@ -75,11 +86,15 @@ export function loadUserApi(script: string, timeoutMs = 20000): Promise<LoadedSc
       switch (msg.t) {
         case "http-req": {
           // 脚本自己不能发请求，这里代发。plugin-http 走 Rust 侧，没有 CORS 限制。
+          dbg("req", { url: msg.url, options: msg.options })
           try {
             const resp = await httpFetch(msg.url, msg.options).promise
+            dbg("res", { url: msg.url, status: resp.statusCode, body: resp.body })
             send({ t: "http-res", id: msg.id, resp, body: resp.body })
           } catch (err) {
-            send({ t: "http-res", id: msg.id, err: err instanceof Error ? err.message : String(err) })
+            const message = err instanceof Error ? err.message : String(err)
+            dbg("res", { url: msg.url, err: message })
+            send({ t: "http-res", id: msg.id, err: message })
           }
           break
         }
@@ -110,6 +125,7 @@ export function loadUserApi(script: string, timeoutMs = 20000): Promise<LoadedSc
           console.info(`[音源] ${info.name} 提示：${msg.log}`, msg.updateUrl ?? "")
           break
         case "error":
+          dbg("note", { scriptError: msg.message })
           clearTimeout(timer)
           stop()
           reject(new Error(`音源脚本报错：${msg.message}`))
