@@ -287,9 +287,9 @@ check("第二次换图同样生效", skin2.backdropUrl !== skin1.backdropUrl)
 check("贴纸第二次也跟着换", skin2.labelUrl === skin2.backdropUrl)
 check("蒙版仍由 WebGL 画（没退化成 CSS 兜底）", skin2.veilIsShader)
 
-// 黑边填充。舞台是固定 1243×688 等比缩放居中的，窗口比例一变就多出黑边；
-// 本脚本平时用的视口正好是设计比例，所以这条路以前一次都没走到过。
-// 换成 16:10（笔记本上最常见的比例之一，理论上约 11% 的上下黑边）来验。
+// 无黑边。窗口比例被锁定在设计比例，正常态舞台正好铺满；最大化/全屏这类比例失配时
+// 改 cover 铺满、裁掉超出部分。这里换成 16:10（比例失配约 11%）来验 cover 路径：
+// 舞台必须盖满整个窗口，任何位置都不该是黑边。
 {
   const { PNG } = await import("pngjs")
   await page.setViewportSize({ width: 1280, height: 800 })
@@ -298,33 +298,37 @@ check("蒙版仍由 WebGL 画（没退化成 CSS 兜底）", skin2.veilIsShader)
   const box = await page.evaluate(() => {
     const v = document.querySelector(".viewport")?.getBoundingClientRect()
     const s = document.querySelector(".stage")?.getBoundingClientRect()
-    const b = document.querySelector(".viewport-bleed")
     return {
-      barY: v && s ? Math.round(v.height - s.height) : 0,
-      stageTop: s ? Math.round(s.top) : 0,
-      hasBleed: !!b,
-      bleedCoversAll:
-        b && v
-          ? b.getBoundingClientRect().width >= v.width && b.getBoundingClientRect().height >= v.height
-          : false,
+      stageW: s ? Math.round(s.width) : 0,
+      stageH: s ? Math.round(s.height) : 0,
+      viewportW: v ? Math.round(v.width) : 0,
+      viewportH: v ? Math.round(v.height) : 0,
+      hasBleed: !!document.querySelector(".viewport-bleed"),
     }
   })
-  console.log(`\n16:10 视口下上下黑边合计 ${box.barY}px，舞台顶边在 y=${box.stageTop}`)
-  check("换成 16:10 后确实出现了letterbox（否则这条用例没测到东西）", box.barY > 40, `${box.barY}px`)
-  check("底图延伸层已渲染并铺满整个窗口", box.hasBleed && box.bleedCoversAll)
+  console.log(`\n16:10 视口下舞台 ${box.stageW}×${box.stageH}（窗口 ${box.viewportW}×${box.viewportH}）`)
+  check(
+    "比例失配时舞台铺满窗口，无黑边",
+    box.stageW >= box.viewportW && box.stageH >= box.viewportH,
+    `${box.stageW}×${box.stageH} vs ${box.viewportW}×${box.viewportH}`,
+  )
+  check("黑边延伸层已移除（不再需要）", !box.hasBleed)
 
-  // 真正的证据：黑边区域里取一个像素，它不该还是纯黑
-  await page.screenshot({ path: `${OUT}/real-letterbox.png` })
+  // 真正的证据：原本是黑边的上下边缘取样，不该是纯黑（cover 模式下这里属于舞台/底图）
+  await page.screenshot({ path: `${OUT}/real-fill.png` })
   const shot = PNG.sync.read(await page.screenshot())
-  const y = Math.max(2, Math.round(box.stageTop / 2)) // 上方黑边的中间
-  const px = (x) => {
+  const px = (x, y) => {
     const i = (y * shot.width + x) * 4
     return [shot.data[i], shot.data[i + 1], shot.data[i + 2]]
   }
-  const samples = [px(80), px(640), px(1200)]
-  const brightest = Math.max(...samples.flat())
-  console.log(`黑边取样 y=${y}：${samples.map((s) => s.join(",")).join("  |  ")}`)
-  check("黑边已被底图填掉，不再是纯黑", brightest > 12, `最亮通道 ${brightest}`)
+  let brightest = 0
+  for (let x = 0; x < shot.width; x += 60) {
+    for (const y of [2, shot.height - 3]) {
+      brightest = Math.max(brightest, ...px(x, y))
+    }
+  }
+  console.log(`上/下边缘取样最亮通道 ${brightest}`)
+  check("窗口边缘已被画面填掉，不再是黑边", brightest > 12, `最亮通道 ${brightest}`)
 
   await page.setViewportSize({ width: 1243, height: 688 })
   await page.waitForTimeout(500)

@@ -32,6 +32,8 @@ tauri-plugin-global-shortcut = "2"
 # 自己调 windows-rs 要处理一堆 COM 生命周期，这个 crate 已经封好了。
 [target.'cfg(target_os = "windows")'.dependencies]
 souvlaki = "0.8"
+# 窗口比例锁定：SetWindowSubclass 挂 WM_SIZING（aspect.rs）。Cargo.lock 里已有该版本（传递依赖）。
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
 # 体积优先：PRD §7 要求安装包 < 20MB

@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "Vinyl Player",
-        "width": 1220,
-        "height": 688,
+        "width": 1280,
+        "height": 708,
         "minWidth": 780,
-        "minHeight": 440,
+        "minHeight": 432,
         "resizable": true,
         "decorations": false,
         "center": true,

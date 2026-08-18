@@ -2,6 +2,8 @@ mod grant;
 mod scan;
 #[cfg(target_os = "windows")]
 mod smtc;
+#[cfg(target_os = "windows")]
+mod aspect;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -44,6 +46,9 @@ pub fn run() {
             #[cfg(desktop)]
             setup_media_keys(app.handle())?;
             setup_tray(app.handle())?;
+            // 窗口只能按设计比例（1243:688）等比缩放，无黑边。启动时顺带把恢复的旧尺寸归一化。
+            #[cfg(target_os = "windows")]
+            aspect::install(app.handle());
             // 首次启动的命令行参数（"打开方式"、拖到 exe 上、命令行直接带文件）。
             // 之前只在单实例重复启动时处理了 argv，首次启动整个漏掉，
             // 而前端也没人监听这个事件 —— 等于这条路从来没通过。
