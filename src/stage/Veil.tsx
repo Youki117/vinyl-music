@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 
 import { useActiveTint } from "./useActiveTint"
-import { useStageFit } from "./useStageFit"
+import { useVeilBuffer } from "./useStageFit"
 import { VeilRenderer } from "./veil/renderer"
 import { useSkin } from "@/store/skin"
 
@@ -24,7 +24,7 @@ export default function Veil() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<VeilRenderer | null>(null)
   const [fallback, setFallback] = useState(false)
-  const fit = useStageFit()
+  const fit = useVeilBuffer()
   const veil = useSkin((s) => s.skin.veil)
 
   // 当前生效的蒙版色（自动取色 / 手动）。Stage 用同一个 hook 推文字配色，见 useActiveTint

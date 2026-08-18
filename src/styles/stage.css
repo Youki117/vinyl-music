@@ -6,29 +6,10 @@
   height: 100%;
   display: grid;
   place-items: center;
-  background: #000;
+  /* 舞台按 cover 铺满，理论上这层底色永远看不见。留成和舞台同色而不是纯黑，
+     是为了万一出现亚像素接缝时也看不出来 —— 纯黑接缝在深色画面上格外显眼。 */
+  background: #101010;
   overflow: hidden;
-}
-
-/*
- * 黑边里的底图延伸（见 Stage.tsx）。
- *
- * 模糊 + 压暗是必须的：不模糊的话黑边里是一张清晰的照片，会和舞台内容抢视线，
- * 反而比黑边更吵。scale(1.12) 是为了盖住 blur 在元素边缘产生的透明衰减带。
- *
- * ⚠ 全屏 CSS 模糊在这个技术栈上是要付内存的（实测一层全屏 blur(40px) 约 +76MB，
- * 见 docs/TECH-DESIGN.md §1.2.1）。这里的取舍是：它只在用户真的设了底图时才存在，
- * 且换来的是"黑边消失"这个每一帧都看得见的观感。真嫌贵就把 filter 里的 blur 去掉，
- * 只留 brightness —— 清晰但压暗的延伸，代价接近零。
- */
-.viewport-bleed {
-  position: absolute;
-  inset: 0;
-  background-size: cover;
-  background-position: center;
-  filter: blur(34px) brightness(0.42) saturate(0.85);
-  transform: scale(1.12);
-  pointer-events: none;
 }
 
 .stage {
@@ -36,9 +17,34 @@
   overflow: hidden;
   isolation: isolate;
   background: #101010;
-  /* 舞台垫在模糊底图上时要有边界感，否则两者糊成一片分不清哪儿是画面。
-     没有底图时背后是纯黑，这道阴影看不见，不影响原来的观感。 */
-  box-shadow: 0 8px 48px rgba(0, 0, 0, 0.55);
+
+  /* 尺寸完全由 CSS 决定，不经过 JS。
+     ------------------------------------------------------------------
+     这是"缩放跟手"的关键：窗口一变，布局这一帧舞台就到位，不必等
+     resize 事件 → setState → React 渲染 → 提交。以前走 React 至少落后两帧，
+     那两帧里舞台还是旧尺寸，视口底色就从边缘露出来 —— 那就是看到的黑边。
+
+     两条 max() 合起来正好是 cover：
+       窗口偏宽 → 宽取 100vw，高由宽推出（> 100vh，纵向裁掉一点）
+       窗口偏高 → 高取 100vh，宽由高推出（> 100vw，横向裁掉一点）
+     两种情况下宽高比都恰好是 1243:688，且两轴都不小于视口。
+
+     为什么是 cover 而不是 contain：窗口比例被 Rust 侧锁死时（src-tauri/aspect.rs）
+     两者等价；锁不住时（最大化、全屏、分辨率取整误差）contain 会留黑边，cover 只是
+     多裁掉零点几个像素。**这就是"不能出现黑色区域"的全部实现** —— 不是去填黑边，
+     是让黑边根本不存在。 */
+  width: max(100vw, calc(100vh * 1243 / 688));
+  height: max(100vh, calc(100vw * 688 / 1243));
+
+  /* 内容层的缩放系数同样在 CSS 里算出来，JS 一行都不参与。
+     length / length → number 是 CSS Values 4 的能力，Chromium 116 起支持；
+     本机 WebView2 Runtime 是 151，够。
+
+     一度是用 ResizeObserver 写这个变量的。RO 的回调虽然在布局之后、绘制之前，
+     终态也对，但连续缩放时实测内容缩放会落后舞台最多 0.32 —— 内容比舞台小的那一瞬，
+     舞台底色就从内容右下缘露出来，还是黑边。纯 CSS 没有"回调"这个环节，
+     宽度和缩放是同一次样式解析算出来的，不存在谁落后谁。 */
+  --stage-scale: calc(max(100vw, 100vh * 1243 / 688) / 1243px);
 }
 
 .layer {
@@ -124,5 +130,9 @@
   top: 0;
   left: 0;
   z-index: 3;
+  width: 1243px;
+  height: 688px;
   transform-origin: top left;
+  /* 变量在 .stage 上用 CSS 算，见那里。和舞台宽度同源同帧，不会掉队。 */
+  transform: scale(var(--stage-scale, 1));
 }

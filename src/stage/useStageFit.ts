@@ -37,9 +37,49 @@ export const DESIGN_H = 688
  */
 const VEIL_MAX_W = 1280
 
-export type StageFit = {
-  /** 缩放系数 */
-  scale: number
+/**
+ * 舞台缩放**不在这个文件里**，也不在任何 JS 里 —— 尺寸和缩放系数全部由
+ * stage.css 的 `.stage` 用 CSS 算。理由写在那里：JS 参与就必然落后至少一帧，
+ * 那一帧里舞台还是旧尺寸，底色就从边缘露出来。
+ *
+ * 这里只剩蒙版后备缓冲，它必须走 React（决定 WebGL 缓冲要不要重建），所以防抖。
+ */
+
+/**
+ * 蒙版后备缓冲尺寸。
+ *
+ * 这一项**必须**走 React state：它决定 WebGL 后备缓冲要不要重建，而重建是真花钱的。
+ * 所以按 120ms 防抖，拖拽全程只重建一次。缩放跟手靠上面的 CSS 变量，与这里无关。
+ */
+export function useVeilBuffer(): VeilBuffer {
+  const [buf, setBuf] = useState<VeilBuffer>(() => computeVeil())
+
+  useEffect(() => {
+    let timer = 0
+    const onResize = () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        setBuf((prev) => {
+          const n = computeVeil()
+          return prev.veilW === n.veilW && prev.veilH === n.veilH ? prev : n
+        })
+      }, 120)
+    }
+
+    window.addEventListener("resize", onResize)
+    const mq = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`)
+    mq.addEventListener("change", onResize)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener("resize", onResize)
+      mq.removeEventListener("change", onResize)
+    }
+  }, [])
+
+  return buf
+}
+
+export type VeilBuffer = {
   /**
    * 蒙版画布的后备缓冲尺寸。
    *
@@ -50,46 +90,14 @@ export type StageFit = {
   veilH: number
 }
 
-/**
- * 舞台等比缩放。窗口内其余部分填黑。
- *
- * 这是保证"任何窗口尺寸下都和效果图一致"最省事也最可靠的做法：只有一套坐标，
- * 不存在断点，不会出现某个分辨率下版式跑偏。
- */
-export function useStageFit(): StageFit {
-  const [fit, setFit] = useState<StageFit>(() => compute())
-
-  useEffect(() => {
-    let timer = 0
-    const update = () => {
-      window.clearTimeout(timer)
-      // 防抖：拖拽窗口时不反复重建 GL 后备缓冲区
-      timer = window.setTimeout(() => setFit(compute()), 100)
-    }
-    window.addEventListener("resize", update)
-    const mq = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`)
-    mq.addEventListener("change", update)
-    return () => {
-      window.clearTimeout(timer)
-      window.removeEventListener("resize", update)
-      mq.removeEventListener("change", update)
-    }
-  }, [])
-
-  return fit
-}
-
-function compute(): StageFit {
+function computeVeil(): VeilBuffer {
   const w = window.innerWidth
   const h = window.innerHeight
-  const scale = Math.min(w / DESIGN_W, h / DESIGN_H)
   const dpr = window.devicePixelRatio || 1
-
-  // 舞台的物理像素数是上限，但不超过 VEIL_MAX_W；小窗口就照实际尺寸来，不放大
-  const physW = DESIGN_W * scale * dpr
-  const veilW = Math.min(physW, VEIL_MAX_W)
+  // 舞台按 cover 铺满窗口（见 stage.css），所以缩放系数取两轴较大的那个
+  const scale = Math.max(w / DESIGN_W, h / DESIGN_H)
+  const veilW = Math.min(DESIGN_W * scale * dpr, VEIL_MAX_W)
   return {
-    scale,
     veilW: Math.max(1, Math.round(veilW)),
     veilH: Math.max(1, Math.round((veilW / DESIGN_W) * DESIGN_H)),
   }
