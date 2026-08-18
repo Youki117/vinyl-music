@@ -116,3 +116,4 @@ export async function getMusicUrl(track: OnlineTrack, quality?: string): Promise
 }
 
 export { hasUserApi, registerUserApi, clearUserApi, type SourceApi }
+export { loadUserApi, unloadUserApi, parseScriptInfo, type LoadedScript } from "./userApi/host"

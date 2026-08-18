@@ -12,6 +12,8 @@
  */
 import { chromium } from "playwright"
 import { spawn } from "node:child_process"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { join } from "node:path"
 import { resolve } from "node:path"
 
 const URL = process.env.VINYL_URL ?? "http://localhost:1420/"
@@ -88,6 +90,78 @@ for (const source of TARGETS) {
     check(`${label} 字段归一化正确`, !!t.title && !!t.artist && !!t.id,
       `${t.title} — ${t.artist}｜${t.album || "?"}｜${t.duration || "?"}｜id=${t.id.slice(0, 14)}`)
     check(`${label} 带音质档位`, t.qualities.length > 0, t.qualities.join(",") || "无")
+  }
+}
+
+/*
+ * 音源脚本：加载 → 解析播放地址。
+ *
+ * 搜索/歌词是 musicSdk 自带的，不需要脚本；**播放地址必须由脚本解析**（上游
+ * api-source.js 的 allApi 是空的）。所以这一段才是"能不能听歌"的判据。
+ *
+ * 脚本目录默认取用户放音源的地方，可用 LX_SCRIPT_DIR 覆盖。没有脚本就跳过，
+ * 不算失败 —— 这台机器上没有不代表功能坏了。
+ */
+const SCRIPT_DIR = process.env.LX_SCRIPT_DIR ?? String.raw`D:\Downloads\洛雪音乐\音源`
+const scripts = existsSync(SCRIPT_DIR)
+  ? readdirSync(SCRIPT_DIR).filter((f) => f.endsWith(".js"))
+  : []
+
+if (!scripts.length) {
+  console.log(`
+（${SCRIPT_DIR} 下没有音源脚本，跳过播放地址检查）`)
+} else {
+  const pick = process.env.LX_SCRIPT ?? scripts[0]
+  const script = readFileSync(join(SCRIPT_DIR, pick), "utf8")
+  console.log(`
+音源脚本：${pick}（${(script.length / 1024).toFixed(0)} KB）`)
+
+  const loaded = await page.evaluate(async (src) => {
+    try {
+      const r = await window.__source.loadUserApi(src)
+      return { name: r.info.name, version: r.info.version, sources: Object.keys(r.sources) }
+    } catch (e) {
+      return { err: String(e?.message ?? e) }
+    }
+  }, script)
+
+  if (loaded.err) {
+    check("音源脚本加载", false, loaded.err)
+  } else {
+    check("音源脚本加载并初始化", loaded.sources.length > 0,
+      `${loaded.name} ${loaded.version}｜支持 ${loaded.sources.join(",")}`)
+
+    // 挑一个脚本支持的平台，搜一首再要播放地址
+    const got = await page.evaluate(
+      async ({ source, keyword }) => {
+        try {
+          const res = await window.__source.searchMusic(source, keyword, 1, 5)
+          if (!res.list.length) return { err: "搜不到结果" }
+          const t = res.list[0]
+          const url = await window.__source.getMusicUrl(t)
+          return { title: t.title, artist: t.artist, quality: t.qualities[0], url }
+        } catch (e) {
+          return { err: String(e?.message ?? e) }
+        }
+      },
+      { source: loaded.sources.find((s) => s !== "local") ?? loaded.sources[0], keyword: KEYWORD },
+    )
+
+    if (got.err) {
+      /*
+       * 区分两种失败，别混为一谈：
+       *   - 脚本能加载、能发请求、拿回了服务端的错误文案 → **我们的集成是通的**，
+       *     是脚本自己被它的服务端拒了（音源脚本寿命很短，过期就 403）
+       *   - 加载就挂 / 根本没发出请求 → 那才是我们的问题
+       * 前者不该报成代码缺陷，但也不能悄悄放过，所以照样标红并写清原因。
+       */
+      check("解析播放地址（脚本可能已过期）", false,
+        `${got.err}　—— 脚本能加载并发出请求、拿回了服务端应答，说明集成链路通；` +
+        `这条错来自音源服务端。换一份新的音源脚本再试。`)
+    } else {
+      check("解析出播放地址", /^https?:/.test(got.url ?? ""),
+        `${got.title} — ${got.artist}｜${got.quality}｜${(got.url ?? "").slice(0, 68)}…`)
+    }
   }
 }
 
