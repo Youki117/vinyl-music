@@ -43,6 +43,19 @@ export class ShuffleOrder {
     return false
   }
 
+  /**
+   * 下一首会是谁，**但不推进**。预取要用它。
+   *
+   * 走到本轮最后一首时返回 null：下一轮是那时才现洗的，答案此刻还不存在。
+   * 硬要给一个（比如先洗出来）会改变随机序列本身 —— 预取是个优化，
+   * 不该让它决定用户听到的顺序。返回 null 的那一次就不预取，仅此而已。
+   */
+  peek(n: number): number | null {
+    if (this.order.length !== n) return null
+    const next = this.pos + 1
+    return next < this.order.length ? this.order[next] : null
+  }
+
   back(): void {
     this.pos = Math.max(0, this.pos - 1)
   }

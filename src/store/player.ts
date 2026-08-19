@@ -116,6 +116,15 @@ async function loadOnline(track: Track): Promise<Uint8Array> {
   return engine.loadUrl(url)
 }
 
+/** 只取回字节，不碰 `<audio>`。预取用它 —— 那时当前这首还在放。 */
+async function fetchOnlineBytes(track: Track): Promise<Uint8Array> {
+  const online = asOnlineTrack(track)
+  if (!online) throw new Error("曲目来源不明")
+  const { resolvePlayUrl } = await onlineModule()
+  const { url } = await resolvePlayUrl(online, DEFAULT_ONLINE_QUALITY)
+  return engine.fetchAudio(url)
+}
+
 /** 在线曲目播放音质。音源脚本对各平台声明的档位不一，128k 是唯一五平台都有的。 */
 const DEFAULT_ONLINE_QUALITY = "128k"
 
@@ -182,6 +191,91 @@ async function applyTrackGain(
   const got = await loadLoudness(loudnessKey(track), bytes)
   if (!got || !stillCurrent()) return
   engine.setTrackGainDb(gainDbFor(got.lufs, got.peak))
+}
+
+// ── 预加载下一首（F1.6：切换间隔 < 200ms）────────────────────
+
+/**
+ * 预取好的下一首。**只留一首。**
+ *
+ * 切歌那一刻才开始读文件（Tauri 下还要整个过一遍 IPC）或者才开始解析在线地址并下载，
+ * 是切歌延迟里最贵的一块 —— 在线那条动辄一两秒。提前一首把字节拿在手上，
+ * 切过去就只剩建 Blob 和等 loadedmetadata。
+ *
+ * 代价是常驻一份下一首的字节（几 MB 到几十 MB）。留两首就是双倍代价换一个更不准的
+ * 猜测：用户按下一首的次数远多于按下下一首。
+ */
+let prefetched: { id: string; bytes: Uint8Array } | null = null
+/** 预取序号，用来作废在途的过期预取（切歌比下载快时会发生） */
+let prefetchSeq = 0
+let prefetchTimer = 0
+
+/**
+ * 太大的文件不预取。40MB 的无损专辑轨常驻在内存里，为的只是省掉一次读盘 ——
+ * 这笔账在 §10 那份内存账单面前划不来。
+ */
+const PREFETCH_MAX_BYTES = 32 * 1024 * 1024
+
+/**
+ * 等这么久再开始预取。
+ *
+ * 刚起播的那一两秒，在线曲目正在拉歌词和封面、本地曲目正在解封面，
+ * 这时候再插一个整文件读取进去，抢的是用户马上就能看见的东西。
+ */
+const PREFETCH_DELAY_MS = 1500
+
+function dropPrefetch(): void {
+  window.clearTimeout(prefetchTimer)
+  // 序号一变，在途的那次预取回来时会发现自己已经过期，直接丢掉
+  prefetchSeq++
+  prefetched = null
+}
+
+/**
+ * 下一首在队列里的下标。null 表示没有下一首、或者**现在还不知道**。
+ *
+ * 随机模式走到本轮最后一首时就是"还不知道"：下一轮是那时才洗的。
+ * 单曲循环也返回 null —— 下一首就是它自己，字节还在 `<audio>` 里。
+ */
+function peekNextIndex(): number | null {
+  const { queue, index, mode } = usePlayer.getState()
+  if (queue.length === 0 || index < 0) return null
+  if (mode === "one") return null
+  if (mode === "shuffle") return shuffle.peek(queue.length)
+  const last = index >= queue.length - 1
+  if (last && mode === "once") return null
+  return last ? 0 : index + 1
+}
+
+async function prefetchNext(): Promise<void> {
+  const i = peekNextIndex()
+  if (i == null) return
+  const track = usePlayer.getState().queue[i]
+  if (!track || prefetched?.id === track.id) return
+
+  const ref = localRef(track)
+  if (ref && ref.size > PREFETCH_MAX_BYTES) return
+
+  const mine = ++prefetchSeq
+  try {
+    const bytes = ref ? await platform.readFile(ref) : await fetchOnlineBytes(track)
+    // 切歌比下载快时会走到这里：这份字节已经没人要了，别占着内存
+    if (mine !== prefetchSeq || bytes.byteLength > PREFETCH_MAX_BYTES) return
+    prefetched = { id: track.id, bytes }
+
+    // 顺带把响度也量出来。测量要解码整首歌（几百毫秒），放在这里意味着下一首
+    // 一开声就是对齐的，不用等测量回来再滑一次音量
+    if (engine.normalize && track.gainDb == null) {
+      void loadLoudness(loudnessKey(track), bytes)
+    }
+  } catch {
+    // 预取失败无所谓：真播到的时候会走正常路径再来一遍，该报的错在那里报
+  }
+}
+
+function schedulePrefetch(): void {
+  window.clearTimeout(prefetchTimer)
+  prefetchTimer = window.setTimeout(() => void prefetchNext(), PREFETCH_DELAY_MS)
 }
 
 /** 播放计时，用于播放次数的计数规则 */
@@ -393,9 +487,19 @@ export const usePlayer = create<PlayerState>((set, get) => {
       // 上一首的归一化增益必须显式清掉，否则会留在节点上加到这一首头上
       engine.setTrackGainDb(0)
 
+      // 预取命中就直接用手上的字节。必须在 dropPrefetch 之前取走
+      const ready = prefetched?.id === track.id ? prefetched.bytes : null
+      dropPrefetch()
+
       try {
         const ref = localRef(track)
-        const bytes = ref ? await engine.load(ref) : await loadOnline(track)
+        let bytes: Uint8Array
+        if (ready) {
+          await engine.loadBytes(ready)
+          bytes = ready
+        } else {
+          bytes = ref ? await engine.load(ref) : await loadOnline(track)
+        }
         consecutiveErrors = 0
         await engine.play()
         save()
@@ -403,6 +507,9 @@ export const usePlayer = create<PlayerState>((set, get) => {
         // 响度对齐。标签命中是同步的，测量那条要解码整首歌，所以不 await ——
         // 声音先出来，量完再用斜坡滑过去
         void applyTrackGain(track, bytes, () => get().index === i)
+
+        // 把下一首提前拿到手上（F1.6）。延后一点点开始，别和刚起播时的封面歌词抢
+        schedulePrefetch()
 
         if (ref) {
           // 曲库落盘时不存歌词正文与封面，重启后要在这里补回来。
@@ -457,6 +564,9 @@ export const usePlayer = create<PlayerState>((set, get) => {
         q.splice(at, 0, track)
         return { queue: q, index: s.index }
       })
+      // 下一首换人了，之前预取的那份已经不是下一首
+      dropPrefetch()
+      schedulePrefetch()
     },
 
     appendToQueue(tracks) {
@@ -478,6 +588,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
 
     clearQueue() {
       engine.pause()
+      dropPrefetch()
       set({ queue: [], index: -1 })
     },
 

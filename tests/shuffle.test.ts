@@ -69,3 +69,43 @@ describe("ShuffleOrder", () => {
     expect(s.current).toBe(s.snapshot()[0])
   })
 })
+
+describe("peek —— 预取要知道下一首是谁", () => {
+  it("说的和 advance 走到的是同一首", () => {
+    const s = new ShuffleOrder()
+    s.reshuffle(6, null, seeded(3))
+    for (let i = 0; i < 5; i++) {
+      const guess = s.peek(6)
+      s.advance(6, seeded(3))
+      expect(s.current).toBe(guess)
+    }
+  })
+
+  it("不推进状态 —— 连问十次答案都一样", () => {
+    const s = new ShuffleOrder()
+    s.reshuffle(6, null, seeded(11))
+    const before = s.current
+    const answers = Array.from({ length: 10 }, () => s.peek(6))
+    expect(new Set(answers).size).toBe(1)
+    expect(s.current).toBe(before)
+  })
+
+  /**
+   * 走到本轮最后一首时下一轮还没洗出来，答案此刻不存在。硬要给一个就会改变
+   * 随机序列本身 —— 预取是个优化，不该决定用户听到的顺序。
+   */
+  it("轮末返回 null，而不是编一个出来", () => {
+    const s = new ShuffleOrder()
+    s.reshuffle(3, null, seeded(5))
+    s.advance(3, seeded(5))
+    expect(s.peek(3)).not.toBe(null)
+    s.advance(3, seeded(5))
+    expect(s.peek(3)).toBe(null)
+  })
+
+  it("队列长度对不上就不猜", () => {
+    const s = new ShuffleOrder()
+    s.reshuffle(6, null, seeded(2))
+    expect(s.peek(7)).toBe(null)
+  })
+})

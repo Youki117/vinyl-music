@@ -410,19 +410,35 @@ class Engine {
    */
   async loadUrl(url: string): Promise<Uint8Array> {
     this.setStatus("loading")
+    const bytes = await this.fetchAudio(url)
+    await this.attachBytes(bytes)
+    return bytes
+  }
+
+  /**
+   * 只把音频**取回来**，不载入。预取下一首用它 —— 那时当前这首还在放，
+   * 绝不能碰 `<audio>`。
+   */
+  async fetchAudio(url: string): Promise<Uint8Array> {
     const { fetch: tauriFetch } = await import("@tauri-apps/plugin-http")
     const res = await tauriFetch(url, { method: "GET" })
-    if (!res.ok) {
-      this.setStatus("error", `音源地址取回失败：HTTP ${res.status}`)
-      throw new Error(`HTTP ${res.status}`)
-    }
+    if (!res.ok) throw new Error(`音源地址取回失败：HTTP ${res.status}`)
     const bytes = new Uint8Array(await res.arrayBuffer())
+    if (bytes.byteLength > MAX_FILE_BYTES) throw new Error("文件过大")
+    return bytes
+  }
+
+  /**
+   * 用**已经在手上的字节**载入。预取命中时走这条 —— 省掉读盘或下载那一整段，
+   * 这正是 F1.6 要求的「切换间隔 < 200ms」里最贵的一块。
+   */
+  async loadBytes(bytes: Uint8Array): Promise<void> {
+    this.setStatus("loading")
     if (bytes.byteLength > MAX_FILE_BYTES) {
       this.setStatus("error", `音频超过 ${MAX_FILE_BYTES / 1024 / 1024}MB，已跳过`)
       throw new Error("文件过大")
     }
     await this.attachBytes(bytes)
-    return bytes
   }
 
   /** 字节 → Blob → `<audio>`，等到 loadedmetadata 才算成功。本地与在线共用。 */
