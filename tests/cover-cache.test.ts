@@ -72,6 +72,8 @@ const track = (id: string): Track => ({
   lastPlayed: 0,
   addedAt: 0,
   missing: false,
+  gainDb: null,
+  gainPeak: null,
 })
 
 /** 上限写在 library.ts 里；这里跟着写死，改那边就该改这边 */

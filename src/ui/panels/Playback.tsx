@@ -14,6 +14,8 @@ export default function Playback({ open, onClose }: { open: boolean; onClose: ()
   const speed = usePlayer((s) => s.speed)
   const setSpeed = usePlayer((s) => s.setSpeed)
   const setOutputDevice = usePlayer((s) => s.setOutputDevice)
+  const normalize = usePlayer((s) => s.normalize)
+  const setNormalize = usePlayer((s) => s.setNormalize)
 
   const [eqOn, setEqOn] = useState(engine.eqEnabled)
   const [gains, setGains] = useState<number[]>(engine.eqGains)
@@ -22,6 +24,11 @@ export default function Playback({ open, onClose }: { open: boolean; onClose: ()
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const [device, setDevice] = useState(engine.outputDevice)
   const [deviceError, setDeviceError] = useState<string | null>(null)
+  /**
+   * 当前这首被加了多少 dB。engine 上这个值不是响应式的，而且它可能在测量完成后
+   * 才落定 —— 跟着下面那个每秒一次的定时器读就够了，为一行只读文字单开一条订阅不值。
+   */
+  const [gainDb, setGainDb] = useState(engine.trackGainDb)
 
   const [loop, setLoop] = useState(engine.loop)
   const rootRef = useDismiss<HTMLDivElement>(open, onClose)
@@ -32,7 +39,10 @@ export default function Playback({ open, onClose }: { open: boolean; onClose: ()
   useEffect(() => {
     if (!open) return
     // 每秒刷新倒计时
-    const id = window.setInterval(() => setRemaining(engine.sleepRemaining), 1000)
+    const id = window.setInterval(() => {
+      setRemaining(engine.sleepRemaining)
+      setGainDb(engine.trackGainDb)
+    }, 1000)
     void engine.listOutputDevices().then(setDevices)
     return () => window.clearInterval(id)
   }, [open])
@@ -118,6 +128,30 @@ export default function Playback({ open, onClose }: { open: boolean; onClose: ()
           />
         </label>
         <p className="hint">勾上后，到点会等当前这首播完再暂停，不会把歌切断。</p>
+
+        <p className="section-title">
+          音量归一化
+          <label className="inline-toggle">
+            <input
+              type="checkbox"
+              checked={normalize}
+              onChange={(e) => setNormalize(e.target.checked)}
+            />
+            启用
+          </label>
+          {normalize && gainDb !== 0 && (
+            <b>
+              {" · 这首 "}
+              {gainDb > 0 ? "+" : ""}
+              {gainDb.toFixed(1)} dB
+            </b>
+          )}
+        </p>
+        <p className="hint">
+          不同专辑的母带响度能差 10dB 以上，开了它换歌就不会音量跳一档。优先读文件里的
+          ReplayGain 标签；没有标签的会按 EBU R128 自己量一遍（解码整首歌，结果缓存到磁盘，
+          同一个文件只算一次），所以第一次播到的那首可能过几秒才对齐。
+        </p>
 
         <p className="section-title">
           均衡器

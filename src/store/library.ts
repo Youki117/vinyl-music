@@ -76,6 +76,9 @@ export function onlineToTrack(o: OnlineTrackInput, addedAt: number): Track {
     addedAt,
     // 在线曲目没有"源文件不见了"这回事，能不能播是播的时候才知道的
     missing: false,
+    // 平台不给 ReplayGain，归一化要靠自己测
+    gainDb: null,
+    gainPeak: null,
   }
 }
 
@@ -95,6 +98,16 @@ export type Track = {
   addedAt: number
   /** 源文件读不到时标灰 */
   missing: boolean
+  /**
+   * ReplayGain 标签给的增益（dB）与采样峰值（0..1）。**导入时从文件标签读**，
+   * 没有标签就是 null —— 那时音量归一化会退回自己测一遍并把结果缓存到磁盘
+   * （audio/loudness.ts）。在线曲目一律 null：平台不给这个。
+   *
+   * 存在曲目上而不是丢进那份测量缓存里，是因为它是**文件自带的元数据**，
+   * 和标题艺术家同类；测量缓存是算出来的东西，清掉它不该连带丢掉别人写好的标签。
+   */
+  gainDb: number | null
+  gainPeak: number | null
 }
 
 export type Playlist = {
@@ -150,7 +163,7 @@ export const SORT_LABEL: Record<SortKey, string> = {
   lastPlayed: "最近播放",
 }
 
-const SCHEMA = 3
+const SCHEMA = 4
 const RECENT_LIMIT = 100
 const MOST_LIMIT = 100
 
@@ -333,6 +346,10 @@ export const useLibrary = create<LibraryState>((set, get) => {
           origin: t.origin ?? (legacy.ref ? { kind: "local", ref: legacy.ref } : t.origin),
           addedAt: t.addedAt ?? i,
           lastPlayed: t.lastPlayed ?? 0,
+          // v3 之前没有这两个字段。null 的含义是"不知道"，归一化会退回自己测，
+          // 不是"没有增益"—— 所以老曲库不需要重新导入
+          gainDb: t.gainDb ?? null,
+          gainPeak: t.gainPeak ?? null,
           cover: null,
           lyrics: null,
           missing: false,
@@ -425,6 +442,8 @@ export const useLibrary = create<LibraryState>((set, get) => {
             lastPlayed: 0,
             addedAt: now + i,
             missing: false,
+            gainDb: meta.gainDb,
+            gainPeak: meta.gainPeak,
           }
         } catch {
           // 单个文件失败不中断整批导入

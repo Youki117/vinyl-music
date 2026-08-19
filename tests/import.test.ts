@@ -103,6 +103,8 @@ describe("addFiles · 并发导入", () => {
           lastPlayed: 0,
           addedAt: 0,
           missing: false,
+          gainDb: null,
+          gainPeak: null,
         },
       ],
     })

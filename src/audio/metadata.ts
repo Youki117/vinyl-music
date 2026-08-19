@@ -1,6 +1,7 @@
 import { parseBlob, type IAudioMetadata } from "music-metadata"
 
 import type { FileRef } from "@/platform"
+import { parseGainTag } from "./loudness"
 
 /**
  * 导入时要落进曲目的元数据。
@@ -17,6 +18,12 @@ export type TrackMeta = {
   album: string
   duration: number
   lyrics: string | null
+  /**
+   * ReplayGain 标签：该给这首歌加多少 dB，以及它的采样峰值（0..1，用于防削波）。
+   * 文件里没写就是 null —— 归一化那边会退回自己测一遍（audio/loudness.ts）。
+   */
+  gainDb: number | null
+  gainPeak: number | null
 }
 
 function stripExt(name: string): string {
@@ -144,6 +151,8 @@ export async function readMetadata(ref: FileRef, bytes: Uint8Array): Promise<Tra
     album: "",
     duration: 0,
     lyrics: null,
+    gainDb: null,
+    gainPeak: null,
   }
 
   let meta: IAudioMetadata
@@ -178,11 +187,22 @@ export async function readMetadata(ref: FileRef, bytes: Uint8Array): Promise<Tra
     return fb
   }
 
+  /*
+   * ReplayGain。音轨增益优先于专辑增益 —— 我们是按单曲连播的播放器，
+   * 专辑增益保的是"同一张专辑内的相对关系"，在混播的列表里反而对不齐。
+   * music-metadata 已经把 ID3 的 TXXX、RVA2 与 Vorbis 注释统一成了 { dB, ratio }。
+   */
+  const gainDb = parseGainTag(common.replaygain_track_gain ?? common.replaygain_album_gain)
+  const peakRatio = (common.replaygain_track_peak ?? common.replaygain_album_peak)?.ratio
+  const gainPeak = typeof peakRatio === "number" && peakRatio > 0 ? peakRatio : null
+
   return {
     title: pick(wav.title, common.title, fallback.title),
     artist: pick(wav.artist, common.artist, fallback.artist),
     album: pick(wav.album, common.album, ""),
     duration: meta.format.duration ?? 0,
     lyrics: typeof lyrics === "string" ? lyrics : null,
+    gainDb,
+    gainPeak,
   }
 }

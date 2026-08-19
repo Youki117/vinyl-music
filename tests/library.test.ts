@@ -16,6 +16,8 @@ function track(p: Partial<Track> & { id: string }): Track {
     lastPlayed: 0,
     addedAt: 0,
     missing: false,
+    gainDb: null,
+    gainPeak: null,
     ...p,
   }
 }

@@ -1,13 +1,14 @@
 import { platform, type FileRef } from "@/platform"
 
 import { Equalizer } from "./eq"
+import { dbToGain } from "./loudness"
 
 /**
  * 播放引擎。用 HTMLAudioElement 而不是 AudioBufferSourceNode 作音源：前者自带
  * 流式解码、currentTime 跳转与缓冲管理，一首 FLAC 不必整个解码进内存。
  *
  * 节点图：
- *   <audio> → MediaElementSource → Equalizer → GainNode → destination
+ *   <audio> → MediaElementSource → Equalizer → 归一化增益 → 主增益 → destination
  *
  * 曾经在 GainNode 上旁路挂过一个 AnalyserNode，给蒙版提供 16 段频谱包络。
  * 蒙版律动删除后已一并移除（见 src/stage/Veil.tsx 的说明）。
@@ -25,6 +26,8 @@ class Engine {
   private _el: HTMLAudioElement | null = null
   private ctx: AudioContext | null = null
   private gain: GainNode | null = null
+  /** 音量归一化专用增益，接在均衡器与主增益之间。见 normGainValue */
+  private norm: GainNode | null = null
   private objectUrl: string | null = null
 
   private progressListeners = new Set<Listener>()
@@ -40,6 +43,8 @@ class Engine {
   private _eqGains: number[] = new Array(10).fill(0)
   private _speed = 1
   private _outputDevice = ""
+  private _normalize = false
+  private _trackGainDb = 0
 
   /** pause() 的延迟停止计时器。play() 必须把它取消掉，见 pause() 里的说明。 */
   private pauseTimer = 0
@@ -97,18 +102,73 @@ class Engine {
     const ctx = new AudioContext()
     const src = ctx.createMediaElementSource(this.el)
     const eq = new Equalizer(ctx)
+    const norm = ctx.createGain()
     const gain = ctx.createGain()
 
     src.connect(eq.input)
-    eq.output.connect(gain)
+    eq.output.connect(norm)
+    norm.connect(gain)
     gain.connect(ctx.destination)
     // 这里原本还旁路挂着一个 AnalyserNode，给蒙版提供 16 段频谱包络。
     // 蒙版律动删掉之后没人要这份数据了，整条链（audio/analyser.ts）一并移除。
 
     gain.gain.value = this.effectiveVolume()
+    norm.gain.value = this.normGainValue()
     this.ctx = ctx
     this.gain = gain
+    this.norm = norm
     this.eq = eq
+  }
+
+  // ── 音量归一化（F7.4）────────────────────────────────────
+  /**
+   * 归一化增益是**独立的一个节点**，不并进主增益。
+   *
+   * 主增益上跑着播放/暂停的淡入淡出包络（cancelScheduledValues + ramp），把归一化
+   * 乘进去的话，任何一次暂停都会把它抹掉；反过来，测量结果晚到时的那次调整也会
+   * 打断淡入。两件事各用一个节点，谁也不用知道谁的存在。
+   *
+   * 位置在均衡器之后、主增益之前 —— 叠加轨接的是主增益（见 attachLayer），
+   * 所以不受归一化影响：那是给主音轨对齐响度的，不该动用户自己叠的环境音。
+   */
+  private normGainValue(): number {
+    return this._normalize ? dbToGain(this._trackGainDb) : 1
+  }
+
+  /**
+   * 应用当前的归一化增益。
+   *
+   * 用 250ms 的线性斜坡而不是直接赋值：测量结果可能在歌播到一半时才回来，
+   * 音量当场跳一档比不归一化更难受。
+   */
+  private applyNorm(): void {
+    if (!this.norm || !this.ctx) return
+    const now = this.ctx.currentTime
+    const g = this.norm.gain
+    g.cancelScheduledValues(now)
+    g.setValueAtTime(g.value, now)
+    g.linearRampToValueAtTime(this.normGainValue(), now + 0.25)
+  }
+
+  setNormalize(on: boolean): void {
+    this._normalize = on
+    this.applyNorm()
+  }
+
+  get normalize(): boolean {
+    return this._normalize
+  }
+
+  /**
+   * 这首歌该加多少 dB。切歌时**必须显式设回 0**，否则上一首的增益会留在节点上。
+   */
+  setTrackGainDb(db: number): void {
+    this._trackGainDb = Number.isFinite(db) ? db : 0
+    this.applyNorm()
+  }
+
+  get trackGainDb(): number {
+    return this._trackGainDb
   }
 
   /**

@@ -2,6 +2,7 @@ import { create } from "zustand"
 
 import { platform } from "@/platform"
 import { engine, type EngineStatus } from "@/audio/engine"
+import { clampGainDb, gainDbFor, loadLoudness } from "@/audio/loudness"
 import { localRef, useLibrary, type Track } from "./library"
 import { ShuffleOrder } from "./shuffle"
 
@@ -19,7 +20,7 @@ export const REPEAT_LABEL: Record<RepeatMode, string> = {
   once: "顺序播放",
 }
 
-const SETTINGS_SCHEMA = 1
+const SETTINGS_SCHEMA = 2
 
 type SettingsFile = {
   schemaVersion: number
@@ -31,6 +32,8 @@ type SettingsFile = {
   lastTrackId: string | null
   /** 输出设备。同一个面板里 EQ 与速度都记，唯独这项不记说不过去。 */
   outputDevice: string
+  /** 音量归一化。PRD F7.4 要求默认关闭 */
+  normalize: boolean
 }
 
 type PlayerState = {
@@ -44,6 +47,8 @@ type PlayerState = {
   muted: boolean
   mode: RepeatMode
   speed: number
+  /** 音量归一化开关（F7.4），默认关闭 */
+  normalize: boolean
 
   current(): Track | null
   init(): Promise<void>
@@ -68,6 +73,7 @@ type PlayerState = {
   setVolume(v: number): void
   toggleMute(): void
   setSpeed(v: number): void
+  setNormalize(on: boolean): void
   /** 切输出设备并落盘。失败时抛，由界面提示。 */
   setOutputDevice(id: string): Promise<void>
 }
@@ -144,6 +150,38 @@ async function fillOnlineMeta(track: Track, stillCurrent: () => boolean, refresh
       refresh()
     })
     .catch(() => {})
+}
+
+/** 曲目的响度缓存键。本地带上大小与修改时间，文件被换掉时缓存自动失效 */
+function loudnessKey(track: Track): string {
+  const ref = localRef(track)
+  return ref ? `${ref.id}|${ref.size}|${ref.mtime}` : track.id
+}
+
+/**
+ * 对齐这首歌的响度（F7.4）。
+ *
+ * 标签优先：文件里写着 ReplayGain 就直接用，零成本。没写才自己测 —— 那要解码整首歌，
+ * 所以结果落盘缓存，同一个文件只算一次；**测量不挡播放**，声音先出来，量完再用 250ms
+ * 的斜坡滑过去（engine.applyNorm）。
+ *
+ * @param bytes 已经在手上的文件字节；传 null 表示只查缓存不解码
+ * @param stillCurrent 回调时先问一句还是不是这一首 —— 测量可能要几百毫秒
+ */
+async function applyTrackGain(
+  track: Track,
+  bytes: Uint8Array | null,
+  stillCurrent: () => boolean,
+): Promise<void> {
+  if (!engine.normalize) return
+
+  if (track.gainDb != null) {
+    engine.setTrackGainDb(clampGainDb(track.gainDb, track.gainPeak))
+    return
+  }
+  const got = await loadLoudness(loudnessKey(track), bytes)
+  if (!got || !stillCurrent()) return
+  engine.setTrackGainDb(gainDbFor(got.lufs, got.peak))
 }
 
 /** 播放计时，用于播放次数的计数规则 */
@@ -237,6 +275,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
         eqGains: engine.eqGains,
         lastTrackId: s.current()?.id ?? null,
         outputDevice: engine.outputDevice,
+        normalize: s.normalize,
       }
       void platform.writeConfig("settings", file)
     }, 1000)
@@ -252,6 +291,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
     muted: false,
     mode: "all",
     speed: 1,
+    normalize: false,
 
     current() {
       const { queue, index } = get()
@@ -313,7 +353,13 @@ export const usePlayer = create<PlayerState>((set, get) => {
 
       const s = await platform.readConfig<SettingsFile>("settings")
       if (s) {
-        set({ volume: s.volume ?? 0.8, mode: s.mode ?? "all", speed: s.speed ?? 1 })
+        set({
+          volume: s.volume ?? 0.8,
+          mode: s.mode ?? "all",
+          speed: s.speed ?? 1,
+          normalize: s.normalize ?? false,
+        })
+        engine.setNormalize(s.normalize ?? false)
         engine.setVolume(s.volume ?? 0.8)
         engine.setSpeed(s.speed ?? 1)
         if (s.eqGains?.length) engine.setEqGains(s.eqGains)
@@ -344,6 +390,8 @@ export const usePlayer = create<PlayerState>((set, get) => {
       const track = queue[i]
       set({ index: i })
       resetPlayCounter()
+      // 上一首的归一化增益必须显式清掉，否则会留在节点上加到这一首头上
+      engine.setTrackGainDb(0)
 
       try {
         const ref = localRef(track)
@@ -351,6 +399,10 @@ export const usePlayer = create<PlayerState>((set, get) => {
         consecutiveErrors = 0
         await engine.play()
         save()
+
+        // 响度对齐。标签命中是同步的，测量那条要解码整首歌，所以不 await ——
+        // 声音先出来，量完再用斜坡滑过去
+        void applyTrackGain(track, bytes, () => get().index === i)
 
         if (ref) {
           // 曲库落盘时不存歌词正文与封面，重启后要在这里补回来。
@@ -527,6 +579,17 @@ export const usePlayer = create<PlayerState>((set, get) => {
     setSpeed(v) {
       set({ speed: v })
       engine.setSpeed(v)
+      save()
+    },
+
+    setNormalize(on) {
+      set({ normalize: on })
+      engine.setNormalize(on)
+      // 打开时把当前这首也对齐上，别等到下一首。字节已经不在手上了，所以只查缓存 ——
+      // 为一个开关重新解码整首歌不值得（loadLoudness 的 bytes 传 null 就是这个意思）
+      const t = get().current()
+      if (on && t) void applyTrackGain(t, null, () => get().current()?.id === t.id)
+      else if (!on) engine.setTrackGainDb(0)
       save()
     },
 
