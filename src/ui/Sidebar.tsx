@@ -16,12 +16,17 @@ export default function Sidebar({
   onOpenSkin,
   onOpenMix,
   onOpenOnline,
+  onOpenLayout,
+  layoutEditing,
   active,
 }: {
   onOpenPlayback?: () => void
   onOpenSkin?: () => void
   onOpenMix?: () => void
   onOpenOnline?: () => void
+  onOpenLayout?: () => void
+  /** 布局编辑是个模式而不是面板，选中态单独给 */
+  layoutEditing?: boolean
   /** 当前打开的面板，用来给对应按钮加选中态 */
   active?: string | null
 }) {
@@ -86,6 +91,21 @@ export default function Sidebar({
             strokeLinecap="round"
             d="m15.5 15.5 4 4"
           />
+        </svg>
+      </button>
+
+      <button
+        className="sb-tool"
+        data-on={layoutEditing}
+        onClick={onOpenLayout}
+        aria-label="编辑布局"
+        aria-pressed={layoutEditing}
+        title="编辑布局（拖动部件调位置）"
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <rect x="3" y="4" width="8" height="7" rx="1.4" fill="none" stroke="currentColor" strokeWidth="1.6" />
+          <rect x="13" y="4" width="8" height="11" rx="1.4" fill="none" stroke="currentColor" strokeWidth="1.6" />
+          <rect x="3" y="13" width="8" height="7" rx="1.4" fill="none" stroke="currentColor" strokeWidth="1.6" />
         </svg>
       </button>
 

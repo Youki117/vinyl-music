@@ -5,6 +5,7 @@ import Veil from "./Veil"
 import { useActiveTint } from "./useActiveTint"
 import { deriveInk } from "@/skin/palette"
 import { useSkin } from "@/store/skin"
+import { offsetsToVars, useLayout } from "@/store/layout"
 
 /**
  * 舞台。固定 1243×688 设计坐标系（见 useStageFit 的 DESIGN_W/H）。
@@ -23,6 +24,9 @@ export default function Stage({ children }: { children: ReactNode }) {
   const veil = useSkin((s) => s.skin.veil)
   const backdropAvg = useSkin((s) => s.backdropAvg)
   const tint = useActiveTint()
+  const offsets = useLayout((s) => s.offsets)
+  const editing = useLayout((s) => s.editing)
+  const vars = useMemo(() => offsetsToVars(offsets), [offsets])
 
   /*
    * 文字配色在这里现算，而不是换图时算一次存进皮肤。
@@ -51,7 +55,14 @@ export default function Stage({ children }: { children: ReactNode }) {
         <Backdrop />
         <Veil />
         <div className="layer grain" />
-        <div className="content">{children}</div>
+        {/*
+          自定义布局的偏移量以 CSS 变量的形式挂在这里（需求 §4.3）。挂在 .content 上
+          而不是各个部件自己读 store：部件不需要知道有"布局编辑"这回事，CSS 里
+          `translate: var(--off-x, 0) var(--off-y, 0)` 一行就够，没动过的部件连变量都没有。
+        */}
+        <div className="content" style={vars} data-layout-edit={editing || undefined}>
+          {children}
+        </div>
       </div>
     </div>
   )

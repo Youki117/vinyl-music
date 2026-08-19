@@ -85,7 +85,7 @@ export default function Lyrics() {
   if (lines.length === 0) return null
 
   return (
-    <div className="lyrics" ref={boxRef}>
+    <div className="lyrics" data-part="lyrics" ref={boxRef}>
       <div className="lyrics-track" ref={trackRef} role="list">
         {lines.map((line, idx) => {
           const isActive = idx === active

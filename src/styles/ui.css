@@ -1812,3 +1812,106 @@ header button.danger,
   background: rgba(255, 255, 255, 0.07);
   color: #c2beb7;
 }
+
+/* ── 组件位置自定义（需求 §4.3）──────────────────────────
+ *
+ * 每个可搬动的部件加一条 translate。用独立的 `translate` 属性而不是写进 transform：
+ * 黑胶自己在 transform 上转圈（rotate），传输栏里也有别的变换 —— 合进一个 transform
+ * 就必须由 JS 把两者拼起来，而现在 CSS 各管各的，谁也不用知道谁。
+ *
+ * 变量只有被搬动过的部件才存在（见 store/layout.ts 的 offsetsToVars），
+ * 没搬过的走 0，也就是 CSS 里那份照参考图对出来的默认版式。
+ */
+.masthead {
+  translate: var(--off-masthead-x, 0) var(--off-masthead-y, 0);
+}
+
+.byline {
+  translate: var(--off-byline-x, 0) var(--off-byline-y, 0);
+}
+
+.lyrics {
+  translate: var(--off-lyrics-x, 0) var(--off-lyrics-y, 0);
+}
+
+.disc,
+.disc-ring,
+.disc-lighting {
+  translate: var(--off-disc-x, 0) var(--off-disc-y, 0);
+}
+
+.actions {
+  translate: var(--off-actions-x, 0) var(--off-actions-y, 0);
+}
+
+.playback {
+  translate: var(--off-transport-x, 0) var(--off-transport-y, 0);
+}
+
+/* 编辑态：给每个部件描个边，让人看得见自己能拖什么 */
+.content[data-layout-edit] [data-part] {
+  outline: 1px dashed rgba(255, 255, 255, 0.45);
+  outline-offset: 3px;
+}
+
+.content[data-layout-edit] [data-part]:hover {
+  outline-color: var(--ink-accent);
+  outline-style: solid;
+}
+
+.layout-edit {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  cursor: move;
+  /* 覆盖层本身要接住所有点击 —— 编辑态下点黑胶不该播放、点收藏不该收藏 */
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.layout-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(14, 14, 14, 0.93);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  color: #ddd9d2;
+  font-size: 11px;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.layout-bar b {
+  font-weight: 400;
+  color: var(--ink-accent);
+}
+
+.layout-bar span {
+  color: #8d8981;
+  font-size: 10.5px;
+}
+
+.layout-bar button {
+  padding: 4px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  color: #b6b2ab;
+  font-size: 10.5px;
+}
+
+.layout-bar button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.layout-bar .layout-done {
+  border-color: var(--ink-accent);
+  color: #fff;
+}

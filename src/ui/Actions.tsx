@@ -12,7 +12,7 @@ export default function Actions() {
   const toggleLike = usePlayer((s) => s.toggleLike)
 
   return (
-    <div className="actions">
+    <div className="actions" data-part="actions">
       <button
         className="action like"
         data-liked={track?.liked ?? false}

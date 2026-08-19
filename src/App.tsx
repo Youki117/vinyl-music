@@ -13,6 +13,7 @@ import Playlist from "@/ui/panels/Playlist"
 import SkinEditor from "@/ui/panels/SkinEditor"
 import Playback from "@/ui/panels/Playback"
 import Online from "@/ui/panels/Online"
+import LayoutEdit from "@/ui/LayoutEdit"
 import { useLibrary } from "@/store/library"
 import { useAi } from "@/store/ai"
 import { useMix } from "@/store/mix"
@@ -20,6 +21,7 @@ import MixPanel from "@/ui/panels/Mix"
 import { engine } from "@/audio/engine"
 import { usePlayer } from "@/store/player"
 import { useSkin } from "@/store/skin"
+import { useLayout } from "@/store/layout"
 import { isAudioFile, isLyricFile, isPlaylistFile, platform, type FileRef } from "@/platform"
 /*
  * 在线音源**按需加载**，不在启动路径上。
@@ -86,6 +88,7 @@ export default function App() {
   // 之前用四个布尔量拼 `open={a && !b && !c}`，被盖住的那个状态还是 true，
   // 关掉上面那个它就自己冒出来了 —— 换成单一状态，互斥是结构自带的。
   const [panel, setPanel] = useState<PanelId>(null)
+  const layoutEditing = useLayout((s) => s.editing)
   const [notice, setNotice] = useState<string | null>(null)
 
   const togglePanel = (id: Exclude<PanelId, null>) =>
@@ -108,6 +111,7 @@ export default function App() {
     void loadSkin()
     void init()
     void useAi.getState().load()
+    void useLayout.getState().load()
   }, [loadSkin, init])
 
   // 切歌时：套用该曲已有的 AI 配图，并把混音编排切到这首歌上
@@ -192,6 +196,11 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return
+      // 布局编辑时方向键归微调用，空格/字母键也不该在搬部件的时候切歌换面板
+      if (useLayout.getState().editing) {
+        if (e.key === "Escape") useLayout.getState().setEditing(false)
+        return
+      }
       const p = usePlayer.getState()
       switch (e.key) {
         case " ":
@@ -270,13 +279,20 @@ export default function App() {
         onOpenSkin={() => togglePanel("skin")}
         onOpenMix={() => togglePanel("mix")}
         onOpenOnline={() => togglePanel("online")}
+        onOpenLayout={() => {
+          // 编辑布局时把抽屉收起来：抽屉压着右边小半个画面，搬部件会看不见落点
+          setPanel(null)
+          useLayout.getState().setEditing(!useLayout.getState().editing)
+        }}
+        layoutEditing={layoutEditing}
         active={panel}
       />
       <Masthead />
       <Lyrics />
-      <div className="disc-ring" />
+      {/* 圆环与光照跟着黑胶一起搬，所以标同一个 data-part（三者共用一组 CSS 偏移变量） */}
+      <div className="disc-ring" data-part="disc" />
       <Disc onToggle={toggle} onContextMenu={() => setPanel("skin")} />
-      <div className="disc-lighting" />
+      <div className="disc-lighting" data-part="disc" />
       <Actions />
       <Progress>
         <Controls
@@ -343,6 +359,7 @@ export default function App() {
       <Playback open={panel === "playback"} onClose={() => setPanel(null)} />
       <MixPanel open={panel === "mix"} onClose={() => setPanel(null)} />
       <Online open={panel === "online"} onClose={() => setPanel(null)} />
+      <LayoutEdit />
     </Stage>
   )
 }

@@ -76,7 +76,7 @@ export default function Masthead() {
 
   return (
     <>
-      <div className="masthead">
+      <div className="masthead" data-part="masthead">
         <h1 ref={titleRef} data-cjk={hasCjk(title)} title={title}>
           {title}
         </h1>
@@ -85,7 +85,7 @@ export default function Masthead() {
         </p>
         {third && <small data-cjk={hasCjk(third)}>{third}</small>}
       </div>
-      <div className="byline">{text.byline}</div>
+      <div className="byline" data-part="byline">{text.byline}</div>
     </>
   )
 }

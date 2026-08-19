@@ -38,7 +38,7 @@ export default function Progress({ children }: { children?: ReactNode }) {
   return (
     // data-keep-panel：整条传输栏是常驻操控件。混音面板开着时本来就要一边拖
     // 进度条一边看时间轴，把它算成"面板外的空白处"会让面板一碰就关。
-    <div className="playback" data-keep-panel>
+    <div className="playback" data-keep-panel data-part="transport">
       {/* 波形删掉了，但这段留白要保住：进度条与上方元素的间距是照效果图定的 */}
       <div className="wave-row" />
 

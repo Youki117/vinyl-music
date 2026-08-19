@@ -40,6 +40,7 @@ export default function Disc({
   return (
     <button
       className="disc"
+      data-part="disc"
       data-playing={playing}
       onClick={onToggle}
       onContextMenu={(e) => {
