@@ -84,6 +84,12 @@ export default defineConfig({
     // 这几个是 CJS 老包，要预构建成 ESM，否则 dev 下会因为 require 报错
     include: ["crypto-browserify", "browserify-zlib", "stream-browserify", "buffer", "process/browser", "util", "events", "assert"],
   },
+  /*
+   * 音源脚本跑在 Worker 里（src/source/userApi/worker.ts）。默认的 iife 只影响打包产物，
+   * dev server 那边一律按 ES 模块产出 worker 源码 —— 两边不一致的结果是音源功能在 dev
+   * 下必崩、打包后才通。这里把打包也钉成 es，与 dev 对齐。
+   */
+  worker: { format: "es" },
   // 着色器以字符串导入
   assetsInclude: ["**/*.vert", "**/*.frag"],
   clearScreen: false,

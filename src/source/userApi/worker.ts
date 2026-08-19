@@ -163,14 +163,15 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
       scriptInfo = msg.info
       try {
         /*
-         * 用 blob + importScripts 加载，**不用 eval**。
+         * 用 blob + 动态 import 加载，**不用 eval**：CSP 只需放行 `script-src blob:` /
+         * `worker-src blob:`，不必开 unsafe-eval —— 后者对整个应用生效，口子宽得多。
          *
-         * 两个好处：
-         *   1. CSP 只需放行 `script-src blob:` / `worker-src blob:`，不必开 unsafe-eval。
-         *      后者对整个应用生效，口子宽得多。
-         *   2. importScripts 在**非严格模式的全局作用域**里执行脚本，和洛雪的 Electron
-         *      渲染进程环境一致。用 `import(blobUrl)` 会按模块跑（强制严格模式、顶层 this
-         *      是 undefined），混淆过的脚本容易在那上面翻车。
+         * 原先用的是 importScripts，因为它在**非严格模式的全局作用域**里执行脚本，
+         * 和洛雪的 Electron 渲染进程环境一致。但 importScripts 只有经典 worker 才有，
+         * 而经典 worker 在 Vite dev 下根本起不来（理由写在 host.ts 起 Worker 那里）。
+         * 权衡之后选了 module worker：`import(blobUrl)` 按模块跑，强制严格模式、
+         * 顶层声明不进全局。实测三份真实音源（野草 / 野花 / 六音）都不受影响 ——
+         * 它们只通过 globalThis.lx 对外说话，不依赖变量泄漏到全局。
          *
          * 安全边界仍然是 Worker 本身：没有 DOM、没有 window、没有 Tauri IPC，
          * 网络还得让主线程代发。CSP 这一步只决定"能不能执行动态代码"，不影响它能碰到什么。
@@ -178,7 +179,7 @@ self.onmessage = async (e: MessageEvent<ToWorker>) => {
         const blob = new Blob([msg.script], { type: "text/javascript" })
         const url = URL.createObjectURL(blob)
         try {
-          ;(self as unknown as { importScripts: (u: string) => void }).importScripts(url)
+          await import(/* @vite-ignore */ url)
         } finally {
           URL.revokeObjectURL(url)
         }

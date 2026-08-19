@@ -63,9 +63,18 @@ export function loadUserApi(script: string, timeoutMs = 20000): Promise<LoadedSc
   const info = parseScriptInfo(script)
 
   return new Promise<LoadedScript>((resolve, reject) => {
-    // 经典 worker 而不是 module worker：importScripts 只在经典 worker 里有，
-    // 而我们要用它在非严格模式下跑音源脚本（理由见 worker.ts 的 boot 分支）
-    const w = new Worker(new URL("./worker.ts", import.meta.url))
+    /*
+     * **必须是 module worker。**
+     *
+     * 一度写成经典 worker（不传 type），为的是用 importScripts 在非严格模式下跑音源脚本。
+     * 那在打包产物里是对的 —— Vite 会把 worker 打成 IIFE —— 但 **dev 下必崩**：
+     * Vite 的 dev server 只会把 worker 源码按 ES 模块产出（保留 import 语句），
+     * 经典 worker 解析不了，脚本还没跑就是 `Cannot use import statement outside a module`，
+     * 于是「导入音源」在 npm run tauri dev 下 100% 失败，只有打包后才碰得通。
+     * dev 与打包行为不一致是最难查的一类问题，所以两边统一用 module worker
+     * （vite.config.ts 的 worker.format 也钉成 es，保证打包产物一致）。
+     */
+    const w = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" })
     worker = w
 
     const timer = setTimeout(() => {
