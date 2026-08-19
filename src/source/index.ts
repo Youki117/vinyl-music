@@ -24,7 +24,7 @@ import { fetch as tauriFetch } from "@tauri-apps/plugin-http"
 import { lxLyricToEnhancedLrc } from "./lyric"
 import type { SourceId } from "./catalog"
 
-export { SOURCES, type SourceId } from "./catalog"
+export { SOURCES, sourceOfLink, type SourceId } from "./catalog"
 
 /** 搜索结果。各平台字段名不一致，统一成这一份再往上层交。 */
 export interface OnlineTrack {
@@ -82,6 +82,58 @@ export async function searchMusic(
   const res = await api.musicSearch.search(keyword, page, limit)
   const list: RawTrack[] = res?.list ?? []
   return { list: list.map((r) => normalize(source, r)), total: res?.total ?? list.length }
+}
+
+/** 一个在线歌单。曲目结构与搜索结果完全一致，上层拿去入库的路径也就是同一条。 */
+export interface OnlinePlaylist {
+  source: SourceId
+  /** 歌单名。平台没给就是空串，由调用方决定叫什么 */
+  name: string
+  list: OnlineTrack[]
+  /** 平台声明的总数，可能大于本页拿到的条数 */
+  total: number
+  page: number
+}
+
+interface RawList {
+  list?: RawTrack[]
+  total?: number
+  info?: { name?: string }
+}
+
+/**
+ * 取一个歌单。**不需要音源脚本** —— 和搜索、歌词一样是 musicSdk 自带的。
+ *
+ * `idOrLink` 直接把用户贴进来的东西原样交给上游：每个平台的 `songList` 都自带一组
+ * 解析分享链接的正则，我们再解析一遍只会多一处要跟着上游改的地方。实测（2026-08-19）：
+ *
+ *   网易云   歌单 id 与分享链接都行
+ *   QQ      分享链接可以
+ *   酷我     歌单 id 可以
+ *   酷狗     **必须给分享链接**，裸 specialId 不行
+ *   咪咕     部分 id 报错，上游这块本来就脆
+ *
+ * 歌单**只给曲目信息，不给播放地址**。所以这里不碰 resolvePlayUrl ——
+ * 一个两百首的歌单挨个解析要几分钟，而且大部分地址等真播到的时候早就过期了。
+ * 播到哪首解析哪首，那是播放路径的事（store/player.ts 的 playAt）。
+ */
+export async function getPlaylist(
+  source: SourceId,
+  idOrLink: string,
+  page = 1,
+): Promise<OnlinePlaylist> {
+  const api = sdk[source]
+  if (!api?.songList?.getListDetail) throw new Error(`音源 ${source} 不支持歌单`)
+  const res = await unwrap<RawList>(api.songList.getListDetail(idOrLink.trim(), page))
+  const list = res?.list ?? []
+  if (list.length === 0) throw new Error("这个歌单里没解析出曲目（可能是私密歌单，或链接不对）")
+  return {
+    source,
+    name: res?.info?.name?.trim() ?? "",
+    list: list.map((r) => normalize(source, r)),
+    total: res?.total ?? list.length,
+    page,
+  }
 }
 
 /**

@@ -737,10 +737,125 @@
   width: calc(420px + var(--rail-w));
 }
 
+.online-tabs {
+  flex: 1;
+  display: flex;
+  gap: 4px;
+}
+
+.online-tabs button {
+  padding: 4px 10px;
+  border-radius: 4px;
+  color: #8d8981;
+  font-size: 11.5px;
+}
+
+.online-tabs button[data-on="true"] {
+  background: rgba(255, 255, 255, 0.13);
+  color: #fff;
+}
+
+.online-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px 8px;
+}
+
+.online-bar input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  font-size: 11px;
+  outline: none;
+}
+
+.online-bar input:focus {
+  border-color: var(--ink-accent);
+}
+
+.online-bar select {
+  padding: 4px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #ddd9d2;
+  font-size: 10.5px;
+  outline: none;
+}
+
+.online-bar button {
+  padding: 5px 10px;
+  border-radius: 4px;
+  color: #b6b2ab;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.online-bar button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.online-bar button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.online-tip {
+  margin: 0 12px 8px;
+  color: #6f6b65;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.online-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+}
+
+.online-preview b {
+  flex: 1;
+  min-width: 0;
+  font-weight: 400;
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.online-preview span {
+  font-size: 10px;
+  color: #8d8981;
+  white-space: nowrap;
+}
+
+.online-preview button {
+  padding: 4px 10px;
+  border: 1px solid var(--ink-accent);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.online-preview button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
 .online-sources {
   display: flex;
   gap: 4px;
-  padding: 8px 12px;
+  padding: 0 12px 8px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 

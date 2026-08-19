@@ -209,11 +209,13 @@ type LibraryState = {
    */
   addOnlineTracks(list: OnlineTrackInput[]): Track[]
   /**
-   * 队列里这首还没进曲库就补进去。**在线曲目是"播了才入库"**：搜索结果整页塞进
-   * 「全部音乐」是污染，但真播过的那首必须在库里 —— 歌词、封面、收藏、播放统计
-   * 全都按曲库里的 id 存，不在库里它们会静默地什么都不做。
+   * 把已经成形的 Track 收进曲库，按 id 去重，返回**全部**对应曲目（含已存在的）。
+   *
+   * 两个调用方：播放队列里那首在线曲目要补进库（"播了才入库"，见 player 的 playAt），
+   * 以及歌单导入要整批入库。`addOnlineTracks` 也是转成 Track 之后走的这条路 ——
+   * 去重规则只此一处。
    */
-  ensureInLibrary(track: Track): void
+  addTracks(list: Track[]): Track[]
   removeTracks(ids: string[]): void
   markMissing(id: string): void
 
@@ -353,36 +355,39 @@ export const useLibrary = create<LibraryState>((set, get) => {
     },
 
     addOnlineTracks(list) {
-      const byId = new Map(get().tracks.map((t) => [t.id, t]))
       const now = Date.now()
+      // addedAt 用 now + i 而不是全都 now：曲库默认按添加时间排，同一批全撞在一个
+      // 毫秒上的话，「全部音乐」里的顺序就成了排序算法的实现细节
+      return get().addTracks(list.map((o, i) => onlineToTrack(o, now + i)))
+    },
+
+    addTracks(list) {
+      const byId = new Map(get().tracks.map((t) => [t.id, t]))
       const fresh: Track[] = []
       const out: Track[] = []
 
-      list.forEach((o, i) => {
-        const id = onlineTrackId(o.source, o.id)
-        const existing = byId.get(id)
+      for (const t of list) {
+        const existing = byId.get(t.id)
         if (existing) {
           out.push(existing)
-          return
+          continue
         }
-        const t = onlineToTrack(o, now + i)
-        byId.set(id, t)
-        fresh.push(t)
-        out.push(t)
-      })
+        /*
+         * 封面一律清空。曲库里的封面 URL 由 ensureCover / setRemoteCover 生成，
+         * 它们同时负责 LRU 与 revokeObjectURL；从外面带一个进来，这份 URL 就
+         * 不在淘汰名单里，等于一个稳定的泄漏。缺封面下次播放会自己补上。
+         */
+        const t2 = t.cover ? { ...t, cover: null } : t
+        byId.set(t.id, t2)
+        fresh.push(t2)
+        out.push(t2)
+      }
 
       if (fresh.length > 0) {
         set((s) => ({ tracks: [...s.tracks, ...fresh] }))
         save()
       }
       return out
-    },
-
-    ensureInLibrary(track) {
-      if (get().tracks.some((t) => t.id === track.id)) return
-      // 队列里的副本可能已经被填过歌词/封面，落盘的那份不存这两样，直接原样收下即可
-      set((s) => ({ tracks: [...s.tracks, { ...track, addedAt: Date.now() }] }))
-      save()
     },
 
     async addFiles(refs) {

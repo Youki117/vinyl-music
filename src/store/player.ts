@@ -375,7 +375,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
            * 全都按曲库里的 id 存，不在库里它们会静默地什么都不做（setRemoteCover
            * 开头那句 byId 检查就直接 return 了）。
            */
-          useLibrary.getState().ensureInLibrary(track)
+          useLibrary.getState().addTracks([track])
           // 在线曲目的歌词与封面来自平台接口，和本地那条路完全不同
           void fillOnlineMeta(track, () => get().index === i, () => get().refreshQueueMeta())
         }

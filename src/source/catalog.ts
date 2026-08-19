@@ -15,3 +15,33 @@ export const SOURCES: { id: SourceId; name: string }[] = [
   { id: "wy", name: "网易云" },
   { id: "mg", name: "咪咕" },
 ]
+
+/**
+ * 各平台的域名。短链也在其中：网易云的 163cn.tv、QQ 的 c6.y.qq.com、
+ * 酷狗的 t1.kugou.com —— 分享出来的十有八九就是短链，认不出短链等于认不出。
+ */
+const LINK_DOMAINS: { re: RegExp; id: SourceId }[] = [
+  { re: /(?:^|[./@])(?:163\.com|163cn\.tv)(?:$|[/:?#])/, id: "wy" },
+  { re: /(?:^|[./@])qq\.com(?:$|[/:?#])/, id: "tx" },
+  { re: /(?:^|[./@])kuwo\.cn(?:$|[/:?#])/, id: "kw" },
+  { re: /(?:^|[./@])kugou\.com(?:$|[/:?#])/, id: "kg" },
+  { re: /(?:^|[./@])migu\.(?:cn|com)(?:$|[/:?#])/, id: "mg" },
+]
+
+/**
+ * 分享链接 → 平台。认不出返回 null。
+ *
+ * 用户手上的东西是**一条从 app 里复制出来的分享链接**，不是"平台 + 歌单 id"。
+ * 让他先在五个平台里点对一个，是把我们自己能做的判断推给了他。
+ *
+ * 只按域名判，不去解析 id：各平台的 id 藏在哪个参数里由 musicSdk 的正则负责
+ * （songList.getListDetail 直接吃链接），在这层重复一遍只会多一处要跟着上游改的地方。
+ *
+ * 分享文案里常常前后还有一堆字（"分享XXX的歌单《晨跑》: https://…"），所以是在
+ * 整段文本里找域名，而不是要求整个字符串就是一条 URL。
+ */
+export function sourceOfLink(text: string): SourceId | null {
+  const s = text.trim().toLowerCase()
+  if (!s) return null
+  return LINK_DOMAINS.find((d) => d.re.test(s))?.id ?? null
+}
