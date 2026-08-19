@@ -39,8 +39,17 @@ declare global {
   }
 }
 void import("@/source")
-  .then((m) => {
+  .then(async (m) => {
     window.__source = m
+    /*
+     * 内置音源在这里自动启用，用户不需要先去哪里「导入音源」。理由见
+     * source/builtin/UPSTREAM.md：能用的音源脚本寿命以周计，让用户自己找一份，
+     * 等于这个功能不存在。用户导入自己的脚本会覆盖它，两条路并存。
+     *
+     * 失败只警告不抛：搜索和歌词不依赖音源脚本，播放本地文件更不依赖。
+     */
+    const loaded = await m.loadBuiltinSource()
+    console.info(`[source] 内置音源就绪：${loaded.info.name}｜${Object.keys(loaded.sources).join(",")}`)
   })
   .catch((err) => {
     console.warn("[source] 在线音源加载失败，搜索不可用，播放器其余功能不受影响", err)

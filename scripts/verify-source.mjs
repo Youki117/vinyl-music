@@ -94,74 +94,172 @@ for (const source of TARGETS) {
 }
 
 /*
- * 音源脚本：加载 → 解析播放地址。
+ * 内置音源（src/source/builtin/qdy.js）。**这一段是硬性判据。**
  *
- * 搜索/歌词是 musicSdk 自带的，不需要脚本；**播放地址必须由脚本解析**（上游
- * api-source.js 的 allApi 是空的）。所以这一段才是"能不能听歌"的判据。
- *
- * 脚本目录默认取用户放音源的地方，可用 LX_SCRIPT_DIR 覆盖。没有脚本就跳过，
- * 不算失败 —— 这台机器上没有不代表功能坏了。
+ * 它敢当判据，是因为 qdy 的 inited 握手完全在本地完成 —— 脚本顶层直接 send(inited)，
+ * 不打任何第三方服务器。所以这里验的全是我们自己的东西：应用启动时有没有自动载入、
+ * Worker 起没起来、上游那套能力收敛规则有没有照做。真正会挂的取址部分放在后面，只作参考。
  */
-const SCRIPT_DIR = process.env.LX_SCRIPT_DIR ?? String.raw`D:\Downloads\洛雪音乐\音源`
-const scripts = existsSync(SCRIPT_DIR)
-  ? readdirSync(SCRIPT_DIR).filter((f) => f.endsWith(".js"))
-  : []
+{
+  const got = await page.evaluate(async () => {
+    try {
+      // App.tsx 启动时就会载入它，这里只等握手完成
+      for (let i = 0; i < 60 && !window.__source.hasUserApi(); i++) {
+        await new Promise((r) => setTimeout(r, 500))
+      }
+      return { has: window.__source.hasUserApi() }
+    } catch (e) {
+      return { err: String(e?.message ?? e) }
+    }
+  })
+  check("内置音源随应用自动启用（用户不必先导入音源）", !got.err && got.has, got.err ?? "")
+}
 
-if (!scripts.length) {
-  console.log(`
-（${SCRIPT_DIR} 下没有音源脚本，跳过播放地址检查）`)
-} else {
-  const pick = process.env.LX_SCRIPT ?? scripts[0]
-  const script = readFileSync(join(SCRIPT_DIR, pick), "utf8")
-  console.log(`
-音源脚本：${pick}（${(script.length / 1024).toFixed(0)} KB）`)
-
+/*
+ * 音源运行时。用**自带的测试音源**（tests/real/fake-source.js），不打第三方服务器。
+ *
+ * 理由写在那个脚本的注释里：真实音源全挂在别人的服务器上，实测四份全部失效，
+ * 而且是在用户成功测试之后十几个小时内挂的。拿它们当验收依据，等于把回归测试
+ * 挂在别人的运维上。这里验证的是我们这一侧：Worker 隔离、globalThis.lx 的形状、
+ * 请求代发、inited 握手、musicUrl 往返。
+ *
+ * 想拿真实音源试，用 LX_SCRIPT_DIR 指到脚本目录（结果仅供参考，不计入通过与否）。
+ */
+{
+  const script = readFileSync(join("tests", "real", "fake-source.js"), "utf8")
   const loaded = await page.evaluate(async (src) => {
     try {
-      const r = await window.__source.loadUserApi(src)
+      const r = await window.__source.loadUserApi(src, 15000)
       return { name: r.info.name, version: r.info.version, sources: Object.keys(r.sources) }
     } catch (e) {
       return { err: String(e?.message ?? e) }
     }
   }, script)
 
-  if (loaded.err) {
-    check("音源脚本加载", false, loaded.err)
-  } else {
-    check("音源脚本加载并初始化", loaded.sources.length > 0,
-      `${loaded.name} ${loaded.version}｜支持 ${loaded.sources.join(",")}`)
+  check("音源脚本能载入并完成 inited 握手", !loaded.err && loaded.sources?.length > 0,
+    loaded.err ?? `${loaded.name} ${loaded.version}｜声明支持 ${loaded.sources.join(",")}`)
 
-    // 挑一个脚本支持的平台，搜一首再要播放地址
-    const got = await page.evaluate(
-      async ({ source, keyword }) => {
-        try {
-          const res = await window.__source.searchMusic(source, keyword, 1, 5)
-          if (!res.list.length) return { err: "搜不到结果" }
-          const t = res.list[0]
-          const url = await window.__source.getMusicUrl(t)
-          return { title: t.title, artist: t.artist, quality: t.qualities[0], url }
-        } catch (e) {
-          return { err: String(e?.message ?? e) }
-        }
-      },
-      { source: loaded.sources.find((s) => s !== "local") ?? loaded.sources[0], keyword: KEYWORD },
-    )
+  if (!loaded.err) {
+    // 脚本声明 kw 支持 128k/320k、tx 只支持 128k；宿主要按上游规则取交集
+    check("按上游规则收敛脚本声明的能力", loaded.sources.join(",") === "kw,tx", loaded.sources.join(","))
 
-    if (got.err) {
-      /*
-       * 区分两种失败，别混为一谈：
-       *   - 脚本能加载、能发请求、拿回了服务端的错误文案 → **我们的集成是通的**，
-       *     是脚本自己被它的服务端拒了（音源脚本寿命很短，过期就 403）
-       *   - 加载就挂 / 根本没发出请求 → 那才是我们的问题
-       * 前者不该报成代码缺陷，但也不能悄悄放过，所以照样标红并写清原因。
-       */
-      check("解析播放地址（脚本可能已过期）", false,
-        `${got.err}　—— 脚本能加载并发出请求、拿回了服务端应答，说明集成链路通；` +
-        `这条错来自音源服务端。换一份新的音源脚本再试。`)
-    } else {
-      check("解析出播放地址", /^https?:/.test(got.url ?? ""),
-        `${got.title} — ${got.artist}｜${got.quality}｜${(got.url ?? "").slice(0, 68)}…`)
+    const got = await page.evaluate(async () => {
+      try {
+        const res = await window.__source.searchMusic("kw", "后来", 1, 2)
+        const t = res.list[0]
+        const url = await window.__source.getMusicUrl(t, "128k")
+        return { id: t.id, url }
+      } catch (e) {
+        return { err: String(e?.message ?? e) }
+      }
+    })
+
+    check("走完 搜索 → 音源解析 → 拿到播放地址 的整条链路", !got.err && /^https:/.test(got.url ?? ""),
+      got.err ?? got.url)
+    // 传给脚本的必须是**原始对象**，不是我们裁剪过的字段 —— 真实音源要用里面的平台专有字段
+    check("原始曲目对象正确传给了音源脚本", (got.url ?? "").includes(`/${got.id}/`),
+      `期望地址里含 id=${got.id}`)
+  }
+}
+
+/*
+ * 歌词与封面。**这一段是硬性判据。**
+ *
+ * 它们不经过音源脚本（只有 getMusicUrl 走 apis()），所以只依赖 musicSdk 与我们的垫片。
+ * 这里守的是三条曾经真的错过、而且**错了不报错**的契约：
+ *
+ *   1. musicSdk 一半的接口返回 `{ promise }` 请求对象而不是 Promise，
+ *      直接 await 拿到的是对象本身，歌词永远是空字符串。
+ *   2. `resp.raw` 必须是原始字节（Buffer）。给字符串的话酷我歌词那次
+ *      `raw.toString('base64')` 会静默变成空操作。
+ *   3. 拿不到就得换源。QQ 的逐字歌词要上游不公开的原生解码器，本平台永远解不出，
+ *      只能换到网易云/酷狗 —— 这条路断了等于 QQ 的歌全没词。
+ */
+{
+  const rows = await page.evaluate(async () => {
+    const out = []
+    for (const source of ["kw", "kg", "tx", "wy", "mg"]) {
+      const row = { source }
+      try {
+        const res = await window.__source.searchMusic(source, "后来", 1, 5)
+        const t = res.list[0]
+        const r = await window.__source.resolveLyric(t)
+        row.from = r.source
+        row.lines = r.lrc.split("\n").filter(Boolean).length
+        row.word = /<\d{1,3}:\d{1,2}[.:]\d{1,3}>/.test(r.lrc)
+        row.pic = await window.__source.resolveCover(t)
+      } catch (e) {
+        row.err = String(e?.message ?? e).slice(0, 70)
+      }
+      out.push(row)
     }
+    return out
+  })
+
+  const bad = rows.filter((r) => r.err || !r.lines)
+  check(
+    "五个平台都能拿到歌词（本平台拿不到就换源）",
+    bad.length === 0,
+    bad.length
+      ? bad.map((r) => `${NAMES[r.source]}: ${r.err ?? "空"}`).join("；")
+      : rows.map((r) => `${NAMES[r.source]}${r.from === r.source ? "" : `←${NAMES[r.from]}`} ${r.lines}行`).join("｜"),
+  )
+  check(
+    "歌词是逐字的（洛雪 lxlyric 已转成增强型 LRC）",
+    rows.every((r) => r.word),
+    rows.filter((r) => !r.word).map((r) => NAMES[r.source]).join(",") || "全部逐字",
+  )
+  // 咪咕的封面接口在上游就是坏的（见 src/source/index.ts 的 NO_LYRIC_PIC），靠换源补上
+  const pics = rows.filter((r) => /^https?:/.test(r.pic ?? ""))
+  check("五个平台都能拿到封面（拿不到就换源）", pics.length === 5, `${pics.length}/5`)
+}
+
+/*
+ * 内置音源打真实接口取地址。**只做参考，不计入通过与否** —— 它挂在别人的服务器上。
+ * 想知道音源本身死没死，用 `npm run probe:source`，那个不经过本应用。
+ */
+{
+  const rows = await page.evaluate(async () => {
+    await window.__source.loadBuiltinSource()
+    const out = []
+    for (const source of ["kw", "kg", "tx", "wy", "mg"]) {
+      try {
+        const res = await window.__source.searchMusic(source, "后来", 1, 5)
+        const t = res.list[0]
+        const r = await window.__source.resolvePlayUrl(t, "128k")
+        out.push({ source, ok: true, via: r.source, url: r.url.slice(0, 46) })
+      } catch (e) {
+        out.push({ source, ok: false, err: String(e?.message ?? e).slice(0, 60) })
+      }
+    }
+    return out
+  })
+  console.log("\n内置音源取址（参考，不计入通过与否）")
+  for (const r of rows) {
+    const name = NAMES[r.source] ?? r.source
+    if (!r.ok) console.log(`  ✗ ${name}：${r.err}`)
+    else console.log(`  ✓ ${name}${r.via === r.source ? "" : `（换源自 ${NAMES[r.via] ?? r.via}）`}：${r.url}…`)
+  }
+}
+
+// 用户自己的音源脚本：只做参考，不影响通过与否（它们的后端随时会挂）
+const SCRIPT_DIR = process.env.LX_SCRIPT_DIR
+if (SCRIPT_DIR && existsSync(SCRIPT_DIR)) {
+  for (const f of readdirSync(SCRIPT_DIR).filter((x) => x.endsWith(".js"))) {
+    const script = readFileSync(join(SCRIPT_DIR, f), "utf8")
+    const r = await page.evaluate(async (src) => {
+      try {
+        const l = await window.__source.loadUserApi(src, 20000)
+        const s = Object.keys(l.sources).find((x) => x !== "local")
+        if (!s) return "载入成功但没有可用平台"
+        const res = await window.__source.searchMusic(s, "后来", 1, 2)
+        const u = await window.__source.getMusicUrl(res.list[0], "128k")
+        return `可用 → ${String(u).slice(0, 60)}`
+      } catch (e) {
+        return `不可用：${String(e?.message ?? e).slice(0, 70)}`
+      }
+    }, script)
+    console.log(`  [参考] ${f}：${r}`)
   }
 }
 

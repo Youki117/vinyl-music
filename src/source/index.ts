@@ -13,6 +13,15 @@
 // @ts-expect-error vendored 的上游代码没有类型声明，且原则是不改它
 import sdk from "@/vendor/lx-music/musicSdk/index.js"
 import { hasUserApi, registerUserApi, clearUserApi, type SourceApi } from "@/vendor/lx-music/store"
+import { loadUserApi, type LoadedScript } from "./userApi/host"
+/*
+ * 内置音源脚本，随应用一起发布。理由与它对宿主的要求见 builtin/UPSTREAM.md。
+ * `?raw` 拿的是源文本 —— 它不是我们的模块，绝不能让打包器去解析它，
+ * 它要原样丢进 Worker 里当第三方代码跑。
+ */
+import builtinScript from "./builtin/qdy.js?raw"
+import { fetch as tauriFetch } from "@tauri-apps/plugin-http"
+import { lxLyricToEnhancedLrc } from "./lyric"
 
 export type SourceId = "kw" | "kg" | "tx" | "wy" | "mg"
 
@@ -82,19 +91,130 @@ export async function searchMusic(
   return { list: list.map((r) => normalize(source, r)), total: res?.total ?? list.length }
 }
 
-/** 歌词。不需要音源脚本。返回 LRC 文本，交给现有的歌词解析器。 */
-export async function getLyric(track: OnlineTrack): Promise<{ lyric: string; tlyric?: string }> {
-  const api = sdk[track.source]
-  if (!api?.getLyric) throw new Error(`音源 ${track.source} 不支持歌词`)
-  const res = await api.getLyric(track.raw)
-  return { lyric: res?.lyric ?? "", tlyric: res?.tlyric }
+/**
+ * musicSdk 有一半的接口返回的是**请求对象** `{ promise, cancelHttp }` 而不是 Promise，
+ * 契约见 vendor/lx-music/request.ts。直接 `await` 它拿到的是对象本身，
+ * `res.lyric` 于是永远 undefined —— 歌词和封面一直是空的就是栽在这里，而且不报错。
+ */
+async function unwrap<T>(res: unknown): Promise<T> {
+  return (res && typeof res === "object" && "promise" in res
+    ? await (res as { promise: Promise<T> }).promise
+    : await (res as Promise<T>)) as T
 }
 
-/** 封面。不需要音源脚本。 */
+interface RawLyric {
+  lyric?: string
+  tlyric?: string
+  /** 洛雪的逐字歌词，格式 `[mm:ss.xxx]<起始ms,时长ms>字…`，与增强型 LRC 不同 */
+  lxlyric?: string
+}
+
+/** 单个平台的歌词。**不需要音源脚本** —— 只有 getMusicUrl 走音源，歌词封面都是 musicSdk 自带的。 */
+export async function getLyric(
+  track: OnlineTrack,
+): Promise<{ lyric: string; tlyric?: string; lxlyric?: string }> {
+  const api = sdk[track.source]
+  if (!api?.getLyric) throw new Error(`音源 ${track.source} 不支持歌词`)
+  const res = await unwrap<RawLyric>(api.getLyric(track.raw))
+  return { lyric: res?.lyric ?? "", tlyric: res?.tlyric, lxlyric: res?.lxlyric }
+}
+
+/** 从哪个平台取歌词最靠谱。实测前三个能出完整的逐字歌词，排前面。 */
+const LYRIC_ORDER: SourceId[] = ["wy", "kg", "kw", "tx"]
+
+/**
+ * 歌词与封面这两条路在这些平台上**根本不能碰**。
+ *
+ * 咪咕：上游 `musicSdk/mg/pic.js` 有两个缺陷 —— `createHttpFetch` 是 async（返回 Promise），
+ * 而 pic.js 拿它当请求对象用 `tryRequestObj.cancelHttp.bind(...)`，`cancelHttp` 是
+ * undefined 直接 TypeError；而且那是个**游离 promise**，我们的 try/catch 拦不住，
+ * 只会变成一条未捕获错误飘到控制台。歌词那条同样会抛 `object is not iterable`。
+ *
+ * 原则是不改 vendored 代码（见 vendor/lx-music/UPSTREAM.md），所以只能在这一层不去调它。
+ * 反正换源本来就要做，咪咕的歌词封面从别的平台拿，功能上没有损失。
+ */
+const NO_LYRIC_PIC: SourceId[] = ["mg"]
+
+export interface OnlineLyric {
+  /** 增强型 LRC，直接交给 lyrics/parse.ts。有逐字就是逐字的 */
+  lrc: string
+  /** 翻译，没有就没有 */
+  tlyric?: string
+  /** 实际取自哪个平台 —— 和曲目所在平台不一定相同 */
+  source: SourceId
+}
+
+/**
+ * 拿一份**能用的**歌词。播放器该用的是这个，不是 getLyric。
+ *
+ * 各平台的歌词能力差得很远，本平台拿不到是常态而不是异常：
+ *
+ *   网易云 / 酷狗   完整逐字 + 翻译，最稳
+ *   酷我           要解一层私有编码，垫片已实现（vendor/lx-music/ipc.ts）
+ *   QQ            逐字歌词由上游一个**不公开算法的 C++ 原生插件**解，我们解不了
+ *   咪咕           接口本身就不稳，时好时坏
+ *
+ * 所以拿不到就换平台找同一首歌要，和 resolvePlayUrl 的换源是同一个道理。
+ */
+export async function resolveLyric(track: OnlineTrack): Promise<OnlineLyric> {
+  const pick = (l: { lyric: string; tlyric?: string; lxlyric?: string }, source: SourceId) => {
+    const lrc = l.lxlyric?.trim() ? lxLyricToEnhancedLrc(l.lxlyric) : l.lyric
+    return lrc.trim() ? { lrc, tlyric: l.tlyric, source } : null
+  }
+
+  if (!NO_LYRIC_PIC.includes(track.source)) {
+    try {
+      const got = pick(await getLyric(track), track.source)
+      if (got) return got
+    } catch {
+      // 本平台不行是常态，往下换源
+    }
+  }
+
+  for (const source of LYRIC_ORDER) {
+    if (source === track.source) continue
+    const alt = await findSameTrack(source, track)
+    if (!alt) continue
+    try {
+      const got = pick(await getLyric(alt), source)
+      if (got) return got
+    } catch {
+      continue
+    }
+  }
+  throw new Error(`所有平台都没有《${track.title}》的歌词`)
+}
+
+/** 单个平台的封面。不需要音源脚本。拿不到就返回空串，不抛。 */
 export async function getPic(track: OnlineTrack): Promise<string> {
+  if (NO_LYRIC_PIC.includes(track.source)) return ""
   const api = sdk[track.source]
   if (!api?.getPic) return ""
-  return (await api.getPic(track.raw)) ?? ""
+  try {
+    const url = await unwrap<string>(api.getPic(track.raw))
+    return typeof url === "string" && /^https?:/.test(url) ? url : ""
+  } catch {
+    return ""
+  }
+}
+
+/**
+ * 拿一张封面。播放器该用的是这个。
+ *
+ * 和歌词同理：本平台没有就去别的平台找同一首要。封面是黑胶贴纸的内容，
+ * 空盘比换一张同名同歌手的封面难看得多。
+ */
+export async function resolveCover(track: OnlineTrack): Promise<string> {
+  const own = await getPic(track)
+  if (own) return own
+  for (const source of LYRIC_ORDER) {
+    if (source === track.source) continue
+    const alt = await findSameTrack(source, track)
+    if (!alt) continue
+    const url = await getPic(alt)
+    if (url) return url
+  }
+  return ""
 }
 
 /**
@@ -115,5 +235,103 @@ export async function getMusicUrl(track: OnlineTrack, quality?: string): Promise
   return url
 }
 
+/**
+ * 载入内置音源。**应用启动时调一次**，之后用户导入自己的脚本会覆盖它（loadUserApi 会先停掉旧的）。
+ *
+ * 为什么要内置：见 builtin/UPSTREAM.md。一句话是 —— 让用户自己找一份能用的音源脚本，
+ * 等于这个功能不存在（实测他手上那四份在 2026-08-19 已全部失效）。
+ */
+export function loadBuiltinSource(): Promise<LoadedScript> {
+  return loadUserApi(builtinScript)
+}
+
+/** 跨平台换源时的尝试顺序。酷我排前面：实测它的直链最稳，且不挑音质。 */
+const FALLBACK_ORDER: SourceId[] = ["kw", "tx", "wy", "kg", "mg"]
+
+/**
+ * 拿一个**能真的播出来**的地址。播放器该用的是这个，不是 getMusicUrl。
+ *
+ * 两件 getMusicUrl 不做的事：
+ *
+ *   1. **验证**。音源脚本返回 200 不代表返回的是音频 —— 实测酷狗会回落到一个
+ *      返回 JSON 的地址，交给 <audio> 只会得到一句没头没尾的解码失败。
+ *      这里花一个 Range 请求（2 字节）确认 Content-Type，比事后猜便宜得多。
+ *   2. **换源**。音源脚本对各平台的可用性并不一致，同一首歌换个平台往往就通了。
+ *      洛雪把这个叫「换源」，是在线播放能不能用的关键，不是锦上添花。
+ *
+ * 代价是失败路径上会多打几个接口。成功路径只多一个 2 字节的请求。
+ */
+export async function resolvePlayUrl(
+  track: OnlineTrack,
+  quality?: string,
+): Promise<{ url: string; source: SourceId }> {
+  const tried: string[] = []
+
+  const attempt = async (t: OnlineTrack): Promise<string | null> => {
+    try {
+      const url = await getMusicUrl(t, quality)
+      if (await isAudio(url)) return url
+      tried.push(`${t.source}: 返回的不是音频`)
+    } catch (err) {
+      tried.push(`${t.source}: ${err instanceof Error ? err.message : String(err)}`)
+    }
+    return null
+  }
+
+  const first = await attempt(track)
+  if (first) return { url: first, source: track.source }
+
+  // 本平台不行就拿歌名+歌手去别的平台找同一首，找到了再解析
+  for (const source of FALLBACK_ORDER) {
+    if (source === track.source) continue
+    const alt = await findSameTrack(source, track)
+    if (!alt) continue
+    const url = await attempt(alt)
+    if (url) return { url, source }
+  }
+
+  throw new Error(`所有平台都没拿到可播放的地址（${tried.join("；")}）`)
+}
+
+/** 在别的平台上找同一首歌。宁可找不到也不要找错：只认歌名一致且歌手有交集的。 */
+async function findSameTrack(source: SourceId, track: OnlineTrack): Promise<OnlineTrack | null> {
+  const norm = (s: string) => s.toLowerCase().replace(/[\s()（）\[\]【】·・-]/g, "")
+  try {
+    const { list } = await searchMusic(source, `${track.title} ${track.artist}`.trim(), 1, 10)
+    const wantTitle = norm(track.title)
+    const wantArtists = norm(track.artist).split(/[,、\/&]/).filter(Boolean)
+    return (
+      list.find((t) => {
+        if (norm(t.title) !== wantTitle) return false
+        const got = norm(t.artist)
+        return wantArtists.length === 0 || wantArtists.some((a) => got.includes(a))
+      }) ?? null
+    )
+  } catch {
+    // 换源本来就是兜底，某个平台搜挂了不该让整件事失败
+    return null
+  }
+}
+
+/**
+ * 这个地址给出来的到底是不是音频。
+ *
+ * 只要头 2 个字节，服务端支持 Range 就几乎不产生流量。走 plugin-http 从 Rust 侧发 ——
+ * 音乐平台的 CDN 不会给浏览器来源发 CORS 头，在 WebView 里直接 fetch 一律失败。
+ */
+async function isAudio(url: string): Promise<boolean> {
+  if (!/^https?:\/\//.test(url)) return false
+  try {
+    const res = await tauriFetch(url, { method: "GET", headers: { Range: "bytes=0-1" } })
+    if (res.status !== 200 && res.status !== 206) return false
+    const type = res.headers.get("content-type") ?? ""
+    // 有的 CDN 就是不给 content-type，那就当它是音频 —— 宁可放过，不可错杀
+    return type === "" || !/^(text|application\/(json|xml))/.test(type)
+  } catch {
+    return false
+  }
+}
+
+export { lxLyricToEnhancedLrc } from "./lyric"
 export { hasUserApi, registerUserApi, clearUserApi, type SourceApi }
 export { loadUserApi, unloadUserApi, parseScriptInfo, setSourceDebug, type LoadedScript } from "./userApi/host"

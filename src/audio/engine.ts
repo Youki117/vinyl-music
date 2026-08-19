@@ -330,6 +330,43 @@ class Engine {
     }
 
     const bytes = await platform.readFile(ref)
+    await this.attachBytes(bytes)
+    return bytes
+  }
+
+  /**
+   * 载入在线曲目。地址由 `src/source` 的 `resolvePlayUrl` 解析而来。
+   *
+   * **不把 URL 直接交给 `<audio>`**，而是先整段取回再走上面那条 Blob 路径。三个理由：
+   *
+   *   1. 音乐平台的 CDN 不给浏览器来源发 CORS 头，也常常要校验 Referer / UA。
+   *      WebView 里的 `<audio>` 两样都做不到，只有走 plugin-http 从 Rust 侧取才拿得到。
+   *   2. 这些直链大多是 `http://`，而 CSP 的 `media-src` 只放行了 `blob:` 与 `https:`。
+   *      为一个可选功能把整个应用的 CSP 放宽到 `http:`，不值。
+   *   3. 与本地文件同一条路径，播放行为、进度、A-B 区间的语义完全一致，不用维护两套。
+   *
+   * 代价是**要下完才能响**（128k 的四分钟大约 4MB，通常一两秒）。真嫌慢的话得改成
+   * 直连流式播放，那就要接受上面三条各自的后果 —— 那是另一个决定，不在这里偷偷做。
+   */
+  async loadUrl(url: string): Promise<Uint8Array> {
+    this.setStatus("loading")
+    const { fetch: tauriFetch } = await import("@tauri-apps/plugin-http")
+    const res = await tauriFetch(url, { method: "GET" })
+    if (!res.ok) {
+      this.setStatus("error", `音源地址取回失败：HTTP ${res.status}`)
+      throw new Error(`HTTP ${res.status}`)
+    }
+    const bytes = new Uint8Array(await res.arrayBuffer())
+    if (bytes.byteLength > MAX_FILE_BYTES) {
+      this.setStatus("error", `音频超过 ${MAX_FILE_BYTES / 1024 / 1024}MB，已跳过`)
+      throw new Error("文件过大")
+    }
+    await this.attachBytes(bytes)
+    return bytes
+  }
+
+  /** 字节 → Blob → `<audio>`，等到 loadedmetadata 才算成功。本地与在线共用。 */
+  private async attachBytes(bytes: Uint8Array): Promise<void> {
     this.revoke()
     // A-B 区间是按秒记的，换了曲目就没有意义了，必须清掉 ——
     // 否则新歌会在上一首的 B 点位置莫名其妙往回跳
@@ -356,7 +393,6 @@ class Engine {
 
     this.setStatus("paused")
     this.emitProgress()
-    return bytes
   }
 
   async play(): Promise<void> {
