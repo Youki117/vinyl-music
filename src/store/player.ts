@@ -369,6 +369,13 @@ export const usePlayer = create<PlayerState>((set, get) => {
             }
           })
         } else {
+          /*
+           * 在线曲目**播了才入库**。搜索结果整页塞进「全部音乐」是污染，但真播出声的
+           * 这首必须在库里 —— 下面 fillOnlineMeta 写回的歌词封面、以及收藏与播放统计，
+           * 全都按曲库里的 id 存，不在库里它们会静默地什么都不做（setRemoteCover
+           * 开头那句 byId 检查就直接 return 了）。
+           */
+          useLibrary.getState().ensureInLibrary(track)
           // 在线曲目的歌词与封面来自平台接口，和本地那条路完全不同
           void fillOnlineMeta(track, () => get().index === i, () => get().refreshQueueMeta())
         }

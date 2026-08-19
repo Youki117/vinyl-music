@@ -55,6 +55,30 @@ export const localRef = (t: Track): FileRef | null =>
 export const onlineTrackId = (source: OnlineSourceId, songId: string): string =>
   `${source}:${songId}`
 
+/**
+ * 在线曲目 → Track。**纯函数**，因为它有两个调用方：搜索结果要立刻变成能进播放队列的
+ * Track（还没入库），而 `addOnlineTracks` 要把同一份东西写进曲库。两边各转一次的话，
+ * 迟早会转出两个不一样的 id 或 addedAt，而 id 一旦对不上，收藏和播放统计就静默失联。
+ */
+export function onlineToTrack(o: OnlineTrackInput, addedAt: number): Track {
+  return {
+    id: onlineTrackId(o.source, o.id),
+    origin: { kind: "online", source: o.source, songId: o.id, qualities: o.qualities, raw: o.raw },
+    title: o.title,
+    artist: o.artist,
+    album: o.album,
+    duration: parseDuration(o.duration),
+    cover: null,
+    lyrics: null,
+    playCount: 0,
+    liked: false,
+    lastPlayed: 0,
+    addedAt,
+    // 在线曲目没有"源文件不见了"这回事，能不能播是播的时候才知道的
+    missing: false,
+  }
+}
+
 export type Track = {
   id: string
   origin: TrackOrigin
@@ -184,6 +208,12 @@ type LibraryState = {
    * 这样调用方可以直接拿去播放或加进歌单，不用自己再查一遍。
    */
   addOnlineTracks(list: OnlineTrackInput[]): Track[]
+  /**
+   * 队列里这首还没进曲库就补进去。**在线曲目是"播了才入库"**：搜索结果整页塞进
+   * 「全部音乐」是污染，但真播过的那首必须在库里 —— 歌词、封面、收藏、播放统计
+   * 全都按曲库里的 id 存，不在库里它们会静默地什么都不做。
+   */
+  ensureInLibrary(track: Track): void
   removeTracks(ids: string[]): void
   markMissing(id: string): void
 
@@ -335,22 +365,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
           out.push(existing)
           return
         }
-        const t: Track = {
-          id,
-          origin: { kind: "online", source: o.source, songId: o.id, qualities: o.qualities, raw: o.raw },
-          title: o.title,
-          artist: o.artist,
-          album: o.album,
-          duration: parseDuration(o.duration),
-          cover: null,
-          lyrics: null,
-          playCount: 0,
-          liked: false,
-          lastPlayed: 0,
-          addedAt: now + i,
-          // 在线曲目没有"源文件不见了"这回事，能不能播是播的时候才知道的
-          missing: false,
-        }
+        const t = onlineToTrack(o, now + i)
         byId.set(id, t)
         fresh.push(t)
         out.push(t)
@@ -361,6 +376,13 @@ export const useLibrary = create<LibraryState>((set, get) => {
         save()
       }
       return out
+    },
+
+    ensureInLibrary(track) {
+      if (get().tracks.some((t) => t.id === track.id)) return
+      // 队列里的副本可能已经被填过歌词/封面，落盘的那份不存这两样，直接原样收下即可
+      set((s) => ({ tracks: [...s.tracks, { ...track, addedAt: Date.now() }] }))
+      save()
     },
 
     async addFiles(refs) {

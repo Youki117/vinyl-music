@@ -22,16 +22,9 @@ import { loadUserApi, type LoadedScript } from "./userApi/host"
 import builtinScript from "./builtin/qdy.js?raw"
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http"
 import { lxLyricToEnhancedLrc } from "./lyric"
+import type { SourceId } from "./catalog"
 
-export type SourceId = "kw" | "kg" | "tx" | "wy" | "mg"
-
-export const SOURCES: { id: SourceId; name: string }[] = [
-  { id: "kw", name: "酷我" },
-  { id: "kg", name: "酷狗" },
-  { id: "tx", name: "QQ" },
-  { id: "wy", name: "网易云" },
-  { id: "mg", name: "咪咕" },
-]
+export { SOURCES, type SourceId } from "./catalog"
 
 /** 搜索结果。各平台字段名不一致，统一成这一份再往上层交。 */
 export interface OnlineTrack {

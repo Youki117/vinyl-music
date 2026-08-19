@@ -12,6 +12,7 @@ import Sidebar from "@/ui/Sidebar"
 import Playlist from "@/ui/panels/Playlist"
 import SkinEditor from "@/ui/panels/SkinEditor"
 import Playback from "@/ui/panels/Playback"
+import Online from "@/ui/panels/Online"
 import { useLibrary } from "@/store/library"
 import { useAi } from "@/store/ai"
 import { useMix } from "@/store/mix"
@@ -69,7 +70,7 @@ void import("@/source")
   })
 
 /** 右侧抽屉同一时刻只能开一个 */
-type PanelId = "playlist" | "skin" | "playback" | "mix" | null
+type PanelId = "playlist" | "skin" | "playback" | "mix" | "online" | null
 
 export default function App() {
   const loadSkin = useSkin((s) => s.load)
@@ -236,6 +237,10 @@ export default function App() {
         case "X":
           togglePanel("mix")
           break
+        case "f":
+        case "F":
+          togglePanel("online")
+          break
         case "Escape":
           setPanel(null)
           break
@@ -264,6 +269,7 @@ export default function App() {
         onOpenPlayback={() => togglePanel("playback")}
         onOpenSkin={() => togglePanel("skin")}
         onOpenMix={() => togglePanel("mix")}
+        onOpenOnline={() => togglePanel("online")}
         active={panel}
       />
       <Masthead />
@@ -336,6 +342,7 @@ export default function App() {
       <SkinEditor open={panel === "skin"} onClose={() => setPanel(null)} />
       <Playback open={panel === "playback"} onClose={() => setPanel(null)} />
       <MixPanel open={panel === "mix"} onClose={() => setPanel(null)} />
+      <Online open={panel === "online"} onClose={() => setPanel(null)} />
     </Stage>
   )
 }

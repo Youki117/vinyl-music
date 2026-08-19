@@ -15,11 +15,13 @@ export default function Sidebar({
   onOpenPlayback,
   onOpenSkin,
   onOpenMix,
+  onOpenOnline,
   active,
 }: {
   onOpenPlayback?: () => void
   onOpenSkin?: () => void
   onOpenMix?: () => void
+  onOpenOnline?: () => void
   /** 当前打开的面板，用来给对应按钮加选中态 */
   active?: string | null
 }) {
@@ -64,6 +66,26 @@ export default function Sidebar({
             d="M4 16.5 13 7.5l3.5 3.5-9 9H4z"
           />
           <path fill="none" stroke="currentColor" strokeWidth="1.6" d="m15 5.5 3.5 3.5" />
+        </svg>
+      </button>
+
+      <button
+        className="sb-tool"
+        data-on={active === "online"}
+        onClick={onOpenOnline}
+        aria-label="在线音乐"
+        aria-pressed={active === "online"}
+        title="在线音乐 (F)"
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" strokeWidth="1.6" />
+          <path
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            d="m15.5 15.5 4 4"
+          />
         </svg>
       </button>
 

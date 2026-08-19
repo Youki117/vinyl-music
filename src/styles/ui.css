@@ -732,6 +732,82 @@
   padding: 0 2px;
 }
 
+/* ── 在线音乐抽屉 ───────────────────────────────────────── */
+.online-drawer {
+  width: calc(420px + var(--rail-w));
+}
+
+.online-sources {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.online-sources button {
+  flex: 1;
+  padding: 4px 0;
+  border-radius: 4px;
+  color: #a9a59e;
+  font-size: 11px;
+}
+
+.online-sources button:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+
+.online-sources button[data-on="true"] {
+  background: rgba(255, 255, 255, 0.13);
+  color: #fff;
+}
+
+.online-drawer .row {
+  grid-template-columns: 1fr auto auto auto;
+}
+
+/* 「库」角标：已经在曲库里的那几首，免得重复收藏 */
+.online-drawer .row i {
+  font-style: normal;
+  font-size: 9px;
+  color: #6f6b65;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
+.online-error {
+  color: #d8695a;
+}
+
+.online-more {
+  justify-content: center;
+  padding: 10px 0 16px;
+}
+
+.online-more button {
+  padding: 5px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  color: #b6b2ab;
+  font-size: 11px;
+}
+
+.online-more button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.online-more button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.online-more span {
+  font-size: 10px;
+  color: #66625d;
+}
+
 header button.danger,
 .ctx-menu button.danger {
   color: #d8695a;
