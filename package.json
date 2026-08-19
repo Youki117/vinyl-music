@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "visual": "node scripts/compare-visual.mjs",
+    "probe:source": "node scripts/probe-source.mjs",
     "tauri": "tauri"
   },
   "dependencies": {
