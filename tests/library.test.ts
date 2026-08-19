@@ -4,7 +4,7 @@ import { selectTracks, type Playlist, type Track } from "@/store/library"
 
 function track(p: Partial<Track> & { id: string }): Track {
   return {
-    ref: { id: p.id, name: `${p.id}.mp3`, size: 1, mtime: 0 },
+    origin: { kind: "local" as const, ref: { id: p.id, name: `${p.id}.mp3`, size: 1, mtime: 0 } },
     title: p.id,
     artist: "",
     album: "",

@@ -91,7 +91,7 @@ describe("addFiles · 并发导入", () => {
       tracks: [
         {
           id: "dup",
-          ref: ref("dup"),
+          origin: { kind: "local" as const, ref: ref("dup") },
           title: "dup",
           artist: "",
           album: "",

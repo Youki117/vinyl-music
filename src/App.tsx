@@ -36,8 +36,21 @@ import { isAudioFile, isLyricFile, isPlaylistFile, platform, type FileRef } from
 declare global {
   interface Window {
     __source?: typeof import("@/source")
+    __lib?: typeof useLibrary
+    __player?: typeof usePlayer
   }
 }
+
+/*
+ * 曲库与播放器的 store 也挂出来，给 scripts/verify-*.mjs 用。
+ *
+ * 与 __source 不同，这两个是**可写**的。之所以仍然接受：它们不提供任何用户点不到的
+ * 能力（界面上本来就能建歌单、收藏、播放），而 store 这一层恰恰是最容易出回归、
+ * 又最没法从界面上断言的地方 —— 曲库迁移、在线曲目的 id 稳定性、播放统计的计数规则，
+ * 靠点按钮验不出来。应用是纯本地的，不加载任何远端页面，没有外部代码能碰到 window。
+ */
+window.__lib = useLibrary
+window.__player = usePlayer
 void import("@/source")
   .then(async (m) => {
     window.__source = m

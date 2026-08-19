@@ -5,7 +5,7 @@ import { AudioLayer, type LayerConfig } from "@/audio/layer"
 import { initialClips, type Clip } from "@/audio/clips"
 import { engine } from "@/audio/engine"
 import { subscribe } from "@/stage/clock"
-import { useLibrary } from "./library"
+import { localRef, useLibrary } from "./library"
 
 const SCHEMA = 1
 
@@ -80,7 +80,10 @@ export const useMix = create<MixState>((set, get) => {
       if (!track) continue
       const layer = new AudioLayer({ ...cfg })
       try {
-        await layer.load(track.ref)
+        const ref = localRef(track)
+        // 叠加轨要把整段音频读进来做实时混音，在线曲目没有本地文件，跳过
+        if (!ref) continue
+        await layer.load(ref)
         if (gen !== syncGeneration) {
           // 这一轮已经过期了：期间发生过新的 sync，这个层不该再上台
           layer.dispose()

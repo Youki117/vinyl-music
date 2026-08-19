@@ -67,13 +67,13 @@ export function formatM3u(tracks: M3uTrack[]): string {
  * 绝对路径解析失败时的退路：歌单文件常常是从别的机器、别的盘符拷过来的，
  * 里头的路径早就失效，但文件名一般没变。
  */
-export function matchByName<T extends { ref: { name: string } }>(
+export function matchByName<T extends { name: string }>(
   entries: M3uEntry[],
   tracks: T[],
 ): Map<string, T> {
   const index = new Map<string, T>()
   for (const t of tracks) {
-    const key = t.ref.name.toLowerCase()
+    const key = t.name.toLowerCase()
     if (!index.has(key)) index.set(key, t)
   }
   const out = new Map<string, T>()

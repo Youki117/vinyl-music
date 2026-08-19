@@ -13,7 +13,7 @@ import {
 } from "@/audio/clips"
 import { formatTime } from "@/lib/format"
 import { platform } from "@/platform"
-import { useLibrary } from "@/store/library"
+import { localRef, useLibrary } from "@/store/library"
 import { useMix } from "@/store/mix"
 import { usePlayer } from "@/store/player"
 import Timeline from "./Timeline"
@@ -59,8 +59,11 @@ export default function Mix({ open, onClose }: { open: boolean; onClose: () => v
     let alive = true
     void (async () => {
       try {
+        // 波形要把整段音频解码一遍，只有本地文件做得到；混音本来也只接受本地曲目
+        const ref = localRef(sourceTrack)
+        if (!ref) return
         // 惰性传字节：波形缓存命中时（换层来回切基本都命中）连文件都不用读
-        const p = await loadPeaks(sourceTrack.ref, () => platform.readFile(sourceTrack.ref))
+        const p = await loadPeaks(ref, () => platform.readFile(ref))
         if (alive) setPeaks(p)
       } catch {
         // 算不出波形不影响编辑，只是看不见形状

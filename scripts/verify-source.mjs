@@ -263,6 +263,81 @@ if (SCRIPT_DIR && existsSync(SCRIPT_DIR)) {
   }
 }
 
+/*
+ * 在线曲目在曲库里的行为。**硬性判据。**
+ *
+ * 这一层最容易出回归又最没法从界面上断言：曲库迁移、在线曲目 id 的稳定性、
+ * 收藏/歌单/播放统计对在线曲目是否一视同仁，点按钮验不出来。
+ *
+ * **必须自己收尾。** 它跑在用户真实的曲库上，加进去的曲目和歌单要原样删掉；
+ * 落盘是 1 秒防抖的，删完还得等它写出去，否则下次启动测试数据又回来了。
+ */
+{
+  const got = await page.evaluate(async () => {
+    const lib = window.__lib
+    const player = window.__player
+    if (!lib || !player) return { err: "没有 __lib / __player 入口" }
+    const before = lib.getState().tracks.length
+    const r = {}
+    try {
+      r.migrated = lib.getState().tracks.every((t) => t.origin?.kind === "local" || t.origin?.kind === "online")
+
+      const res = await window.__source.searchMusic("kw", "后来", 1, 3)
+      const added = lib.getState().addOnlineTracks(res.list.slice(0, 2))
+      r.ids = added.map((t) => t.id)
+      // 再加一次不该翻倍
+      lib.getState().addOnlineTracks(res.list.slice(0, 2))
+      r.dedup = lib.getState().tracks.length === before + added.length
+
+      const t = added[0]
+      lib.getState().toggleLike(t.id)
+      const pid = lib.getState().createPlaylist("__verify__")
+      lib.getState().addToPlaylist(pid, [t.id])
+      lib.getState().recordPlay(t.id)
+      const after = lib.getState().byId(t.id)
+      r.liked = after.liked
+      r.inPlaylist = lib.getState().playlists.find((p) => p.id === pid)?.trackIds.includes(t.id)
+      r.counted = after.playCount === 1
+
+      await player.getState().playFrom([t], 0)
+      await new Promise((x) => setTimeout(x, 2500))
+      r.status = player.getState().status
+      r.duration = player.getState().duration
+      r.title = `${t.title} — ${t.artist}`
+
+      await new Promise((x) => setTimeout(x, 4000))
+      const meta = lib.getState().byId(t.id)
+      r.lyricLines = meta.lyrics ? meta.lyrics.split("\n").filter(Boolean).length : 0
+      r.hasCover = !!meta.cover
+
+      lib.getState().deletePlaylist(pid)
+      lib.getState().removeTracks(added.map((x) => x.id))
+      player.getState().clearQueue()
+    } catch (e) {
+      r.err = String(e?.message ?? e).slice(0, 90)
+    }
+    // 收尾必须落盘之后才算完，否则测试数据留在用户曲库里
+    await new Promise((x) => setTimeout(x, 1500))
+    r.restored = lib.getState().tracks.length === before
+    return r
+  })
+
+  if (got.err) {
+    check("在线曲目能进曲库并播放", false, got.err)
+  } else {
+    check("老曲库迁移到 origin 判别联合", got.migrated, "")
+    check("在线曲目入库且 id 稳定", got.ids?.length === 2 && got.ids.every((x) => /^[a-z]{2}:/.test(x)), got.ids?.join(" , "))
+    check("重复入库不产生副本", got.dedup, "")
+    check("收藏 / 歌单 / 播放统计对在线曲目一视同仁", got.liked && got.inPlaylist && got.counted,
+      `收藏=${got.liked} 歌单=${got.inPlaylist} 计数=${got.counted}`)
+    check("在线曲目真的播起来了", got.status === "playing" && got.duration > 60,
+      `${got.title}｜${got.status}｜${got.duration?.toFixed(1)}s`)
+    check("在线曲目的歌词与封面异步补齐", got.lyricLines > 0 && got.hasCover,
+      `歌词 ${got.lyricLines} 行｜封面 ${got.hasCover ? "有" : "无"}`)
+    check("测试数据已清理干净（不污染用户曲库）", got.restored, "")
+  }
+}
+
 check("全程无 JS 报错", errors.length === 0, errors.slice(0, 2).join(" | "))
 
 await browser.close().catch(() => {})

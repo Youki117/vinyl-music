@@ -72,10 +72,8 @@ describe("formatM3u", () => {
 })
 
 describe("matchByName 兜底匹配", () => {
-  const tracks = [
-    { ref: { name: "April Showers.mp3" } },
-    { ref: { name: "Downtown Irony.ogg" } },
-  ]
+  // matchByName 只认 { name }，不认识 Track 的形状 —— 曲库那边负责把本地曲目转成这个
+  const tracks = [{ name: "April Showers.mp3" }, { name: "Downtown Irony.ogg" }]
 
   it("路径失效时靠文件名找回 —— 歌单常是从别的机器拷来的", () => {
     const entries = parseM3u("E:\\旧盘\\音乐\\April Showers.mp3")

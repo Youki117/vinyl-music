@@ -60,7 +60,7 @@ async function freshLibrary() {
 const ref = (id: string): FileRef => ({ id, name: `${id}.mp3`, size: 1, mtime: 0 })
 const track = (id: string): Track => ({
   id,
-  ref: ref(id),
+  origin: { kind: "local" as const, ref: ref(id) },
   title: id,
   artist: "",
   album: "",

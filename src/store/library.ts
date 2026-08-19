@@ -5,9 +5,59 @@ import { readCover, readMetadata } from "@/audio/metadata"
 import { formatM3u, matchByName, parseM3u } from "@/lib/m3u"
 import { baseName, stripExt } from "@/lib/text"
 
+/**
+ * 曲目从哪来。**判别联合而不是可空字段**，是为了让类型逼着每个调用点表态 ——
+ * 混音、AI 配图、m3u 导出、波形、外挂歌词这些本来就对在线曲目不成立，
+ * 用 `ref: FileRef | null` 的话它们只会多一句 `if (!ref) return`，
+ * 而真正该问的是「这件事对在线曲目意味着什么」。
+ */
+export type TrackOrigin =
+  | { kind: "local"; ref: FileRef }
+  | {
+      kind: "online"
+      /** 平台 id，与 src/source 的 SourceId 一致 */
+      source: OnlineSourceId
+      /** 平台内的曲目 id */
+      songId: string
+      qualities: string[]
+      /** 平台返回的原始对象。音源脚本要的是它，裁剪过的字段不够用 */
+      raw: unknown
+    }
+
+/** 只在类型上依赖 src/source —— 值上依赖会把整个 musicSdk 拖进曲库模块 */
+export type OnlineSourceId = "kw" | "kg" | "tx" | "wy" | "mg"
+
+/** 搜索/歌单给过来的曲目。结构与 src/source 的 OnlineTrack 一致，此处不引入它以免拖依赖。 */
+export type OnlineTrackInput = {
+  source: OnlineSourceId
+  id: string
+  title: string
+  artist: string
+  album: string
+  /** 平台给的是 "mm:ss" 文本 */
+  duration: string
+  qualities: string[]
+  raw: unknown
+}
+
+/** "04:32" / "1:02:03" → 秒。解析不出就是 0，界面那边本来就按 0 当"未知时长"处理。 */
+export function parseDuration(text: string): number {
+  const parts = text.split(":").map((x) => Number(x.trim()))
+  if (parts.length === 0 || parts.some((n) => !Number.isFinite(n))) return 0
+  return parts.reduce((acc, n) => acc * 60 + n, 0)
+}
+
+/** 本地文件引用。在线曲目没有，返回 null。 */
+export const localRef = (t: Track): FileRef | null =>
+  t.origin.kind === "local" ? t.origin.ref : null
+
+/** 在线曲目的稳定 id。歌单、收藏、播放统计都按 id 存，所以它必须跨会话不变。 */
+export const onlineTrackId = (source: OnlineSourceId, songId: string): string =>
+  `${source}:${songId}`
+
 export type Track = {
   id: string
-  ref: FileRef
+  origin: TrackOrigin
   title: string
   artist: string
   album: string
@@ -76,7 +126,7 @@ export const SORT_LABEL: Record<SortKey, string> = {
   lastPlayed: "最近播放",
 }
 
-const SCHEMA = 2
+const SCHEMA = 3
 const RECENT_LIMIT = 100
 const MOST_LIMIT = 100
 
@@ -129,6 +179,11 @@ type LibraryState = {
 
   load(): Promise<void>
   addFiles(refs: FileRef[]): Promise<Track[]>
+  /**
+   * 把在线曲目收进曲库。已在库里的按 id 去重，返回**全部**对应曲目（含已存在的），
+   * 这样调用方可以直接拿去播放或加进歌单，不用自己再查一遍。
+   */
+  addOnlineTracks(list: OnlineTrackInput[]): Track[]
   removeTracks(ids: string[]): void
   markMissing(id: string): void
 
@@ -151,6 +206,10 @@ type LibraryState = {
    * 曲库落盘时不存歌词正文，重启后要靠这个补回来。
    */
   ensureLyrics(id: string): Promise<string | null>
+  /** 直接写入歌词正文。在线曲目的歌词来自平台接口，不走 ensureLyrics 那条找同名文件的路。 */
+  setLyrics(id: string, text: string): void
+  /** 取回远端封面并挂到曲目上。见实现处的说明（CSP 与 Referer）。 */
+  setRemoteCover(id: string, url: string): Promise<void>
   /**
    * 确保内嵌封面就位。曲库落盘时不存封面，重启后要靠这个补回来 ——
    * 否则唱片中心和系统媒体面板都会是空的。
@@ -231,20 +290,29 @@ export const useLibrary = create<LibraryState>((set, get) => {
       const raw = await platform.readConfig<LibraryFile>("library")
       for (const [id, path] of Object.entries(raw?.coverFiles ?? {})) coverFiles.set(id, path)
       if (!raw?.tracks) return
-      // v1 没有 playlists / addedAt / lastPlayed，补默认值即可，不洗掉用户数据
-      const tracks: Track[] = raw.tracks.map((t, i) => ({
-        ...t,
-        addedAt: t.addedAt ?? i,
-        lastPlayed: t.lastPlayed ?? 0,
-        cover: null,
-        lyrics: null,
-        missing: false,
-      }))
+      /*
+       * v1 没有 playlists / addedAt / lastPlayed，v2 用的是 `ref` 而不是 `origin`。
+       * 一律补默认值，不洗掉用户数据 —— 曲库是用户攒出来的，宁可多留字段也不能丢。
+       */
+      const tracks: Track[] = raw.tracks.map((t, i) => {
+        const legacy = t as typeof t & { ref?: FileRef }
+        return {
+          ...t,
+          origin: t.origin ?? (legacy.ref ? { kind: "local", ref: legacy.ref } : t.origin),
+          addedAt: t.addedAt ?? i,
+          lastPlayed: t.lastPlayed ?? 0,
+          cover: null,
+          lyrics: null,
+          missing: false,
+        }
+      }).filter((t) => t.origin != null)
 
       // fs 能力域是每次启动重建的，上次拖进来的路径这次并不自动可读。
       // 不在这里补放行，音乐库不在 $HOME/Music 等标准目录下的用户，
       // 重启后整个曲库都会变成"无法播放"。
-      await platform.ensureReadable(tracks.map((t) => t.ref.id)).catch(() => {})
+      await platform
+        .ensureReadable(tracks.map(localRef).filter((r): r is FileRef => r != null).map((r) => r.id))
+        .catch(() => {})
       set({
         tracks,
         playlists: raw.playlists ?? [],
@@ -252,6 +320,47 @@ export const useLibrary = create<LibraryState>((set, get) => {
         sort: raw.sort ?? "added",
         sortDesc: raw.sortDesc ?? false,
       })
+    },
+
+    addOnlineTracks(list) {
+      const byId = new Map(get().tracks.map((t) => [t.id, t]))
+      const now = Date.now()
+      const fresh: Track[] = []
+      const out: Track[] = []
+
+      list.forEach((o, i) => {
+        const id = onlineTrackId(o.source, o.id)
+        const existing = byId.get(id)
+        if (existing) {
+          out.push(existing)
+          return
+        }
+        const t: Track = {
+          id,
+          origin: { kind: "online", source: o.source, songId: o.id, qualities: o.qualities, raw: o.raw },
+          title: o.title,
+          artist: o.artist,
+          album: o.album,
+          duration: parseDuration(o.duration),
+          cover: null,
+          lyrics: null,
+          playCount: 0,
+          liked: false,
+          lastPlayed: 0,
+          addedAt: now + i,
+          // 在线曲目没有"源文件不见了"这回事，能不能播是播的时候才知道的
+          missing: false,
+        }
+        byId.set(id, t)
+        fresh.push(t)
+        out.push(t)
+      })
+
+      if (fresh.length > 0) {
+        set((s) => ({ tracks: [...s.tracks, ...fresh] }))
+        save()
+      }
+      return out
     },
 
     async addFiles(refs) {
@@ -276,7 +385,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
           }
           slots[i] = {
             id: ref.id,
-            ref,
+            origin: { kind: "local", ref },
             title: meta.title,
             artist: meta.artist,
             album: meta.album,
@@ -440,10 +549,55 @@ export const useLibrary = create<LibraryState>((set, get) => {
       if (probedLyrics.has(id)) return null
       probedLyrics.add(id)
 
-      const text = await platform.readSidecar(track.ref, "lrc").catch(() => null)
+      // 外挂 .lrc 是"音频文件旁边的同名文件"，在线曲目没有这个概念
+      const ref = localRef(track)
+      if (!ref) return null
+      const text = await platform.readSidecar(ref, "lrc").catch(() => null)
       if (!text) return null
       set((s) => ({ tracks: s.tracks.map((t) => (t.id === id ? { ...t, lyrics: text } : t)) }))
       return text
+    },
+
+    setLyrics(id, text) {
+      if (!text.trim()) return
+      probedLyrics.add(id)
+      set((s) => ({ tracks: s.tracks.map((t) => (t.id === id ? { ...t, lyrics: text } : t)) }))
+    },
+
+    /**
+     * 把在线封面挂到曲目上。
+     *
+     * **必须先取回字节再造 blob**，不能把远端 URL 直接塞进 `<img>`：CSP 的 `img-src`
+     * 只放行 `'self' blob: data:`，远端地址一律被拦；而且平台的图床常要校验 Referer，
+     * WebView 里的 `<img>` 设不了。走 plugin-http 从 Rust 侧取则两个问题都没有。
+     *
+     * 落一份到磁盘是为了系统媒体面板 —— 它读不了 blob:，只认真实文件路径。
+     */
+    async setRemoteCover(id, url) {
+      if (!get().byId(id) || probedCovers.has(id)) return
+      probedCovers.add(id)
+      try {
+        const { fetch: tauriFetch } = await import("@tauri-apps/plugin-http")
+        const res = await tauriFetch(url, { method: "GET" })
+        if (!res.ok) return
+        const mime = res.headers.get("content-type") ?? "image/jpeg"
+        const data = new Uint8Array(await res.arrayBuffer())
+        const objectUrl = URL.createObjectURL(new Blob([data as BlobPart], { type: mime }))
+        set((s) => ({ tracks: s.tracks.map((t) => (t.id === id ? { ...t, cover: objectUrl } : t)) }))
+        rememberCover(id)
+        try {
+          const ext = mime.includes("png") ? "png" : "jpg"
+          const ref = await platform.saveImage(`cover-${hashId(id)}.${ext}`, data)
+          if (ref) {
+            coverFiles.set(id, ref.id)
+            save()
+          }
+        } catch {
+          // 落盘失败只影响系统媒体面板的封面，界面照常显示
+        }
+      } catch {
+        probedCovers.delete(id) // 网络抖动不该让这首歌永远没封面
+      }
     },
 
     async ensureCover(id, bytes) {
@@ -506,7 +660,9 @@ export const useLibrary = create<LibraryState>((set, get) => {
       // 同名匹配：「歌名.lrc」配「歌名.mp3」
       const index = new Map<string, string>()
       for (const t of get().tracks) {
-        const key = stripExt(t.ref.name).toLowerCase()
+        const ref = localRef(t)
+        if (!ref) continue
+        const key = stripExt(ref.name).toLowerCase()
         if (!index.has(key)) index.set(key, t.id)
       }
 
@@ -550,8 +706,20 @@ export const useLibrary = create<LibraryState>((set, get) => {
 
       // 二、路径失效的退回按文件名匹配 —— 歌单文件常是从别的机器拷来的
       const tracks = get().tracks
-      const byRefId = new Map(tracks.map((t) => [t.ref.id, t]))
-      const nameHits = matchByName(entries, tracks)
+      const byRefId = new Map(
+        tracks.flatMap((t) => {
+          const ref = localRef(t)
+          return ref ? [[ref.id, t] as const] : []
+        }),
+      )
+      // m3u 靠文件名兜底，只有本地曲目有文件名
+      const nameHits = matchByName(
+        entries,
+        tracks.flatMap((t) => {
+          const ref = localRef(t)
+          return ref ? [{ id: t.id, name: ref.name }] : []
+        }),
+      )
 
       // 严格按 m3u 里的顺序建歌单
       const ids: string[] = []
@@ -573,7 +741,8 @@ export const useLibrary = create<LibraryState>((set, get) => {
     },
 
     async exportPlaylist() {
-      const rows = get().visible()
+      // m3u 是一份文件路径清单，在线曲目没有路径，只能略过
+      const rows = get().visible().filter((t) => t.origin.kind === "local")
       if (rows.length === 0) return false
       const view = get().activeView
       const name = isVirtual(view)
@@ -581,13 +750,16 @@ export const useLibrary = create<LibraryState>((set, get) => {
         : get().playlists.find((p) => p.id === view)?.name ?? "playlist"
 
       const text = formatM3u(
-        rows.map((t) => ({
-          // 浏览器实现下 ref.id 是会话内的假 id，写进文件没意义，退回文件名
-          path: /^[a-zA-Z]:[\\/]|^\//.test(t.ref.id) ? t.ref.id : t.ref.name,
-          title: t.title,
-          artist: t.artist,
-          duration: t.duration,
-        })),
+        rows.map((t) => {
+          const ref = localRef(t)!
+          return {
+            // 浏览器实现下 ref.id 是会话内的假 id，写进文件没意义，退回文件名
+            path: /^[a-zA-Z]:[\\/]|^\//.test(ref.id) ? ref.id : ref.name,
+            title: t.title,
+            artist: t.artist,
+            duration: t.duration,
+          }
+        }),
       )
       return platform.saveText(`${name}.m3u8`, text)
     },

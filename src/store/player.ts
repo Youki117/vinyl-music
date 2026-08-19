@@ -2,7 +2,7 @@ import { create } from "zustand"
 
 import { platform } from "@/platform"
 import { engine, type EngineStatus } from "@/audio/engine"
-import { useLibrary, type Track } from "./library"
+import { localRef, useLibrary, type Track } from "./library"
 import { ShuffleOrder } from "./shuffle"
 
 export type { Track } from "./library"
@@ -73,6 +73,78 @@ type PlayerState = {
 }
 
 const shuffle = new ShuffleOrder()
+
+/**
+ * 在线曲目的播放与元数据。
+ *
+ * `@/source` 一律**动态引入**：它会拉起整个 vendored musicSdk（几百 KB），
+ * 只放本地文件的用户不该为此付出加载成本 —— App.tsx 里也是这么处理的。
+ */
+async function onlineModule() {
+  return import("@/source")
+}
+
+/** Track 的在线来源 → src/source 的 OnlineTrack。两边字段名有出入，转换只此一处。 */
+function asOnlineTrack(track: Track) {
+  const o = track.origin
+  if (o.kind !== "online") return null
+  return {
+    source: o.source,
+    id: o.songId,
+    title: track.title,
+    artist: track.artist,
+    album: track.album,
+    // OnlineTrack 的 duration 是平台给的 "mm:ss" 文本，播放路径上用不到
+    duration: "",
+    qualities: o.qualities,
+    raw: o.raw,
+  }
+}
+
+/** 解析地址 → 取回字节。换源与地址验证都在 resolvePlayUrl 里，这里不重复。 */
+async function loadOnline(track: Track): Promise<Uint8Array> {
+  const online = asOnlineTrack(track)
+  if (!online) throw new Error("曲目来源不明")
+  const { resolvePlayUrl } = await onlineModule()
+  const { url } = await resolvePlayUrl(online, DEFAULT_ONLINE_QUALITY)
+  return engine.loadUrl(url)
+}
+
+/** 在线曲目播放音质。音源脚本对各平台声明的档位不一，128k 是唯一五平台都有的。 */
+const DEFAULT_ONLINE_QUALITY = "128k"
+
+/**
+ * 补齐在线曲目的歌词与封面。**不阻塞播放** —— 声音已经出来了，这两样晚几百毫秒到没关系。
+ *
+ * @param stillCurrent 回调时先问一句还是不是这一首，切歌快的时候会有过期的结果回来
+ */
+async function fillOnlineMeta(track: Track, stillCurrent: () => boolean, refresh: () => void) {
+  const online = asOnlineTrack(track)
+  if (!online) return
+  const src = await onlineModule()
+  const lib = useLibrary.getState()
+
+  void src
+    .resolveLyric(online)
+    .then((l) => {
+      if (!stillCurrent()) return
+      lib.setLyrics(track.id, l.lrc)
+      refresh()
+    })
+    .catch(() => {
+      // 没歌词是常态，不该报错打扰
+    })
+
+  void src
+    .resolveCover(online)
+    .then(async (url) => {
+      if (!url || !stillCurrent()) return
+      await lib.setRemoteCover(track.id, url)
+      if (!stillCurrent()) return
+      refresh()
+    })
+    .catch(() => {})
+}
 
 /** 播放计时，用于播放次数的计数规则 */
 let playedSec = 0
@@ -274,26 +346,32 @@ export const usePlayer = create<PlayerState>((set, get) => {
       resetPlayCounter()
 
       try {
-        const bytes = await engine.load(track.ref)
+        const ref = localRef(track)
+        const bytes = ref ? await engine.load(ref) : await loadOnline(track)
         consecutiveErrors = 0
         await engine.play()
         save()
 
-        // 曲库落盘时不存歌词正文与封面，重启后要在这里补回来。
-        // 封面直接从已经读进内存的字节里解，不再多读一次盘。
-        const lib = useLibrary.getState()
-        void Promise.all([
-          lib.ensureLyrics(track.id).catch(() => null),
-          lib.ensureCover(track.id, bytes).catch(() => null),
-        ]).then(([lrc, cover]) => {
-          if (get().index !== i) return
-          if (lrc || cover) get().refreshQueueMeta()
-          // 封面要等解出来、落盘之后才报给系统媒体面板，否则任务栏那格是空的
-          if (cover?.path) {
-            coverPaths.set(track.id, cover.path)
-            pushNowPlaying(get().current(), engine.status === "playing", engine.currentTime, "cover")
-          }
-        })
+        if (ref) {
+          // 曲库落盘时不存歌词正文与封面，重启后要在这里补回来。
+          // 封面直接从已经读进内存的字节里解，不再多读一次盘。
+          const lib = useLibrary.getState()
+          void Promise.all([
+            lib.ensureLyrics(track.id).catch(() => null),
+            lib.ensureCover(track.id, bytes).catch(() => null),
+          ]).then(([lrc, cover]) => {
+            if (get().index !== i) return
+            if (lrc || cover) get().refreshQueueMeta()
+            // 封面要等解出来、落盘之后才报给系统媒体面板，否则任务栏那格是空的
+            if (cover?.path) {
+              coverPaths.set(track.id, cover.path)
+              pushNowPlaying(get().current(), engine.status === "playing", engine.currentTime, "cover")
+            }
+          })
+        } else {
+          // 在线曲目的歌词与封面来自平台接口，和本地那条路完全不同
+          void fillOnlineMeta(track, () => get().index === i, () => get().refreshQueueMeta())
+        }
 
         pushNowPlaying(track, true, 0)
 
