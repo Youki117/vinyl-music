@@ -23,6 +23,7 @@ import { usePlayer } from "@/store/player"
 import { useSkin } from "@/store/skin"
 import { ensureSource } from "@/source/boot"
 import { useLayout } from "@/store/layout"
+import { useOnline } from "@/store/online"
 import { isAudioFile, isLyricFile, isPlaylistFile, platform, type FileRef } from "@/platform"
 /*
  * 给端到端核查用的入口（scripts/verify-*.mjs）。
@@ -39,11 +40,13 @@ declare global {
   interface Window {
     __lib?: typeof useLibrary
     __player?: typeof usePlayer
+    __online?: typeof useOnline
   }
 }
 
 window.__lib = useLibrary
 window.__player = usePlayer
+window.__online = useOnline
 window.__initSource = ensureSource
 
 /** 右侧抽屉同一时刻只能开一个 */

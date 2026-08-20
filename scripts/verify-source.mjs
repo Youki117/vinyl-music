@@ -344,6 +344,94 @@ if (SCRIPT_DIR && existsSync(SCRIPT_DIR)) {
   }
 }
 
+/*
+ * 歌单导入。**硬性判据。**
+ *
+ * 用网易云的《热歌榜》(3778678)：官方榜单，不会哪天被人删掉，而且够长，
+ * 能顺带验到翻页把整份取全。裸 id 和分享链接两种写法都要试 —— 用户手上的
+ * 十有八九是链接，而链接解析是完全另一条代码路径（上游 songList 的正则）。
+ *
+ * 同样**必须自己收尾**：它跑在用户真实的曲库上。
+ */
+{
+  const got = await page.evaluate(async () => {
+    const src = window.__source
+    const lib = window.__lib
+    // 打包应用里没有 dev server，取不到源码路径，只能走 App.tsx 挂出来的入口
+    const useOnline = window.__online
+    const r = {}
+    try {
+      // 一、认平台（纯函数，但顺手在真环境里再确认一次）
+      r.link = {
+        wy: src.sourceOfLink("https://music.163.com/playlist?id=3778678"),
+        tx: src.sourceOfLink("分享歌单：https://y.qq.com/n/ryqq/playlist/8888"),
+        kw: src.sourceOfLink("http://www.kuwo.cn/playlist_detail/123"),
+        kg: src.sourceOfLink("https://t1.kugou.com/song.html?id=x"),
+        mg: src.sourceOfLink("https://music.migu.cn/v3/music/playlist/1"),
+        none: src.sourceOfLink("2829883282"),
+      }
+
+      // 二、裸 id
+      const byId = await src.getPlaylist("wy", "3778678", 1)
+      r.name = byId.name
+      r.count = byId.list.length
+      r.total = byId.total
+      r.first = byId.list[0]
+
+      // 三、分享链接（另一条解析路径）
+      const byLink = await src.getPlaylist("wy", "https://music.163.com/playlist?id=3778678", 1)
+      r.linkCount = byLink.list.length
+      r.sameList = byLink.list[0]?.id === byId.list[0]?.id
+
+      // 四、真的导进曲库：顺序要和平台给的一致
+      if (useOnline) {
+        const before = lib.getState().tracks.length
+        useOnline.setState({ listInput: "3778678", listSource: "wy" })
+        await useOnline.getState().fetchList()
+        const preview = useOnline.getState().preview
+        r.previewCount = preview?.tracks.length ?? 0
+        const pid = useOnline.getState().importList()
+        const pl = lib.getState().playlists.find((p) => p.id === pid)
+        r.playlistName = pl?.name
+        r.orderKept =
+          !!pl &&
+          pl.trackIds.length === preview.tracks.length &&
+          pl.trackIds.every((id, i) => id === preview.tracks[i].id)
+
+        // 收尾
+        lib.getState().deletePlaylist(pid)
+        lib.getState().removeTracks(preview.tracks.map((t) => t.id))
+        useOnline.setState({ preview: null, listInput: "" })
+        await new Promise((x) => setTimeout(x, 1500))
+        r.restored = lib.getState().tracks.length === before
+      }
+    } catch (e) {
+      r.err = String(e?.message ?? e).slice(0, 120)
+    }
+    return r
+  })
+
+  if (got.err) {
+    check("歌单导入", false, got.err)
+  } else {
+    check(
+      "分享链接能认出平台，认不出的不瞎猜",
+      got.link.wy === "wy" && got.link.tx === "tx" && got.link.kw === "kw" &&
+        got.link.kg === "kg" && got.link.mg === "mg" && got.link.none === null,
+      JSON.stringify(got.link),
+    )
+    check("裸歌单 id 能取到曲目", got.count > 0, `《${got.name}》${got.count} 首 / 平台声称 ${got.total}`)
+    check(
+      "歌单里的曲目字段归一化正确",
+      !!got.first?.id && !!got.first?.title && Array.isArray(got.first?.qualities),
+      `${got.first?.title} — ${got.first?.artist}｜${got.first?.duration}｜id=${got.first?.id}`,
+    )
+    check("分享链接与裸 id 拿到的是同一个歌单", got.linkCount > 0 && got.sameList, `链接 ${got.linkCount} 首`)
+    check("导入后歌单名与曲目顺序都和平台一致", got.orderKept, `「${got.playlistName}」${got.previewCount} 首`)
+    check("测试数据已清理干净（不污染用户曲库）", got.restored, "")
+  }
+}
+
 check("全程无 JS 报错", errors.length === 0, errors.slice(0, 2).join(" | "))
 
 await browser.close().catch(() => {})
