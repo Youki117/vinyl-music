@@ -60,6 +60,18 @@ describe("偏移 → CSS 变量", () => {
 describe("右侧栏顺序：存下来的那份可能过期", () => {
   const DEFAULT = SIDEBAR_TOOLS.map((t) => t.id)
 
+  it("新默认顺序与已确认的七个入口一致", () => {
+    expect(DEFAULT).toEqual([
+      "online",
+      "playback",
+      "mix",
+      "skin",
+      "layout",
+      "volume",
+      "library",
+    ])
+  })
+
   it("没存过就用默认顺序", () => {
     expect(sidebarOrderOf(null)).toEqual(DEFAULT)
   })

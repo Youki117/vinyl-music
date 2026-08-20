@@ -9,7 +9,7 @@ import { usePlayer } from "@/store/player"
 import { useDismiss } from "../useDismiss"
 
 /** 抽屉里的两件事：搜歌、导歌单。共用一个抽屉是因为它们要的都是"从平台拿曲目" */
-type Tab = "search" | "list"
+type Tab = "search" | "list" | "source"
 
 /**
  * 在线音乐抽屉：换平台 → 搜索 → 播放 / 加进歌单；或者贴一条分享链接导整个歌单。
@@ -67,37 +67,45 @@ function SourceScript() {
   }
 
   return (
-    <div className="source-script">
+    <section className="panel-section source-script">
       <div className="source-script-row">
-        <span>
-          {info ? (
-            <>
-              音源：{info.name}
-              {info.version && ` v${info.version}`}
-            </>
-          ) : builtin ? (
-            "音源：随构建附带"
-          ) : (
-            "未导入音源"
-          )}
-        </span>
-        <span className="source-script-actions">
-          <button onClick={() => void pick()} disabled={busy}>
-            {busy ? "载入中…" : info ? "更换" : "导入音源"}
+        <div>
+          <b>当前激活音源</b>
+          <span>
+            {info ? (
+              <>
+                {info.name}
+                {info.version && ` v${info.version}`}
+              </>
+            ) : builtin ? (
+              "随构建附带"
+            ) : (
+              "尚未导入"
+            )}
+          </span>
+        </div>
+        <em data-ready={Boolean(info || builtin)}>{info || builtin ? "可用于解析" : "需要配置"}</em>
+      </div>
+      <div className="source-script-actions">
+        <button onClick={() => void pick()} disabled={busy}>
+          {busy ? "载入中…" : info ? "更换脚本文件…" : "导入音源脚本…"}
+        </button>
+        {info && (
+          <button className="danger" onClick={() => void clear()}>
+            清除已导入音源
           </button>
-          {info && <button onClick={() => void clear()}>清除</button>}
-        </span>
+        )}
       </div>
       <p className="hint">
         {err
           ? `载入失败：${err}`
           : info
-            ? `来自 ${info.file}。脚本正文已存下，源文件挪走也不影响。`
+            ? `来自 ${info.file}。脚本正文已存到本机，源文件挪走也不影响。`
             : builtin
-              ? "这份构建自带了一份音源。导入自己的脚本会覆盖它。"
-              : "搜索与歌词不需要音源脚本，但播放需要 —— 没有它，点播放会一直失败。"}
+              ? "当前自用构建附带音源；导入自己的脚本后会优先使用新脚本。"
+              : "搜索、歌词与歌单解析不依赖音源；真正播放在线歌曲时需要一份可用音源脚本。"}
       </p>
-    </div>
+    </section>
   )
 }
 
@@ -159,13 +167,16 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
 
   return (
     <div ref={rootRef} className="drawer online-drawer" role="dialog" aria-label="在线音乐">
-      <header>
+      <header className="panel-header">
         <div className="online-tabs" role="tablist" aria-label="在线音乐">
           <button role="tab" aria-selected={tab === "search"} data-on={tab === "search"} onClick={() => setTab("search")}>
-            搜索
+            在线搜索
           </button>
           <button role="tab" aria-selected={tab === "list"} data-on={tab === "list"} onClick={() => setTab("list")}>
             歌单导入
+          </button>
+          <button role="tab" aria-selected={tab === "source"} data-on={tab === "source"} onClick={() => setTab("source")}>
+            音源管理
           </button>
         </div>
         <button className="drawer-close" onClick={onClose} aria-label="关闭">
@@ -175,42 +186,47 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
 
       {tab === "search" ? (
         <>
-          <div className="online-bar">
-            <input
-              value={keyword}
-              autoFocus
-              onChange={(e) => setKeyword(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void search()
-              }}
-              placeholder="搜索歌名、歌手"
-              aria-label="搜索在线音乐"
-            />
-            <button onClick={() => void search()} title="搜索（回车）">
-              搜索
-            </button>
-          </div>
-
-          <div className="online-sources" role="tablist" aria-label="音乐平台">
-            {SOURCES.map((s) => (
-              <button
-                key={s.id}
-                role="tab"
-                aria-selected={source === s.id}
-                data-on={source === s.id}
-                onClick={() => {
-                  setSource(s.id)
-                  // 换平台就拿同一个关键词再搜一次 —— 换源本来就是为了比较结果，
-                  // 还要用户再点一次「搜索」是多余的一步
-                  if (keyword.trim()) void search()
+          <section className="panel-section online-query">
+            <div className="online-bar">
+              <input
+                value={keyword}
+                autoFocus
+                onChange={(e) => setKeyword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void search()
                 }}
-              >
-                {s.name}
+                placeholder="输入歌名、歌手或专辑"
+                aria-label="搜索在线音乐"
+              />
+              <button className="primary" onClick={() => void search()} title="搜索（回车）">
+                搜索
               </button>
-            ))}
-          </div>
+            </div>
 
-          <SourceScript />
+            <div className="online-sources" role="tablist" aria-label="音乐平台">
+              {SOURCES.map((s) => (
+                <button
+                  key={s.id}
+                  role="tab"
+                  aria-selected={source === s.id}
+                  data-on={source === s.id}
+                  onClick={() => {
+                    setSource(s.id)
+                    // 换平台就拿同一个关键词再搜一次 —— 换源本来就是为了比较结果，
+                    // 还要用户再点一次「搜索」是多余的一步
+                    if (keyword.trim()) void search()
+                  }}
+                >
+                  {s.name}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <div className="result-heading">
+            <b>搜索结果</b>
+            <span>{results.length > 0 ? `${results.length}${total ? ` / ${total}` : ""} 首` : ""}</span>
+          </div>
 
           {status === "error" && error && <p className="lib-note online-error">{error}</p>}
 
@@ -226,6 +242,7 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
                   }}
                   title="双击播放，右键更多"
                 >
+                  <span className="song-index">{String(i + 1).padStart(2, "0")}</span>
                   <b>{t.title}</b>
                   <span>{t.artist}</span>
                   {inLibrary.has(t.id) && <i title="已在曲库">库</i>}
@@ -257,8 +274,9 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
             )}
           </ol>
         </>
-      ) : (
+      ) : tab === "list" ? (
         <>
+          <section className="panel-section playlist-import-form">
           <div className="online-bar">
             <input
               value={listInput}
@@ -292,6 +310,7 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
             自己的「我喜欢的音乐」也是一个歌单，只要不是私密的，贴分享链接就能导。
             酷狗必须给分享链接，裸 id 不行。
           </p>
+          </section>
 
           {listStatus === "error" && listError && <p className="lib-note online-error">{listError}</p>}
           {note && (
@@ -320,6 +339,7 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
             {preview?.tracks.map((t, i) => (
               <li key={t.id} data-active={t.id === currentId}>
                 <button className="row" onDoubleClick={() => playPreview(i)} data-tooltip="双击从这里播放整张歌单">
+                  <span className="song-index">{String(i + 1).padStart(2, "0")}</span>
                   <b>{t.title}</b>
                   <span>{t.artist}</span>
                   {inLibrary.has(t.id) && <i title="已在曲库">库</i>}
@@ -333,6 +353,10 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
             )}
           </ol>
         </>
+      ) : (
+        <div className="panel-scroll source-manager">
+          <SourceScript />
+        </div>
       )}
 
       {menu && (

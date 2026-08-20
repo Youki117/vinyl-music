@@ -24,6 +24,7 @@ export default function Playback({ open, onClose }: { open: boolean; onClose: ()
   const [eqOn, setEqOn] = useState(engine.eqEnabled)
   const [gains, setGains] = useState<number[]>(engine.eqGains)
   const [remaining, setRemaining] = useState<number | null>(null)
+  const [sleepChoice, setSleepChoice] = useState<number | null>(null)
   const [afterTrack, setAfterTrack] = useState(false)
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const [device, setDevice] = useState(engine.outputDevice)
@@ -37,7 +38,14 @@ export default function Playback({ open, onClose }: { open: boolean; onClose: ()
   const [loop, setLoop] = useState(engine.loop)
   const rootRef = useDismiss<HTMLDivElement>(open, onClose)
 
-  useEffect(() => engine.onSleepChange(setRemaining), [])
+  useEffect(
+    () =>
+      engine.onSleepChange((ms) => {
+        setRemaining(ms)
+        if (ms === null) setSleepChoice(null)
+      }),
+    [],
+  )
   useEffect(() => engine.onLoopChange(setLoop), [])
 
   useEffect(() => {
@@ -61,169 +69,213 @@ export default function Playback({ open, onClose }: { open: boolean; onClose: ()
       setEqEnabled(true)
     }
   }
+  const activePreset = EQ_PRESETS.find((preset) =>
+    preset.gains.every((gain, i) => Math.abs(gain - (gains[i] ?? 0)) < 0.01),
+  )?.name
 
   return (
-    <div ref={rootRef} className="drawer skin-editor" role="dialog" aria-label="播放设置">
-      <header>
-        <nav className="tabs">
-          <button data-on>播放设置</button>
-        </nav>
+    <div ref={rootRef} className="drawer settings-drawer" role="dialog" aria-label="播放设置">
+      <header className="panel-header">
+        <h2>播放与调音设置</h2>
         <button className="drawer-close" onClick={onClose} aria-label="关闭">
           ✕
         </button>
       </header>
 
-      <div className="skin-body">
-        <p className="section-title">播放速度</p>
-        <div className="chip-row">
-          {SPEEDS.map((s) => (
-            <button key={s} data-on={Math.abs(speed - s) < 0.01} onClick={() => setSpeed(s)}>
-              {s}×
-            </button>
-          ))}
-        </div>
-        <p className="hint">变速不变调，1.5 倍速也不会把人声唱成花栗鼠。</p>
-
-        <p className="section-title">
-          A-B 循环
-          {loop.a !== null && (
-            <b>
-              {" · "}
-              {formatTime(loop.a)}
-              {loop.b !== null ? ` → ${formatTime(loop.b)}` : " → 等待 B 点"}
-            </b>
+      <div className="panel-scroll settings-body">
+        <section className="panel-section">
+          <div className="panel-title-row">
+            <h3>音频输出设备</h3>
+            <span>{devices.find((d) => d.deviceId === device)?.label || "系统默认"}</span>
+          </div>
+          <select
+            className="wide-select"
+            value={device}
+            onChange={(e) => {
+              const id = e.target.value
+              setDevice(id)
+              setDeviceError(null)
+              // 走 store 而不是直接调 engine：设备选择要跟 EQ、速度一样落盘
+              setOutputDevice(id).catch((err) => setDeviceError(String(err.message ?? err)))
+            }}
+          >
+            <option value="">系统默认</option>
+            {devices.map((d) => (
+              <option key={d.deviceId} value={d.deviceId}>
+                {d.label || `设备 ${d.deviceId.slice(0, 8)}`}
+              </option>
+            ))}
+          </select>
+          {deviceError && <p className="hint danger-text">{deviceError}</p>}
+          {devices.length === 0 && (
+            <p className="hint">未枚举到设备；部分环境需要先授予系统音频设备访问权限。</p>
           )}
-        </p>
-        <div className="chip-row">
-          <button onClick={() => engine.cycleLoop()} data-on={loop.a !== null}>
-            {loop.a === null ? "设 A 点" : loop.b === null ? "设 B 点" : "清除区间"}
-          </button>
-          {loop.a !== null && (
-            <button className="danger" onClick={() => engine.setLoop(null, null)}>
-              取消
+        </section>
+
+        <section className="panel-section">
+          <div className="panel-title-row">
+            <h3>播放倍速</h3>
+            <span>变速不变调</span>
+          </div>
+          <div className="chip-row grid-six">
+            {SPEEDS.map((s) => (
+              <button key={s} data-on={Math.abs(speed - s) < 0.01} onClick={() => setSpeed(s)}>
+                {s}×
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="panel-section">
+          <div className="panel-title-row">
+            <h3>A-B 段落循环</h3>
+            <span>
+              {loop.a === null
+                ? "未启用"
+                : loop.b === null
+                  ? `A ${formatTime(loop.a)} · 等待 B 点`
+                  : `${formatTime(loop.a)} → ${formatTime(loop.b)}`}
+            </span>
+          </div>
+          <p className="hint">
+            在段落头尾设置 A、B 点，播放到 B 点会自动回到 A 点；快捷键 <code>L</code>。
+          </p>
+          <div className="chip-row grid-three">
+            <button data-on={loop.a !== null} onClick={() => engine.setLoop(engine.currentTime, null)}>
+              设 A 点
             </button>
-          )}
-        </div>
-        <p className="hint">
-          扒歌、练听力用得上：在想复读的段落头尾各点一次，播到 B 点会自动跳回 A 点。
-          按 <code>L</code> 也能设。换歌自动清除。
-        </p>
-
-        <p className="section-title">
-          睡眠定时器
-          {remaining !== null && <b> · 剩 {Math.ceil(remaining / 60000)} 分钟</b>}
-        </p>
-        <div className="chip-row">
-          {SLEEP_OPTIONS.map((m) => (
-            <button key={m} onClick={() => engine.setSleepTimer(m, afterTrack)}>
-              {m} 分钟
+            <button disabled={loop.a === null || loop.b !== null} onClick={() => engine.cycleLoop()}>
+              设 B 点
             </button>
-          ))}
-          <button className="danger" onClick={() => engine.cancelSleepTimer()}>
-            取消
-          </button>
-        </div>
-        <label className="row-field">
-          <span>播完再停</span>
-          <input
-            type="checkbox"
-            checked={afterTrack}
-            onChange={(e) => setAfterTrack(e.target.checked)}
-          />
-        </label>
-        <p className="hint">勾上后，到点会等当前这首播完再暂停，不会把歌切断。</p>
-
-        <p className="section-title">
-          音量归一化
-          <label className="inline-toggle">
-            <input
-              type="checkbox"
-              checked={normalize}
-              onChange={(e) => setNormalize(e.target.checked)}
-            />
-            启用
-          </label>
-          {normalize && gainDb !== 0 && (
-            <b>
-              {" · 这首 "}
-              {gainDb > 0 ? "+" : ""}
-              {gainDb.toFixed(1)} dB
-            </b>
-          )}
-        </p>
-        <p className="hint">
-          不同专辑的母带响度能差 10dB 以上，开了它换歌就不会音量跳一档。优先读文件里的
-          ReplayGain 标签；没有标签的会按 EBU R128 自己量一遍（解码整首歌，结果缓存到磁盘，
-          同一个文件只算一次），所以第一次播到的那首可能过几秒才对齐。
-        </p>
-
-        <p className="section-title">
-          均衡器
-          <label className="inline-toggle">
-            <input
-              type="checkbox"
-              checked={eqOn}
-              onChange={(e) => {
-                setEqOn(e.target.checked)
-                setEqEnabled(e.target.checked)
-              }}
-            />
-            启用
-          </label>
-        </p>
-
-        <div className="chip-row">
-          {EQ_PRESETS.map((p) => (
-            <button key={p.name} onClick={() => applyGains(p.gains)}>
-              {p.name}
+            <button disabled={loop.a === null} onClick={() => engine.setLoop(null, null)}>
+              清除循环
             </button>
-          ))}
-        </div>
+          </div>
+        </section>
 
-        <div className="eq-grid" data-off={!eqOn}>
-          {EQ_BANDS.map((hz, i) => (
-            <div key={hz} className="eq-band">
-              <input
-                type="range"
-                min={EQ_MIN_DB}
-                max={EQ_MAX_DB}
-                step={0.5}
-                value={gains[i] ?? 0}
-                onChange={(e) => {
-                  const next = [...gains]
-                  next[i] = Number(e.target.value)
-                  applyGains(next)
+        <section className="panel-section">
+          <div className="panel-title-row">
+            <h3>睡眠定时</h3>
+            <span>{remaining === null ? "未启用" : `剩 ${Math.ceil(remaining / 60000)} 分钟`}</span>
+          </div>
+          <div className="chip-row grid-five">
+            {SLEEP_OPTIONS.map((m) => (
+              <button
+                key={m}
+                data-on={sleepChoice === m}
+                onClick={() => {
+                  setSleepChoice(m)
+                  engine.setSleepTimer(m, afterTrack)
                 }}
-                aria-label={`${hz}Hz`}
-              />
-              <em>{hz >= 1000 ? `${hz / 1000}k` : hz}</em>
-              <i>{(gains[i] ?? 0) > 0 ? `+${gains[i]}` : (gains[i] ?? 0)}</i>
+              >
+                {m}m
+              </button>
+            ))}
+          </div>
+          <div className="setting-toggle-row">
+            <div>
+              <b>播完当前歌曲后再停止</b>
+              <span>到点时不切断正在播放的歌曲</span>
             </div>
-          ))}
-        </div>
-        <p className="hint">关闭时整条滤波器链会被旁路，不占 CPU。</p>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={afterTrack}
+                onChange={(e) => setAfterTrack(e.target.checked)}
+              />
+              <span />
+            </label>
+          </div>
+          {remaining !== null && (
+            <button
+              className="panel-link danger"
+              onClick={() => {
+                setSleepChoice(null)
+                engine.cancelSleepTimer()
+              }}
+            >
+              取消睡眠定时
+            </button>
+          )}
+        </section>
 
-        <p className="section-title">输出设备</p>
-        <select
-          className="wide-select"
-          value={device}
-          onChange={(e) => {
-            const id = e.target.value
-            setDevice(id)
-            setDeviceError(null)
-            // 走 store 而不是直接调 engine：设备选择要跟 EQ、速度一样落盘
-            setOutputDevice(id).catch((err) => setDeviceError(String(err.message ?? err)))
-          }}
-        >
-          <option value="">系统默认</option>
-          {devices.map((d) => (
-            <option key={d.deviceId} value={d.deviceId}>
-              {d.label || `设备 ${d.deviceId.slice(0, 8)}`}
-            </option>
-          ))}
-        </select>
-        {deviceError && <p className="hint danger-text">{deviceError}</p>}
-        {devices.length === 0 && <p className="hint">未枚举到设备（部分环境需先授权麦克风才会给出设备名）。</p>}
+        <section className="panel-section">
+          <div className="panel-title-row">
+            <div>
+              <h3>专业均衡器（EQ）</h3>
+              <p>预设与 10 段频率增益微调</p>
+            </div>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={eqOn}
+                onChange={(e) => {
+                  setEqOn(e.target.checked)
+                  setEqEnabled(e.target.checked)
+                }}
+              />
+              <span />
+            </label>
+          </div>
+          <div className="chip-row eq-presets">
+            {EQ_PRESETS.map((p) => (
+              <button
+                key={p.name}
+                data-on={activePreset === p.name}
+                onClick={() => applyGains(p.gains)}
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+          <div className="eq-grid" data-off={!eqOn}>
+            {EQ_BANDS.map((hz, i) => (
+              <div key={hz} className="eq-band">
+                <input
+                  type="range"
+                  min={EQ_MIN_DB}
+                  max={EQ_MAX_DB}
+                  step={0.5}
+                  value={gains[i] ?? 0}
+                  onChange={(e) => {
+                    const next = [...gains]
+                    next[i] = Number(e.target.value)
+                    applyGains(next)
+                  }}
+                  aria-label={`${hz}Hz`}
+                />
+                <em>{hz >= 1000 ? `${hz / 1000}k` : hz}</em>
+                <i>{(gains[i] ?? 0) > 0 ? `+${gains[i]}` : (gains[i] ?? 0)}</i>
+              </div>
+            ))}
+          </div>
+          <p className="hint">关闭时整条滤波器链会旁路，不占额外 CPU。</p>
+        </section>
+
+        <section className="panel-section">
+          <div className="setting-toggle-row">
+            <div>
+              <b>音量智能归一化</b>
+              <span>
+                EBU R128 标准，换歌不再忽大忽小
+                {normalize && gainDb !== 0
+                  ? ` · 当前 ${gainDb > 0 ? "+" : ""}${gainDb.toFixed(1)} dB`
+                  : ""}
+              </span>
+            </div>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={normalize}
+                onChange={(e) => setNormalize(e.target.checked)}
+              />
+              <span />
+            </label>
+          </div>
+          <p className="hint">
+            优先读取 ReplayGain；没有标签时会在后台测量并缓存，同一文件只计算一次。
+          </p>
+        </section>
       </div>
     </div>
   )

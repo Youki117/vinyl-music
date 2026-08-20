@@ -264,6 +264,7 @@ export default function App() {
         onOpenSkin={() => togglePanel("skin")}
         onOpenMix={() => togglePanel("mix")}
         onOpenOnline={() => togglePanel("online")}
+        onOpenLibrary={() => togglePanel("playlist")}
         onOpenLayout={() => {
           // 编辑布局时把抽屉收起来：抽屉压着右边小半个画面，搬部件会看不见落点
           setPanel(null)
@@ -284,8 +285,6 @@ export default function App() {
           onToggle={toggle}
           onPrev={() => void prev()}
           onNext={() => void next()}
-          onOpenPlaylist={() => togglePanel("playlist")}
-          playlistOpen={panel === "playlist"}
         />
       </Progress>
 

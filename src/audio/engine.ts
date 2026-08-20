@@ -486,6 +486,22 @@ class Engine {
   }
 
   /**
+   * 仅在原地换音质时临时复制当前 Blob 的字节，用作新音质解码失败后的回滚。
+   * 平时不常驻第二份音频，避免每首歌都把内存占用翻倍。
+   */
+  async copyLoadedBytes(): Promise<Uint8Array | null> {
+    const url = this.objectUrl
+    if (!url) return null
+    try {
+      const res = await fetch(url)
+      if (!res.ok) return null
+      return new Uint8Array(await res.arrayBuffer())
+    } catch {
+      return null
+    }
+  }
+
+  /**
    * 用**已经在手上的字节**载入。预取命中时走这条 —— 省掉读盘或下载那一整段，
    * 这正是 F1.6 要求的「切换间隔 < 200ms」里最贵的一块。
    */

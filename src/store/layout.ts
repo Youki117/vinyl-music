@@ -29,12 +29,13 @@ export const LAYOUT_PARTS = [
  * 两件事的数据形状不一样，混在一起会让偏移那套变复杂，而它现在很干净。
  */
 export const SIDEBAR_TOOLS = [
-  { id: "volume", label: "音量", hint: "音量（M 静音）" },
-  { id: "playback", label: "播放设置", hint: "播放设置 (E)" },
-  { id: "skin", label: "皮肤设置", hint: "皮肤设置 (S)" },
-  { id: "online", label: "在线音乐", hint: "在线音乐 (F)" },
-  { id: "layout", label: "编辑布局", hint: "编辑布局（拖动部件调位置）" },
+  { id: "online", label: "搜索", hint: "在线搜索与歌单导入 (F)" },
+  { id: "playback", label: "参数设置", hint: "播放与调音设置 (E)" },
   { id: "mix", label: "混音", hint: "混音 (X)" },
+  { id: "skin", label: "底图与蒙版", hint: "底图、蒙版、文案与 AI 配图 (S)" },
+  { id: "layout", label: "自定义组件位置", hint: "自定义组件位置与侧栏顺序" },
+  { id: "volume", label: "音量", hint: "音量（M 静音）" },
+  { id: "library", label: "曲库与歌单", hint: "曲库与歌单 (P)" },
 ] as const
 
 export type SidebarToolId = (typeof SIDEBAR_TOOLS)[number]["id"]
@@ -72,7 +73,7 @@ export type Offsets = Partial<Record<PartId, Offset>>
 export const DESIGN_W = 1243
 export const DESIGN_H = 688
 
-const SCHEMA = 1
+const SCHEMA = 2
 
 type LayoutFile = {
   schemaVersion: number
@@ -167,7 +168,16 @@ export const useLayout = create<LayoutState>((set, get) => {
     async load() {
       const raw = await platform.readConfig<LayoutFile>("layout")
       if (raw?.offsets) set({ offsets: raw.offsets })
-      if (Array.isArray(raw?.sidebarOrder)) set({ sidebarOrder: raw.sidebarOrder })
+      if (Array.isArray(raw?.sidebarOrder)) {
+        if ((raw.schemaVersion ?? 0) < 2) {
+          // v2 增加曲库入口，并按用户确认的七项顺序重新排过。旧顺序只在这次升级时
+          // 归位一次；迁移落盘后，用户之后从布局编辑里做的自定义仍会照常保留。
+          set({ sidebarOrder: null })
+          save()
+        } else {
+          set({ sidebarOrder: raw.sidebarOrder })
+        }
+      }
     },
 
     setEditing(on) {

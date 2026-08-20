@@ -17,6 +17,7 @@ const engine = {
   status: "paused" as string,
   currentTime: 0,
   duration: 0,
+  loop: { a: null as number | null, b: null as number | null },
   eqEnabled: false,
   eqGains: [0, 0, 0] as number[],
   normalize: false,
@@ -35,10 +36,14 @@ const engine = {
   setOutputDevice: vi.fn(async () => {}),
   loadBytes: vi.fn(async () => {}),
   loadUrl: vi.fn(async () => {}),
+  fetchAudio: vi.fn(async () => new Uint8Array([2])),
+  copyLoadedBytes: vi.fn(async () => new Uint8Array([1])),
   play: vi.fn(async () => {}),
   pause: vi.fn(),
   toggle: vi.fn(),
   seek: vi.fn(),
+  seekSeconds: vi.fn(),
+  setLoop: vi.fn(),
   onStatus: vi.fn(() => () => {}),
   onProgress: vi.fn(() => () => {}),
   onEnded: vi.fn(() => () => {}),
@@ -99,7 +104,7 @@ vi.stubGlobal("window", {
   clearInterval: (id: number) => clearInterval(id),
 })
 
-const { usePlayer } = await import("@/store/player")
+const { qualityForTrack, usePlayer } = await import("@/store/player")
 
 const track = (id: string): Track =>
   ({
@@ -120,10 +125,10 @@ const track = (id: string): Track =>
     gainPeak: null,
   }) as unknown as Track
 
-const onlineTrack = (id: string): Track =>
+const onlineTrack = (id: string, qualities = ["128k", "320k", "flac", "flac24bit"]): Track =>
   ({
     ...track(id),
-    origin: { kind: "online", source: "tx", songId: id, qualities: {}, raw: {} },
+    origin: { kind: "online", source: "tx", songId: id, qualities, raw: {} },
   }) as unknown as Track
 
 /*
@@ -143,11 +148,22 @@ beforeEach(() => {
   engine.play.mockClear()
   engine.pause.mockClear()
   engine.loadUrl.mockClear()
+  engine.fetchAudio.mockClear()
+  engine.fetchAudio.mockImplementation(async () => new Uint8Array([2]))
+  engine.copyLoadedBytes.mockClear()
+  engine.copyLoadedBytes.mockImplementation(async () => new Uint8Array([1]))
+  engine.loadBytes.mockClear()
+  engine.seekSeconds.mockClear()
+  engine.setLoop.mockClear()
   resolvePlayUrl.mockClear()
   resolvePlayUrl.mockImplementation(async () => ({ url: "https://example.test/audio" }))
   markMissing.mockClear()
   engine.eqEnabled = false
   engine.eqGains = [0, 0, 0]
+  engine.status = "paused"
+  engine.currentTime = 0
+  engine.duration = 0
+  engine.loop = { a: null, b: null }
   round++
   usePlayer.setState({
     queue: [track(`a${round}`), track(`b${round}`), track(`c${round}`)],
@@ -155,6 +171,94 @@ beforeEach(() => {
     mode: "all",
     status: "paused",
     error: null,
+  })
+})
+
+describe("在线音质", () => {
+  it("当前歌曲缺首选档位时向下选最接近的可用音质", () => {
+    const t = onlineTrack(`quality${round}`, ["128k", "320k"])
+    expect(qualityForTrack(t, "flac24bit")).toBe("320k")
+    expect(qualityForTrack(t, "flac")).toBe("320k")
+    expect(qualityForTrack(t, "128k")).toBe("128k")
+  })
+
+  it("切换当前在线歌曲时保留进度、播放状态与 A-B 区间", async () => {
+    const t = onlineTrack(`quality${round}`)
+    usePlayer.setState({
+      queue: [t],
+      index: 0,
+      status: "playing",
+      onlineQuality: "128k",
+      activeOnlineQuality: "128k",
+    })
+    engine.status = "playing"
+    engine.currentTime = 42
+    engine.duration = 180
+    engine.loop = { a: 30, b: 60 }
+
+    await usePlayer.getState().setOnlineQuality("320k")
+
+    expect(resolvePlayUrl).toHaveBeenCalledWith(expect.objectContaining({ id: t.origin.kind === "online" ? t.origin.songId : "" }), "320k")
+    expect(engine.loadBytes).toHaveBeenCalledWith(new Uint8Array([2]))
+    expect(engine.seekSeconds).toHaveBeenCalledWith(42)
+    expect(engine.setLoop).toHaveBeenCalledWith(30, 60)
+    expect(engine.play).toHaveBeenCalled()
+    expect(usePlayer.getState().activeOnlineQuality).toBe("320k")
+    expect(usePlayer.getState().qualityStatus).toBe("idle")
+  })
+
+  it("音质下载尚未完成时暂停，会作废晚到的自动换入", async () => {
+    let finish!: (bytes: Uint8Array<ArrayBuffer>) => void
+    engine.fetchAudio.mockImplementationOnce(
+      () =>
+        new Promise<Uint8Array<ArrayBuffer>>((resolve) => {
+          finish = resolve
+        }),
+    )
+    const t = onlineTrack(`quality-cancel${round}`)
+    usePlayer.setState({
+      queue: [t],
+      index: 0,
+      status: "playing",
+      onlineQuality: "128k",
+      activeOnlineQuality: "128k",
+    })
+    engine.status = "playing"
+
+    const switching = usePlayer.getState().setOnlineQuality("flac")
+    for (let i = 0; i < 10 && !finish; i++) await Promise.resolve()
+    usePlayer.getState().pause()
+    finish(new Uint8Array(new ArrayBuffer(1)))
+    await switching
+
+    expect(engine.loadBytes).not.toHaveBeenCalled()
+    expect(usePlayer.getState().qualityStatus).toBe("idle")
+  })
+
+  it("新音质解码失败时恢复旧字节与原进度", async () => {
+    const t = onlineTrack(`quality-rollback${round}`)
+    usePlayer.setState({
+      queue: [t],
+      index: 0,
+      status: "playing",
+      onlineQuality: "128k",
+      activeOnlineQuality: "128k",
+    })
+    engine.status = "playing"
+    engine.currentTime = 26
+    engine.loop = { a: 20, b: 35 }
+    engine.loadBytes
+      .mockRejectedValueOnce(new Error("新音质解码失败"))
+      .mockResolvedValueOnce(undefined)
+
+    await usePlayer.getState().setOnlineQuality("flac")
+
+    expect(engine.loadBytes).toHaveBeenNthCalledWith(1, new Uint8Array([2]))
+    expect(engine.loadBytes).toHaveBeenNthCalledWith(2, new Uint8Array([1]))
+    expect(engine.seekSeconds).toHaveBeenLastCalledWith(26)
+    expect(engine.setLoop).toHaveBeenLastCalledWith(20, 35)
+    expect(usePlayer.getState().activeOnlineQuality).toBe("128k")
+    expect(usePlayer.getState().qualityStatus).toBe("error")
   })
 })
 

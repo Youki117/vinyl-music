@@ -83,7 +83,7 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
 
   return (
     <div ref={rootRef} className="drawer skin-editor" role="dialog" aria-label="皮肤设置">
-      <header>
+      <header className="panel-header">
         <nav className="tabs">
           <button data-on={tab === "image"} onClick={() => setTab("image")}>
             底图
@@ -103,16 +103,19 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
         </button>
       </header>
 
-      <div className="skin-body">
+      <div className="panel-scroll skin-body">
         {tab === "image" && (
           <>
+            <section className="panel-section">
             <button
               className="wide"
               onClick={() => void platform.pickImage().then((r) => r && setBackdrop(r))}
             >
               选择底图图片…
             </button>
+            </section>
 
+            <section className="panel-section">
             {/*
               内置底图。装完不选图就只有一层 CSS 渐变，而整套配色都是从底图现算的，
               没有图等于看不出效果。setBackdrop 只用 ref.id，所以这里给个合成的
@@ -133,9 +136,11 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
                 />
               ))}
             </div>
+            </section>
 
             {backdrop ? (
               <>
+                <section className="panel-section">
                 <p className="hint">拖动可调整底图焦点，避免人脸被裁掉</p>
                 <div
                   className="preview backdrop-preview"
@@ -146,7 +151,9 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
                   onPointerDown={startDrag("backdrop")}
                   onPointerMove={onDragMove}
                 />
+                </section>
 
+                <section className="panel-section">
                 <label className="row-field">
                   <span>黑胶中心优先显示</span>
                   <select
@@ -202,15 +209,17 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
                     </button>
                   </div>
                 </div>
+                </section>
               </>
             ) : (
-              <p className="hint">还没有底图。当前用的是内置底纹。</p>
+              <div className="panel-empty">还没有底图。当前用的是内置底纹。</div>
             )}
           </>
         )}
 
         {tab === "veil" && (
           <>
+            <section className="panel-section veil-sliders">
             <Slider
               label="边缘位置"
               value={skin.veil.edgeX}
@@ -246,6 +255,8 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
               max={1}
               onChange={(ripple) => patchVeil({ ripple })}
             />
+            </section>
+            <section className="panel-section">
             <label className="row-field">
               <span>自动从底图取色</span>
               <input
@@ -283,7 +294,9 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
               自动取色就自动关掉、以你选的为准；想让它接管回去，把开关打开即可。
             </p>
             <p className="hint">不透明度上限 0.92：底图必须能透出来，做成纯白就失去层次了。</p>
+            </section>
 
+            <section className="panel-section">
             <p className="section-title">预设</p>
             <div className="preset-save">
               <input
@@ -331,11 +344,12 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
               预设存的是<b>整张皮肤</b>（底图、取景、蒙版、文案、配色）。只想换雾的感觉就点
               「只套蒙版」—— 它会保留你当前的底图，并按新的蒙版参数重推一次文字配色。
             </p>
+            </section>
           </>
         )}
 
         {tab === "text" && (
-          <>
+          <section className="panel-section text-fields">
             {(["title", "subtitle", "year", "byline"] as const).map((k) => (
               <label key={k} className="row-field">
                 <span>{{ title: "主标题", subtitle: "副标题", year: "年份", byline: "署名" }[k]}</span>
@@ -356,7 +370,7 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
             <p className="hint">
               SELP-PORTRAIT 是效果图原样保留的拼写（还原优先），这里可以随时改掉。
             </p>
-          </>
+          </section>
         )}
 
         {tab === "ai" && <AiTab />}

@@ -92,6 +92,9 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
   const exportM3u = () =>
     void exportPlaylist().then((ok) => setNote(ok ? "已导出" : "当前列表是空的"))
 
+  const exportOne = (id: string, name: string) =>
+    void exportPlaylist(id).then((ok) => setNote(ok ? `已导出「${name}」` : `「${name}」没有可导出的本地曲目`))
+
   // 只有自建歌单里"顺序"才是用户定的；虚拟歌单与排序视图下拖动没有意义
   const canReorder = inPlaylist && sort === "added" && !filter.trim()
 
@@ -144,6 +147,13 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
 
   return (
     <div ref={rootRef} className="drawer library-drawer" role="dialog" aria-label="曲库">
+      <header className="panel-header library-header">
+        <h2>音乐库与歌单</h2>
+        <button className="drawer-close" onClick={onClose} aria-label="关闭">
+          ✕
+        </button>
+      </header>
+      <div className="library-layout">
       <aside className="lib-side">
         <div className="lib-side-group">
           {VIRTUAL_VIEWS.map((v) => (
@@ -153,15 +163,25 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
           ))}
         </div>
 
+        <button className="lib-local-button" onClick={importFolder}>
+          <span>本地目录</span>
+          <em>＋ 添加</em>
+        </button>
+
         <div className="lib-side-title">
-          歌单
-          <button
-            onClick={() => setRenaming(createPlaylist(`新建歌单 ${playlists.length + 1}`))}
-            aria-label="新建歌单"
-            title="新建歌单"
-          >
-            ＋
-          </button>
+          <span>歌单</span>
+          <div>
+            <button onClick={importM3u} aria-label="导入歌单" title="导入 m3u / m3u8 歌单">
+              导入
+            </button>
+            <button
+              onClick={() => setRenaming(createPlaylist(`新建歌单 ${playlists.length + 1}`))}
+              aria-label="新建歌单"
+              title="新建歌单"
+            >
+              ＋
+            </button>
+          </div>
         </div>
 
         <div className="lib-side-group">
@@ -181,16 +201,25 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
                 }}
               />
             ) : (
-              <button
-                key={p.id}
-                data-on={activeView === p.id}
-                onClick={() => setView(p.id)}
-                onDoubleClick={() => setRenaming(p.id)}
-                title={`${p.name}（${p.trackIds.length} 首，双击重命名）`}
-              >
-                <span>{p.name}</span>
-                <em>{p.trackIds.length}</em>
-              </button>
+              <div key={p.id} className="lib-playlist-row" data-on={activeView === p.id}>
+                <button
+                  className="lib-playlist-select"
+                  onClick={() => setView(p.id)}
+                  onDoubleClick={() => setRenaming(p.id)}
+                  title={`${p.name}（${p.trackIds.length} 首，双击重命名）`}
+                >
+                  <span>{p.name}</span>
+                  <em>{p.trackIds.length}</em>
+                </button>
+                <button
+                  className="lib-playlist-export"
+                  onClick={() => exportOne(p.id, p.name)}
+                  aria-label={`导出歌单 ${p.name}`}
+                  title="导出此歌单"
+                >
+                  导
+                </button>
+              </div>
             ),
           )}
           {playlists.length === 0 && <p className="lib-side-empty">还没有歌单</p>}
@@ -199,6 +228,11 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
 
       <section className="lib-main">
         <header>
+          <b className="lib-current-view">
+            {VIRTUAL_VIEWS.includes(activeView as never)
+              ? VIEW_LABEL[activeView as never]
+              : playlists.find((p) => p.id === activeView)?.name ?? "歌单"}
+          </b>
           <input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
@@ -220,9 +254,6 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
           <button onClick={() => setSort(sort)} aria-label="切换升降序" title="切换升降序">
             {sortDesc ? "↓" : "↑"}
           </button>
-          <button className="drawer-close" onClick={onClose} aria-label="关闭">
-            ✕
-          </button>
         </header>
 
         {/* 操作按钮单独一行：380px 的抽屉塞不下搜索框 + 排序 + 五个按钮，
@@ -230,11 +261,8 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
         <div className="lib-actions">
           <button onClick={importFiles}>加文件</button>
           <button onClick={importFolder}>加文件夹</button>
-          <button onClick={importM3u} title="导入 m3u / m3u8 歌单文件">
-            导入歌单
-          </button>
           <button onClick={exportM3u} title="把当前列表导出为 m3u8">
-            导出
+            导出当前列表
           </button>
           {inPlaylist && (
             <button
@@ -280,6 +308,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
                 }}
                 title={canReorder ? "双击播放，按住拖动可排序" : "双击播放"}
               >
+                <span className="song-index">{String(i + 1).padStart(2, "0")}</span>
                 <b>{t.title}</b>
                 <span>{[t.artist, t.album].filter(Boolean).join(" · ")}</span>
                 {t.playCount > 0 && <i title="播放次数">{t.playCount}</i>}
@@ -294,6 +323,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
           )}
         </ol>
       </section>
+      </div>
 
       {menu && (
         <div

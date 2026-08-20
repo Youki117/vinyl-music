@@ -16,6 +16,21 @@
     "Times New Roman", serif;
   --font-cjk: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", "Source Han Sans SC", sans-serif;
   --font-ui: "Segoe UI", var(--font-cjk), sans-serif;
+  --font-panel-title: "Songti SC", "STSong", "Noto Serif SC", "Source Han Serif SC", SimSun,
+    var(--font-display), serif;
+
+  /* 右侧功能区统一使用这一套暖黑金令牌。主舞台继续由皮肤注入 ink 颜色，两者互不污染。 */
+  --panel-bg: rgba(14, 13, 12, 0.965);
+  --panel-bg-soft: #171513;
+  --panel-bg-active: #28231d;
+  --panel-border: rgba(178, 132, 95, 0.2);
+  --panel-border-strong: rgba(213, 164, 82, 0.72);
+  --panel-gold: #d5a452;
+  --panel-gold-bright: #ebc174;
+  --panel-text: #eee8df;
+  --panel-text-muted: #978f84;
+  --panel-text-dim: #665f56;
+  --panel-danger: #d97868;
 
   /* 右侧工具栏的宽度。抽屉必须给它让出这条轨道，否则一开面板就把按钮盖住，
      而那几个按钮的用处恰恰是在面板之间互相切换。这个数在 .sidebar 和每个抽屉的

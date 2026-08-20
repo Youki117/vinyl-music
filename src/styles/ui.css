@@ -2082,16 +2082,957 @@ header button.danger,
   border-width: 2px;
 }
 
-/* ── 音源脚本导入 ──────────────────────────────────────── */
-/*
- * 常驻在搜索结果上方。脚本不随应用分发，没有它「搜得到但播不了」，
- * 而这个因果关系用户是猜不出来的 —— 所以状态和后果都摆在明面上，不收进二级菜单。
+/* ── 统一功能面板设计系统 ─────────────────────────────────
+ * 目标稿只负责定下暖黑金语言；所有真实面板共用下面这些令牌、间距和控件状态，
+ * 避免在线页、设置页、皮肤页各自长成一套 UI。
  */
-.source-script {
-  margin: 2px 0 4px;
+.drawer,
+.online-drawer,
+.settings-drawer,
+.skin-editor,
+.mix-panel,
+.library-drawer {
+  width: min(calc(880px + var(--rail-w)), calc(100% - 44px));
+  padding-right: var(--rail-w);
+  background: var(--panel-bg);
+  border-left: 1px solid var(--panel-border);
+  box-shadow: -22px 0 56px rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(20px) saturate(0.78);
+  color: var(--panel-text);
+}
+
+.drawer .panel-header {
+  width: 100%;
+  align-self: stretch;
+  min-height: 56px;
+  flex: none;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--panel-border);
+  background: rgba(16, 14, 12, 0.78);
+}
+
+.panel-header > .drawer-close {
+  margin-left: auto;
+}
+
+.panel-header h2 {
+  flex: 1;
+  margin: 0;
+  color: var(--panel-text);
+  font-family: var(--font-panel-title);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.045em;
+}
+
+.drawer .drawer-close {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 3px;
+  color: var(--panel-text-muted);
+  font-size: 16px;
+}
+
+.drawer .drawer-close:hover {
+  color: var(--panel-gold-bright);
+  background: var(--panel-bg-active);
+}
+
+.panel-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(213, 164, 82, 0.4) transparent;
+}
+
+.panel-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+
+.panel-scroll::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: rgba(213, 164, 82, 0.35);
+}
+
+.panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.panel-title-row,
+.setting-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.panel-title-row h3,
+.setting-toggle-row b {
+  margin: 0;
+  color: var(--panel-text);
+  font-family: var(--font-panel-title);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.035em;
+}
+
+.panel-title-row > span,
+.panel-title-row > em {
+  color: var(--panel-gold);
+  font-size: 11px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.panel-title-row > div > p,
+.setting-toggle-row > div > span {
+  display: block;
+  margin: 3px 0 0;
+  color: var(--panel-text-muted);
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+
+.setting-toggle-row.compact {
+  padding-top: 12px;
+  border-top: 1px solid var(--panel-border);
+}
+
+.panel-empty {
+  margin: 24px;
+  padding: 38px 20px;
+  border: 1px dashed var(--panel-border);
+  color: var(--panel-text-muted);
+  text-align: center;
+  line-height: 1.7;
+}
+
+.drawer .hint,
+.skin-body .hint {
+  margin: 0;
+  color: var(--panel-text-muted);
+  font-size: 10.5px;
+  line-height: 1.7;
+}
+
+.drawer .danger-text,
+.drawer button.danger,
+.drawer .error {
+  color: var(--panel-danger);
+}
+
+.drawer input:not([type="range"]):not([type="checkbox"]):not([type="color"]),
+.drawer select,
+.drawer textarea,
+.wide-select {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  outline: none;
+  background: var(--panel-bg-soft);
+  color: var(--panel-text);
+  font: 11.5px/1.5 var(--font-ui);
+}
+
+.drawer input:focus,
+.drawer select:focus,
+.drawer textarea:focus,
+.wide-select:focus {
+  border-color: var(--panel-border-strong);
+}
+
+.drawer select option {
+  background: #171513;
+  color: var(--panel-text);
+}
+
+.drawer textarea {
+  min-height: 112px;
+  resize: vertical;
+}
+
+.chip-row {
+  gap: 7px;
+}
+
+.chip-row.grid-six,
+.chip-row.grid-five,
+.chip-row.grid-three {
+  display: grid;
+}
+
+.chip-row.grid-six {
+  grid-template-columns: repeat(6, 1fr);
+}
+
+.chip-row.grid-five {
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.chip-row.grid-three {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.chip-row button,
+.panel-link,
+.drawer .mini-add,
+.source-script-actions button,
+.ai-generate-actions button {
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--panel-bg-soft);
+  color: #d7d0c6;
+  font-size: 11px;
+}
+
+.chip-row button:hover:not(:disabled),
+.panel-link:hover,
+.drawer .mini-add:hover,
+.source-script-actions button:hover:not(:disabled),
+.ai-generate-actions button:hover:not(:disabled) {
+  border-color: var(--panel-border-strong);
+  background: var(--panel-bg-active);
+  color: var(--panel-text);
+}
+
+.chip-row button[data-on="true"],
+.drawer button.primary {
+  border-color: var(--panel-border-strong);
+  background: var(--panel-bg-active);
+  color: var(--panel-gold-bright);
+}
+
+.chip-row button:disabled,
+.drawer button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.switch {
+  position: relative;
+  width: 37px;
+  height: 21px;
+  flex: none;
+}
+
+.switch input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.switch > span {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 11px;
+  background: #211e1a;
+  transition: 160ms ease;
+}
+
+.switch > span::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #a49b90;
+  transition: 160ms ease;
+}
+
+.switch input:checked + span {
+  border-color: var(--panel-border-strong);
+  background: #8b692f;
+}
+
+.switch input:checked + span::after {
+  translate: 16px 0;
+  background: #fff;
+}
+
+/* 在线搜索 / 歌单导入 / 音源管理 */
+.online-tabs,
+.skin-editor .tabs {
+  flex: 1;
+  display: flex;
+  gap: 18px;
+  align-self: stretch;
+  align-items: center;
+}
+
+.online-tabs button,
+.skin-editor .tabs button {
+  position: relative;
+  height: 100%;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--panel-text-muted);
+  font-family: var(--font-panel-title);
+  font-size: 14px;
+}
+
+.online-tabs button::after,
+.skin-editor .tabs button::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: transparent;
+}
+
+.online-tabs button[data-on="true"],
+.skin-editor .tabs button[data-on="true"] {
+  background: none;
+  color: var(--panel-gold-bright);
+}
+
+.online-tabs button[data-on="true"]::after,
+.skin-editor .tabs button[data-on="true"]::after {
+  background: var(--panel-gold);
+}
+
+.online-query,
+.playlist-import-form {
+  padding-bottom: 16px;
+}
+
+.online-bar {
+  padding: 0;
+  gap: 8px;
+}
+
+.online-bar input {
+  height: 42px;
+}
+
+.online-bar button,
+.online-bar select {
+  width: auto;
+  min-height: 42px;
+  padding: 0 16px;
+}
+
+.online-sources {
+  gap: 8px;
+  padding: 0;
+  border: 0;
+}
+
+.online-sources button {
+  min-height: 36px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--panel-bg-soft);
+  color: #b8b0a5;
+}
+
+.online-sources button[data-on="true"] {
+  border-color: var(--panel-border-strong);
+  background: var(--panel-bg-active);
+  color: var(--panel-gold-bright);
+}
+
+.result-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px 8px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.result-heading b {
+  font-family: var(--font-panel-title);
+  font-size: 14px;
+}
+
+.result-heading span {
+  color: var(--panel-text-muted);
+  font-size: 10.5px;
+}
+
+.online-tip {
+  margin: 0;
+}
+
+.online-preview {
+  margin: 14px 24px 8px;
+  padding: 12px 14px;
+  border-color: var(--panel-border);
+  border-radius: 4px;
+  background: var(--panel-bg-soft);
+}
+
+.source-manager {
+  padding: 18px 0;
+}
+
+.source-script-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.source-script-row b {
+  color: var(--panel-text);
+  font-family: var(--font-panel-title);
+  font-size: 14px;
+}
+
+.source-script-row span {
+  color: var(--panel-gold-bright);
+  font-size: 12px;
+}
+
+.source-script-row > em {
+  padding: 3px 7px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  color: var(--panel-text-muted);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.source-script-row > em[data-ready="true"] {
+  border-color: rgba(112, 157, 104, 0.36);
+  color: #99bd8d;
+}
+
+.source-script-actions,
+.ai-generate-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.source-script-actions button,
+.ai-generate-actions button {
+  flex: 1;
+}
+
+/* 统一曲目行 */
+.drawer ol {
+  padding: 0;
+}
+
+.drawer li {
+  position: relative;
+  border-bottom: 1px solid rgba(178, 132, 95, 0.12);
+}
+
+.drawer .row {
+  min-height: 58px;
+  padding: 10px 18px 10px 24px;
+}
+
+.online-drawer .row,
+.library-drawer .row {
+  grid-template-columns: 42px minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "index title badge dur"
+    "index meta  meta  meta";
+}
+
+.drawer .row .song-index {
+  grid-area: index;
+  align-self: center;
+  color: var(--panel-text-dim);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.drawer li[data-active="true"] .row .song-index {
+  color: var(--panel-gold);
+}
+
+.drawer .row:hover {
+  background: rgba(213, 164, 82, 0.055);
+}
+
+.drawer li[data-active="true"]::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--panel-gold);
+}
+
+.drawer li[data-active="true"] .row b {
+  color: var(--panel-gold-bright);
+}
+
+/* 播放设置 */
+.settings-body .panel-section:last-child,
+.skin-body .panel-section:last-child,
+.mix-body .panel-section:last-child {
+  border-bottom: 0;
+}
+
+.eq-presets {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.eq-grid {
+  padding: 12px 4px 2px;
+}
+
+.eq-band input[type="range"] {
+  height: 92px;
+}
+
+.panel-link {
+  align-self: flex-start;
+}
+
+/* 混音 */
+.mix-body {
+  padding: 18px 0;
+}
+
+.master-track > b {
+  color: var(--panel-gold-bright);
+  font-family: var(--font-panel-title);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.master-track > p {
+  margin: -6px 0 0;
+  color: var(--panel-text-muted);
+  font-size: 11px;
+}
+
+.mix-aux-heading .mini-add {
+  min-height: 30px;
+}
+
+.track-picker,
+.layer-row,
+.timeline {
+  border-color: var(--panel-border);
+  border-radius: 4px;
+  background: var(--panel-bg-soft);
+}
+
+.track-picker button:hover,
+.layer-ctl button:hover {
+  background: var(--panel-bg-active);
+  color: var(--panel-gold-bright);
+}
+
+.layer-row[data-on="true"] {
+  border-color: var(--panel-border-strong);
+  background: rgba(213, 164, 82, 0.055);
+}
+
+.layer-ctl button:first-child {
+  width: auto;
+  min-width: 42px;
+  padding: 0 6px;
+  font-size: 9.5px;
+}
+
+.aux-section > .hint:not(.mix-footnote) {
+  padding: 26px 16px;
+  border: 1px dashed var(--panel-border);
+  text-align: center;
+}
+
+.mix-footnote {
+  padding-top: 10px;
+  border-top: 1px solid var(--panel-border);
+}
+
+/* 底图、蒙版、文案、AI */
+.skin-body {
+  padding: 0;
+  gap: 0;
+}
+
+.skin-body .wide {
+  min-height: 48px;
+  border-color: var(--panel-border);
+  color: var(--panel-text);
+}
+
+.skin-body .wide:hover {
+  border-color: var(--panel-border-strong);
+  color: var(--panel-gold-bright);
+}
+
+.backdrop-preview {
+  height: 178px;
+  border: 1px solid var(--panel-border-strong);
+}
+
+.label-preview {
+  width: 120px;
+  height: 120px;
+  box-shadow: 0 0 0 3px var(--panel-gold), 0 0 0 9px #090807;
+}
+
+.row-field {
+  grid-template-columns: 110px 1fr;
+  color: #b8b0a5;
+}
+
+.veil-sliders .slider {
+  grid-template-columns: 116px 1fr 44px;
+  min-height: 34px;
+}
+
+.text-fields {
+  gap: 14px;
+}
+
+.preset-list li {
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--panel-bg-soft);
+}
+
+.preset-list li[data-on="true"] {
+  border-color: var(--panel-border-strong);
+  background: var(--panel-bg-active);
+}
+
+.scene-text {
+  padding: 12px;
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg-soft);
+  color: var(--panel-gold-bright) !important;
+}
+
+/* 曲库 */
+.library-drawer {
+  flex-direction: column;
+}
+
+.library-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.lib-side {
+  width: 210px;
+  gap: 8px;
+  padding: 18px 12px;
+  border-right-color: var(--panel-border);
+}
+
+.lib-side-group button,
+.lib-side-group input {
+  min-height: 36px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  color: var(--panel-text-muted);
+}
+
+.lib-side-group button[data-on="true"],
+.lib-playlist-row[data-on="true"] {
+  border-left: 3px solid var(--panel-gold);
+  background: var(--panel-bg-active);
+  color: var(--panel-gold-bright);
+}
+
+.lib-local-button {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #c9c1b6;
+  text-align: left;
+}
+
+.lib-local-button:hover {
+  border-color: var(--panel-border);
+  background: var(--panel-bg-soft);
+}
+
+.lib-local-button em {
+  color: var(--panel-gold);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.lib-side-title {
+  margin-top: 8px;
+  padding: 0 10px;
+  color: var(--panel-text-muted);
+}
+
+.lib-side-title > div {
+  display: flex;
+  gap: 4px;
+}
+
+.lib-side-title button {
+  width: auto;
+  padding: 0 5px;
+}
+
+.lib-playlist-row {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  border-left: 3px solid transparent;
+  border-radius: 4px;
+}
+
+.lib-playlist-select {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 6px 8px 9px;
+  color: var(--panel-text-muted);
+  text-align: left;
+}
+
+.lib-playlist-select span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-playlist-select em,
+.lib-playlist-export {
+  color: var(--panel-text-dim);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.lib-playlist-export {
+  width: 28px;
+  height: 28px;
+}
+
+.lib-playlist-row:hover,
+.lib-playlist-row:hover .lib-playlist-select {
+  background: var(--panel-bg-soft);
+  color: var(--panel-text);
+}
+
+.lib-main header {
+  min-height: 58px;
+  padding: 10px 16px;
+  border-bottom-color: var(--panel-border);
+  flex-wrap: nowrap;
+}
+
+.lib-current-view {
+  min-width: 98px;
+  overflow: hidden;
+  color: var(--panel-gold-bright);
+  font-family: var(--font-panel-title);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-actions {
+  padding: 9px 16px;
+  border-bottom-color: var(--panel-border);
+}
+
+.lib-actions button {
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg-soft);
+}
+
+/* 右侧栏及音量沿用原交互，只统一材质与色彩。 */
+.sb-tool {
+  border-radius: 5px;
+  border-color: var(--panel-border);
+  background: rgba(15, 13, 11, 0.76);
+  color: #d8d0c5;
+}
+
+.sb-tool:hover,
+.sb-tool[data-on="true"] {
+  border-color: var(--panel-border-strong);
+  background: var(--panel-bg-active);
+  color: var(--panel-gold-bright);
+}
+
+.sb-volume-flyout {
+  border-color: var(--panel-border);
+  border-radius: 5px;
+  background: var(--panel-bg);
+}
+
+/* 播放控制区音质菜单 */
+.quality-control {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  flex: none;
+}
+
+.controls .quality-trigger span {
+  color: currentColor;
+  font-family: var(--font-cjk);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+
+.quality-popover {
+  position: absolute;
+  right: -4px;
+  bottom: 40px;
+  z-index: 16;
+  width: 286px;
+  padding: 13px;
+  border: 1px solid var(--panel-border-strong);
+  border-radius: 5px;
+  background: var(--panel-bg);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  color: var(--panel-text);
+  text-align: left;
+}
+
+.quality-popover header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 11px;
+}
+
+.quality-popover header div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.quality-popover header b {
+  font-family: var(--font-panel-title);
+  font-size: 13px;
+}
+
+.quality-popover header span,
+.quality-popover header em {
+  color: var(--panel-text-muted);
+  font-size: 9px;
+  font-style: normal;
+}
+
+.quality-options {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.controls .quality-options button {
+  width: auto;
+  height: auto;
+  min-height: 42px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   padding: 7px 9px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--panel-bg-soft);
+}
+
+.controls .quality-options button[data-on="true"] {
+  border-color: var(--panel-border-strong);
+  background: var(--panel-bg-active);
+}
+
+.quality-options button span {
+  color: var(--panel-text);
+  font-size: 10.5px;
+}
+
+.quality-options button em {
+  margin-top: 2px;
+  color: var(--panel-text-muted);
+  font-size: 8.5px;
+  font-style: normal;
+}
+
+.quality-options button[data-unavailable="true"] em::after {
+  content: " · 当前曲目无此档";
+  color: var(--panel-text-dim);
+}
+
+.quality-note {
+  margin: 10px 0 0;
+  color: var(--panel-text-muted);
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.quality-note.error {
+  color: var(--panel-danger);
+}
+
+/* 右键菜单、布局条也归入同一材质，避免弹层突然回到灰色玻璃风。 */
+.ctx-menu,
+.layout-bar {
+  border-color: var(--panel-border);
+  border-radius: 5px;
+  background: var(--panel-bg);
+  color: var(--panel-text);
+}
+
+.ctx-menu button:hover,
+.layout-bar button:hover {
+  background: var(--panel-bg-active);
+  color: var(--panel-gold-bright);
+}
+
+@media (max-width: 860px) {
+  .drawer,
+  .online-drawer,
+  .settings-drawer,
+  .skin-editor,
+  .mix-panel,
+  .library-drawer {
+    width: calc(100% - 28px);
+  }
+
+  .panel-section {
+    padding-inline: 16px;
+  }
+
+  .lib-side {
+    width: 176px;
+  }
+}
+
+/* ── 音源脚本导入：现在是“音源管理”独立标签页 ─────────── */
+.source-script {
+  margin: 0;
+  padding: 20px 24px;
+  border-radius: 0;
+  background: transparent;
 }
 
 .source-script-row {
@@ -2100,26 +3041,29 @@ header button.danger,
   justify-content: space-between;
   gap: 8px;
   font-size: 11px;
-  color: #ddd9d2;
+  color: var(--panel-text);
 }
 
 .source-script-actions {
   display: flex;
-  gap: 4px;
+  gap: 8px;
   flex: none;
 }
 
 .source-script-actions button {
-  padding: 3px 9px;
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #c2beb7;
-  font-size: 10.5px;
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--panel-bg-soft);
+  color: #d7d0c6;
+  font-size: 11px;
 }
 
 .source-script-actions button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.16);
-  color: #fff;
+  border-color: var(--panel-border-strong);
+  background: var(--panel-bg-active);
+  color: var(--panel-text);
 }
 
 .source-script-actions button:disabled {
@@ -2127,7 +3071,7 @@ header button.danger,
 }
 
 .source-script .hint {
-  margin: 5px 0 0;
+  margin: 0;
 }
 
 /* ── 布局编辑：右侧栏顺序 ──────────────────────────────── */
@@ -2137,12 +3081,12 @@ header button.danger,
   right: calc(var(--rail-w) + 10px);
   top: 50%;
   translate: 0 -50%;
-  width: 152px;
+  width: 196px;
   padding: 9px 10px;
-  border-radius: 8px;
-  background: rgba(14, 14, 14, 0.94);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: #ddd9d2;
+  border-radius: 5px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  color: var(--panel-text);
 }
 
 .layout-order-title {
@@ -2152,14 +3096,15 @@ header button.danger,
   gap: 6px;
   margin: 0 0 6px;
   font-size: 11px;
-  color: #cbc7c0;
+  color: var(--panel-gold-bright);
 }
 
 .layout-order-title button {
   padding: 2px 6px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #b6b2ab;
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg-soft);
+  color: #d7d0c6;
   font-size: 10px;
 }
 
@@ -2178,8 +3123,8 @@ header button.danger,
   align-items: center;
   gap: 3px;
   padding: 3px 4px 3px 7px;
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  background: var(--panel-bg-soft);
   font-size: 11px;
 }
 
@@ -2187,13 +3132,13 @@ header button.danger,
   width: 19px;
   height: 19px;
   border-radius: 4px;
-  color: #b6b2ab;
+  color: #d7d0c6;
   line-height: 1;
 }
 
 .layout-order li button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.14);
-  color: #fff;
+  background: var(--panel-bg-active);
+  color: var(--panel-gold-bright);
 }
 
 .layout-order li button:disabled {
