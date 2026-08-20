@@ -19,7 +19,49 @@ export const LAYOUT_PARTS = [
   { id: "disc", label: "黑胶" },
   { id: "actions", label: "收藏与播放次数" },
   { id: "transport", label: "进度条与控制" },
+  { id: "sidebar", label: "右侧栏" },
 ] as const
+
+/**
+ * 右侧栏里的按钮。**顺序可改**，所以这里给的是默认顺序而不是渲染顺序。
+ *
+ * 位置走 LAYOUT_PARTS 那套偏移（整条一起搬），顺序单独存一份 id 列表 ——
+ * 两件事的数据形状不一样，混在一起会让偏移那套变复杂，而它现在很干净。
+ */
+export const SIDEBAR_TOOLS = [
+  { id: "volume", label: "音量", hint: "音量（M 静音）" },
+  { id: "playback", label: "播放设置", hint: "播放设置 (E)" },
+  { id: "skin", label: "皮肤设置", hint: "皮肤设置 (S)" },
+  { id: "online", label: "在线音乐", hint: "在线音乐 (F)" },
+  { id: "layout", label: "编辑布局", hint: "编辑布局（拖动部件调位置）" },
+  { id: "mix", label: "混音", hint: "混音 (X)" },
+] as const
+
+export type SidebarToolId = (typeof SIDEBAR_TOOLS)[number]["id"]
+
+const DEFAULT_SIDEBAR_ORDER: SidebarToolId[] = SIDEBAR_TOOLS.map((t) => t.id)
+
+/**
+ * 存下来的顺序 → 实际渲染顺序。
+ *
+ * 存的那份可能过期：以后加了新按钮，老用户的列表里没有它；删了按钮，老列表里
+ * 还留着。所以每次都按 SIDEBAR_TOOLS 校一遍 —— 认识的按存的顺序排，
+ * 存里没有的（新增的）补到末尾，不认识的（已删的）丢掉。
+ */
+export function sidebarOrderOf(saved: string[] | null): SidebarToolId[] {
+  if (!saved) return DEFAULT_SIDEBAR_ORDER
+  const known = new Set<string>(DEFAULT_SIDEBAR_ORDER)
+  // seen 同时兼两件事：去重，以及算出"存里缺了哪些"。重复项会让同一个按钮渲染两次，
+  // React 还会因为 key 撞车报警
+  const seen = new Set<string>()
+  const kept = saved.filter((id): id is SidebarToolId => {
+    if (!known.has(id) || seen.has(id)) return false
+    seen.add(id)
+    return true
+  })
+  const missing = DEFAULT_SIDEBAR_ORDER.filter((id) => !seen.has(id))
+  return [...kept, ...missing]
+}
 
 export type PartId = (typeof LAYOUT_PARTS)[number]["id"]
 
@@ -35,6 +77,8 @@ const SCHEMA = 1
 type LayoutFile = {
   schemaVersion: number
   offsets: Offsets
+  /** 右侧栏按钮顺序。没改过就不写，让默认顺序生效 */
+  sidebarOrder?: string[]
 }
 
 /**
@@ -75,6 +119,8 @@ export function offsetsToVars(offsets: Offsets): Record<string, string> {
 
 type LayoutState = {
   offsets: Offsets
+  /** 右侧栏按钮顺序。null = 没改过，用默认 */
+  sidebarOrder: string[] | null
   /** 编辑模式：部件描边、可拖动，且本来的点击行为一律不触发 */
   editing: boolean
   /** 最近动过的部件。方向键微调作用在它身上 */
@@ -87,7 +133,11 @@ type LayoutState = {
   setOffset(id: PartId, off: Offset): void
   /** 相对当前偏移挪一点（方向键微调） */
   nudge(id: PartId, dx: number, dy: number): void
-  /** 不传 id 就是全部复位 */
+  /** 把右侧栏里的某个按钮上移/下移一格 */
+  moveSidebarTool(id: SidebarToolId, dir: -1 | 1): void
+  /** 右侧栏顺序恢复默认 */
+  resetSidebarOrder(): void
+  /** 不传 id 就是全部复位。位置与顺序一起还原 */
   reset(id?: PartId): void
   /** 落盘。拖动过程中不落，松手调一次 */
   persist(): void
@@ -99,19 +149,25 @@ export const useLayout = create<LayoutState>((set, get) => {
   const save = () => {
     window.clearTimeout(saveTimer)
     saveTimer = window.setTimeout(() => {
-      const file: LayoutFile = { schemaVersion: SCHEMA, offsets: get().offsets }
+      const file: LayoutFile = {
+        schemaVersion: SCHEMA,
+        offsets: get().offsets,
+        ...(get().sidebarOrder ? { sidebarOrder: get().sidebarOrder ?? undefined } : {}),
+      }
       void platform.writeConfig("layout", file)
     }, 400)
   }
 
   return {
     offsets: {},
+    sidebarOrder: null,
     editing: false,
     selected: null,
 
     async load() {
       const raw = await platform.readConfig<LayoutFile>("layout")
       if (raw?.offsets) set({ offsets: raw.offsets })
+      if (Array.isArray(raw?.sidebarOrder)) set({ sidebarOrder: raw.sidebarOrder })
     },
 
     setEditing(on) {
@@ -132,6 +188,21 @@ export const useLayout = create<LayoutState>((set, get) => {
       save()
     },
 
+    moveSidebarTool(id, dir) {
+      const cur = [...sidebarOrderOf(get().sidebarOrder)]
+      const i = cur.indexOf(id)
+      const j = i + dir
+      if (i < 0 || j < 0 || j >= cur.length) return
+      ;[cur[i], cur[j]] = [cur[j], cur[i]]
+      set({ sidebarOrder: cur })
+      save()
+    },
+
+    resetSidebarOrder() {
+      set({ sidebarOrder: null })
+      save()
+    },
+
     reset(id) {
       if (id) {
         set((s) => {
@@ -140,7 +211,7 @@ export const useLayout = create<LayoutState>((set, get) => {
           return { offsets: next }
         })
       } else {
-        set({ offsets: {} })
+        set({ offsets: {}, sidebarOrder: null })
       }
       save()
     },

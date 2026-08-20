@@ -1,3 +1,6 @@
+import { useMemo, type ReactElement } from "react"
+
+import { SIDEBAR_TOOLS, sidebarOrderOf, useLayout, type SidebarToolId } from "@/store/layout"
 import VolumeControl from "./VolumeControl"
 
 /**
@@ -12,7 +15,69 @@ import VolumeControl from "./VolumeControl"
  * 不需要额外的命中区域。focus-within 那半边是给键盘用户的，Tab 进来也会显形。
  *
  * data-keep-panel：点这里是"换一个面板"，不是"点到面板外面去了"，不该触发关闭。
+ * data-part：整条侧栏也能在布局编辑里搬位置，按钮顺序则在布局条里调。
  */
+
+/** 图标只跟 id 有关，与顺序无关，所以单独放一张表 */
+const ICONS: Record<Exclude<SidebarToolId, "volume">, ReactElement> = {
+  playback: (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        d="M4 7h10M18 7h2M4 12h3M11 12h9M4 17h8M16 17h4"
+      />
+      <circle cx="16" cy="7" r="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="9" cy="12" r="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="14" cy="17" r="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  ),
+  skin: (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+        d="M4 16.5 13 7.5l3.5 3.5-9 9H4z"
+      />
+      <path fill="none" stroke="currentColor" strokeWidth="1.6" d="m15 5.5 3.5 3.5" />
+    </svg>
+  ),
+  online: (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        d="m15.5 15.5 4 4"
+      />
+    </svg>
+  ),
+  layout: (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <rect x="3" y="4" width="8" height="7" rx="1.4" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <rect x="13" y="4" width="8" height="11" rx="1.4" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <rect x="3" y="13" width="8" height="7" rx="1.4" fill="none" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  ),
+  mix: (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        d="M3 18V9M8 18V5M13 18v-6M18 18V8M21 18v-4"
+      />
+    </svg>
+  ),
+}
+
 export default function Sidebar({
   onOpenPlayback,
   onOpenSkin,
@@ -32,105 +97,42 @@ export default function Sidebar({
   /** 当前打开的面板，用来给对应按钮加选中态 */
   active?: string | null
 }) {
+  // 订阅原始值再算，不要在选择器里算 —— sidebarOrderOf 每次返回新数组，
+  // 放进选择器等于每次 store 变化都判定"变了"，整条栏跟着重渲染
+  const saved = useLayout((s) => s.sidebarOrder)
+  const order = useMemo(() => sidebarOrderOf(saved), [saved])
+
+  const handlers: Record<Exclude<SidebarToolId, "volume">, (() => void) | undefined> = {
+    playback: onOpenPlayback,
+    skin: onOpenSkin,
+    online: onOpenOnline,
+    layout: onOpenLayout,
+    mix: onOpenMix,
+  }
+
   return (
-    <div className="sidebar" data-keep-panel>
-      <VolumeControl />
+    <div className="sidebar" data-keep-panel data-part="sidebar">
+      {order.map((id) => {
+        if (id === "volume") return <VolumeControl key={id} />
 
-      <button
-        className="sb-tool"
-        data-on={active === "playback"}
-        onClick={onOpenPlayback}
-        aria-label="播放设置"
-        aria-pressed={active === "playback"}
-        title="播放设置 (E)"
-      >
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-          <path
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-            d="M4 7h10M18 7h2M4 12h3M11 12h9M4 17h8M16 17h4"
-          />
-          <circle cx="16" cy="7" r="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
-          <circle cx="9" cy="12" r="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
-          <circle cx="14" cy="17" r="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
-        </svg>
-      </button>
+        const tool = SIDEBAR_TOOLS.find((t) => t.id === id)
+        if (!tool) return null
+        const on = id === "layout" ? !!layoutEditing : active === id
 
-      <button
-        className="sb-tool"
-        data-on={active === "skin"}
-        onClick={onOpenSkin}
-        aria-label="皮肤设置"
-        aria-pressed={active === "skin"}
-        title="皮肤设置 (S)"
-      >
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-          <path
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinejoin="round"
-            d="M4 16.5 13 7.5l3.5 3.5-9 9H4z"
-          />
-          <path fill="none" stroke="currentColor" strokeWidth="1.6" d="m15 5.5 3.5 3.5" />
-        </svg>
-      </button>
-
-      <button
-        className="sb-tool"
-        data-on={active === "online"}
-        onClick={onOpenOnline}
-        aria-label="在线音乐"
-        aria-pressed={active === "online"}
-        title="在线音乐 (F)"
-      >
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-          <circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" strokeWidth="1.6" />
-          <path
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-            d="m15.5 15.5 4 4"
-          />
-        </svg>
-      </button>
-
-      <button
-        className="sb-tool"
-        data-on={layoutEditing}
-        onClick={onOpenLayout}
-        aria-label="编辑布局"
-        aria-pressed={layoutEditing}
-        title="编辑布局（拖动部件调位置）"
-      >
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-          <rect x="3" y="4" width="8" height="7" rx="1.4" fill="none" stroke="currentColor" strokeWidth="1.6" />
-          <rect x="13" y="4" width="8" height="11" rx="1.4" fill="none" stroke="currentColor" strokeWidth="1.6" />
-          <rect x="3" y="13" width="8" height="7" rx="1.4" fill="none" stroke="currentColor" strokeWidth="1.6" />
-        </svg>
-      </button>
-
-      <button
-        className="sb-tool"
-        data-on={active === "mix"}
-        onClick={onOpenMix}
-        aria-label="混音"
-        aria-pressed={active === "mix"}
-        title="混音 (X)"
-      >
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-          <path
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-            d="M3 18V9M8 18V5M13 18v-6M18 18V8M21 18v-4"
-          />
-        </svg>
-      </button>
+        return (
+          <button
+            key={id}
+            className="sb-tool"
+            data-on={on}
+            onClick={handlers[id]}
+            aria-label={tool.label}
+            aria-pressed={on}
+            title={tool.hint}
+          >
+            {ICONS[id]}
+          </button>
+        )
+      })}
     </div>
   )
 }

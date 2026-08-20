@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest"
 
-import { DESIGN_H, DESIGN_W, clampOffset, offsetsToVars } from "@/store/layout"
+import {
+  DESIGN_H,
+  DESIGN_W,
+  SIDEBAR_TOOLS,
+  clampOffset,
+  offsetsToVars,
+  sidebarOrderOf,
+} from "@/store/layout"
 
 /** 歌词栏的默认位置与大小，取自 ui.css */
 const lyrics = { x: 8, y: 268, w: 208, h: 152 }
@@ -47,5 +54,37 @@ describe("偏移 → CSS 变量", () => {
 
   it("什么都没动就是空的", () => {
     expect(offsetsToVars({})).toEqual({})
+  })
+})
+
+describe("右侧栏顺序：存下来的那份可能过期", () => {
+  const DEFAULT = SIDEBAR_TOOLS.map((t) => t.id)
+
+  it("没存过就用默认顺序", () => {
+    expect(sidebarOrderOf(null)).toEqual(DEFAULT)
+  })
+
+  it("存过就按存的来", () => {
+    const custom = [...DEFAULT].reverse()
+    expect(sidebarOrderOf(custom)).toEqual(custom)
+  })
+
+  it("以后新增的按钮补到末尾，不会因为老配置而消失", () => {
+    // 老用户存的列表里只有前两个
+    const stale = DEFAULT.slice(0, 2)
+    const got = sidebarOrderOf(stale)
+    expect(got.slice(0, 2)).toEqual(stale)
+    expect(new Set(got)).toEqual(new Set(DEFAULT))
+    expect(got).toHaveLength(DEFAULT.length)
+  })
+
+  it("已删掉的按钮从老配置里丢掉，不会渲染出一个空位", () => {
+    const got = sidebarOrderOf(["nope", ...DEFAULT, "gone"])
+    expect(got).toEqual(DEFAULT)
+  })
+
+  it("重复项不会让同一个按钮出现两次", () => {
+    const got = sidebarOrderOf([DEFAULT[0], DEFAULT[0], ...DEFAULT])
+    expect(got).toHaveLength(new Set(got).size)
   })
 })

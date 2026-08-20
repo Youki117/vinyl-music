@@ -3,10 +3,13 @@ import { useEffect, useRef } from "react"
 import {
   DESIGN_W,
   LAYOUT_PARTS,
+  SIDEBAR_TOOLS,
   clampOffset,
+  sidebarOrderOf,
   useLayout,
   type Offset,
   type PartId,
+  type SidebarToolId,
 } from "@/store/layout"
 
 const PART_LABEL = new Map<string, string>(LAYOUT_PARTS.map((p) => [p.id, p.label]))
@@ -23,7 +26,9 @@ export default function LayoutEdit() {
   const editing = useLayout((s) => s.editing)
   const offsets = useLayout((s) => s.offsets)
   const selected = useLayout((s) => s.selected)
-  const { setEditing, setOffset, nudge, reset, persist, select } = useLayout.getState()
+  const sidebarOrder = useLayout((s) => s.sidebarOrder)
+  const { setEditing, setOffset, nudge, reset, persist, select, moveSidebarTool, resetSidebarOrder } =
+    useLayout.getState()
   const overlayRef = useRef<HTMLDivElement>(null)
 
   // 方向键微调。编辑态下这几个键归这里管 —— App 那边的快捷键会让开（见 App.tsx）
@@ -110,6 +115,15 @@ export default function LayoutEdit() {
     return o && (o.x !== 0 || o.y !== 0)
   })
 
+  /*
+   * 侧栏按钮顺序改用列表 + 上下移，而不是在栏里拖。
+   *
+   * 编辑层已经把"拖动 = 搬部件"占掉了；同一个手势在侧栏里换成"拖动 = 换顺序"，
+   * 用户没法预期哪次是哪个。两件事分开：整条栏拖着走，里面的顺序在这儿点。
+   */
+  const order = sidebarOrderOf(sidebarOrder)
+  const toolLabel = (id: SidebarToolId) => SIDEBAR_TOOLS.find((t) => t.id === id)?.label ?? id
+
   return (
     <div ref={overlayRef} className="layout-edit" onPointerDown={beginDrag} data-keep-panel>
       <div className="layout-bar" onPointerDown={(e) => e.stopPropagation()}>
@@ -133,6 +147,42 @@ export default function LayoutEdit() {
           完成
         </button>
       </div>
+
+      {selected === "sidebar" && (
+        <div className="layout-order" onPointerDown={(e) => e.stopPropagation()}>
+          <p className="layout-order-title">
+            右侧栏顺序
+            {sidebarOrder && (
+              <button onClick={resetSidebarOrder} title="顺序恢复默认">
+                恢复默认
+              </button>
+            )}
+          </p>
+          <ol>
+            {order.map((id, i) => (
+              <li key={id}>
+                <span>{toolLabel(id)}</span>
+                <button
+                  onClick={() => moveSidebarTool(id, -1)}
+                  disabled={i === 0}
+                  aria-label={`${toolLabel(id)} 上移`}
+                  title="上移"
+                >
+                  ↑
+                </button>
+                <button
+                  onClick={() => moveSidebarTool(id, 1)}
+                  disabled={i === order.length - 1}
+                  aria-label={`${toolLabel(id)} 下移`}
+                  title="下移"
+                >
+                  ↓
+                </button>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
     </div>
   )
 }

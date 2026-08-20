@@ -1900,6 +1900,18 @@ header button.danger,
   translate: var(--off-actions-x, 0) var(--off-actions-y, 0);
 }
 
+.sidebar {
+  translate: var(--off-sidebar-x, 0) var(--off-sidebar-y, 0);
+}
+
+/*
+ * 编辑态强制显形。侧栏平时靠 :hover 才浮现，而编辑层盖在最上面接住了所有指针事件，
+ * hover 永远不会触发 —— 不强制显示的话，用户要搬的东西根本看不见。
+ */
+.content[data-layout-edit] .sidebar {
+  opacity: 1;
+}
+
 .playback {
   translate: var(--off-transport-x, 0) var(--off-transport-y, 0);
 }
@@ -2068,4 +2080,74 @@ header button.danger,
 
 .source-script .hint {
   margin: 5px 0 0;
+}
+
+/* ── 布局编辑：右侧栏顺序 ──────────────────────────────── */
+/* 贴着侧栏左边出现，改完就能在旁边看到效果，不用来回看两处 */
+.layout-order {
+  position: absolute;
+  right: calc(var(--rail-w) + 10px);
+  top: 50%;
+  translate: 0 -50%;
+  width: 152px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: rgba(14, 14, 14, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #ddd9d2;
+}
+
+.layout-order-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin: 0 0 6px;
+  font-size: 11px;
+  color: #cbc7c0;
+}
+
+.layout-order-title button {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #b6b2ab;
+  font-size: 10px;
+}
+
+.layout-order ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.layout-order li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 4px 3px 7px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 11px;
+}
+
+.layout-order li button {
+  width: 19px;
+  height: 19px;
+  border-radius: 4px;
+  color: #b6b2ab;
+  line-height: 1;
+}
+
+.layout-order li button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+.layout-order li button:disabled {
+  color: #55524d;
 }
