@@ -1,6 +1,39 @@
 import { defineConfig } from "vite"
 import react from "@vitejs/plugin-react"
 import { fileURLToPath, URL } from "node:url"
+import { readdirSync } from "node:fs"
+
+/*
+ * 构建闸门：源码树里放着音源脚本时，默认**不许**产出发布包。
+ *
+ * src/source/index.ts 用 import.meta.glob 收 builtin/ 下的 *.js —— 目录里放什么就
+ * 静默打包什么。自用构建想带上它是合理的，但同一条命令也会被拿去打发布包，那份
+ * 聚合音源脚本一旦进了公开安装包，"不随仓库分发"这条线就等于白划了。
+ * （这不是假设：本项目第一次打 v0.1.0 就这么把脚本打进 dist 了，发出去之前才发现。）
+ *
+ * 拦的正是"顺手构建一下"。确实要带就显式声明 VINYL_BUNDLE_SOURCE=1。dev 不拦。
+ */
+function assertNoAccidentalSourceScript(): void {
+  if (!process.argv.includes("build") || process.env.VINYL_BUNDLE_SOURCE === "1") return
+  let scripts: string[] = []
+  try {
+    scripts = readdirSync(fileURLToPath(new URL("./src/source/builtin", import.meta.url))).filter(
+      (f) => f.endsWith(".js"),
+    )
+  } catch {
+    return // 目录不存在就是没有脚本
+  }
+  if (scripts.length === 0) return
+  throw new Error(
+    [
+      `src/source/builtin/ 里有音源脚本（${scripts.join("、")}），它会被打进发布包。`,
+      "发布包不该带音源脚本 —— 先把它移出该目录再构建。",
+      "确实要带（自用构建）请显式声明：VINYL_BUNDLE_SOURCE=1 npm run tauri build",
+    ].join(String.fromCharCode(10)),
+  )
+}
+
+assertNoAccidentalSourceScript()
 
 // Tauri 期望一个固定端口，且失败时不要静默换端口
 const HOST = process.env.TAURI_DEV_HOST
