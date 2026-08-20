@@ -57,7 +57,13 @@ const page = ctx.pages()[0] ?? (await ctx.waitForEvent("page"))
 const errors = []
 page.on("pageerror", (e) => errors.push(e.message))
 
-// 应用自己的源，window.__source 由 App.tsx 挂上（那里写了为什么需要这个入口）
+/*
+ * 音源不在启动路径上了（内存：整个 musicSdk 加一个 Worker，见 src/source/boot.ts），
+ * 所以这里要显式把它拉起来 —— 这正是用户第一次点开搜索时发生的事。
+ * window.__source 由 boot.ts 在拉起后挂上。
+ */
+await page.waitForFunction(() => !!window.__initSource, null, { timeout: 30000 })
+await page.evaluate(() => window.__initSource())
 await page.waitForFunction(() => !!window.__source, null, { timeout: 30000 })
 
 console.log(`关键词「${KEYWORD}」，平台：${TARGETS.map((t) => NAMES[t] ?? t).join(" ")}\n`)

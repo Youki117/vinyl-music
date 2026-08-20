@@ -21,55 +21,30 @@ import MixPanel from "@/ui/panels/Mix"
 import { engine } from "@/audio/engine"
 import { usePlayer } from "@/store/player"
 import { useSkin } from "@/store/skin"
+import { ensureSource } from "@/source/boot"
 import { useLayout } from "@/store/layout"
 import { isAudioFile, isLyricFile, isPlaylistFile, platform, type FileRef } from "@/platform"
 /*
- * 在线音源**按需加载**，不在启动路径上。
+ * 给端到端核查用的入口（scripts/verify-*.mjs）。
  *
- * 这一条是踩出来的：音源依赖的 node polyfill（crypto/zlib/Buffer）目前在打包构建里
- * 还没配通，同步 import 会让整个应用启动即白屏。改成动态 import 之后，音源没配好
- * 也只影响搜索本身，播放器照常能用 —— 这个隔离本来就该有，不该让一个可选功能
- * 拖垮主流程。
+ * 曲库与播放器这两个是**可写**的。之所以仍然接受：它们不提供任何用户点不到的能力
+ * （界面上本来就能建歌单、收藏、播放），而 store 这一层恰恰是最容易出回归、又最没法
+ * 从界面上断言的地方 —— 曲库迁移、在线曲目的 id 稳定性、播放统计的计数规则，
+ * 靠点按钮验不出来。应用是纯本地的，不加载任何远端页面，没有外部代码能碰到 window。
  *
- * window.__source 是给端到端核查用的入口（scripts/verify-source.mjs）：音源请求必须
- * 走 Tauri 的 plugin-http 从 Rust 侧发，普通浏览器里没有 __TAURI_INTERNALS__，
- * 导航到 dev server 又会被 ACL 当远程源挡掉，只有在应用自己的源里才测得到。
- * 暴露的都是查询函数，不含任何写权限。
+ * 在线音源的入口（window.__source）由 source/boot.ts 在**第一次真的要用时**挂上，
+ * 不在启动路径上 —— 理由见那里。核查脚本要先调 window.__initSource()。
  */
 declare global {
   interface Window {
-    __source?: typeof import("@/source")
     __lib?: typeof useLibrary
     __player?: typeof usePlayer
   }
 }
 
-/*
- * 曲库与播放器的 store 也挂出来，给 scripts/verify-*.mjs 用。
- *
- * 与 __source 不同，这两个是**可写**的。之所以仍然接受：它们不提供任何用户点不到的
- * 能力（界面上本来就能建歌单、收藏、播放），而 store 这一层恰恰是最容易出回归、
- * 又最没法从界面上断言的地方 —— 曲库迁移、在线曲目的 id 稳定性、播放统计的计数规则，
- * 靠点按钮验不出来。应用是纯本地的，不加载任何远端页面，没有外部代码能碰到 window。
- */
 window.__lib = useLibrary
 window.__player = usePlayer
-void import("@/source")
-  .then(async (m) => {
-    window.__source = m
-    /*
-     * 内置音源在这里自动启用，用户不需要先去哪里「导入音源」。理由见
-     * source/builtin/UPSTREAM.md：能用的音源脚本寿命以周计，让用户自己找一份，
-     * 等于这个功能不存在。用户导入自己的脚本会覆盖它，两条路并存。
-     *
-     * 失败只警告不抛：搜索和歌词不依赖音源脚本，播放本地文件更不依赖。
-     */
-    const loaded = await m.loadBuiltinSource()
-    console.info(`[source] 内置音源就绪：${loaded.info.name}｜${Object.keys(loaded.sources).join(",")}`)
-  })
-  .catch((err) => {
-    console.warn("[source] 在线音源加载失败，搜索不可用，播放器其余功能不受影响", err)
-  })
+window.__initSource = ensureSource
 
 /** 右侧抽屉同一时刻只能开一个 */
 type PanelId = "playlist" | "skin" | "playback" | "mix" | "online" | null

@@ -3,6 +3,7 @@ import { create } from "zustand"
 import { platform } from "@/platform"
 import { engine, type EngineStatus } from "@/audio/engine"
 import { clampGainDb, gainDbFor, loadLoudness } from "@/audio/loudness"
+import { ensureSource } from "@/source/boot"
 import { localRef, useLibrary, type Track } from "./library"
 import { ShuffleOrder } from "./shuffle"
 
@@ -83,11 +84,12 @@ const shuffle = new ShuffleOrder()
 /**
  * 在线曲目的播放与元数据。
  *
- * `@/source` 一律**动态引入**：它会拉起整个 vendored musicSdk（几百 KB），
- * 只放本地文件的用户不该为此付出加载成本 —— App.tsx 里也是这么处理的。
+ * 音源模块**用到才拉**：它会带起整个 vendored musicSdk、一串 node 垫片，
+ * 还有一个跑音源脚本的 Worker。只放本地文件的用户从头到尾用不上这些。
+ * 详见 source/boot.ts。
  */
 async function onlineModule() {
-  return import("@/source")
+  return ensureSource()
 }
 
 /** Track 的在线来源 → src/source 的 OnlineTrack。两边字段名有出入，转换只此一处。 */

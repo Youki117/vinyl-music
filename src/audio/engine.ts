@@ -49,6 +49,14 @@ class Engine {
   /** pause() 的延迟停止计时器。play() 必须把它取消掉，见 pause() 里的说明。 */
   private pauseTimer = 0
 
+  /**
+   * 正在把 `<audio>` 清空以释放上一段媒体（见 attachBytes）。
+   *
+   * 清空期间元素上那个常驻的 error 监听不能当真：规范说没有 src 时不该报错，
+   * 但真让它报了一次，界面就会无缘无故显示"音频文件无法播放"。
+   */
+  private resetting = false
+
   private sleepHandle = 0
   private sleepAt: number | null = null
   private sleepAfterTrack = false
@@ -62,7 +70,14 @@ class Engine {
   private get el(): HTMLAudioElement {
     if (!this._el) {
       const el = new Audio()
-      el.preload = "auto"
+      /*
+       * preload 用 "metadata" 而不是 "auto"。
+       *
+       * 我们喂给它的是 blob:，整份数据本来就已经在内存里了 —— "auto" 的意思是
+       * 让媒体管线再把整条流缓冲一份进它自己的缓存，等于同一首歌在内存里存两遍。
+       * 没有网络这一环，预缓冲买不到任何东西：跳转照样是瞬时的。
+       */
+      el.preload = "metadata"
       el.playbackRate = this._speed
       el.preservesPitch = true
       // 挂进 DOM（隐藏）而不是留在游离状态：行为完全一样，但外部可观测，
@@ -74,6 +89,7 @@ class Engine {
       el.addEventListener("durationchange", () => this.emitProgress())
       el.addEventListener("ended", () => this.onEnded?.())
       el.addEventListener("error", () => {
+        if (this.resetting) return
         this.setStatus("error", "音频文件无法播放（可能已损坏或格式不受支持）")
       })
       this._el = el
@@ -443,6 +459,24 @@ class Engine {
 
   /** 字节 → Blob → `<audio>`，等到 loadedmetadata 才算成功。本地与在线共用。 */
   private async attachBytes(bytes: Uint8Array): Promise<void> {
+    /*
+     * 先让 `<audio>` 真正**放掉上一段媒体资源**，再挂新的。
+     *
+     * 只 revokeObjectURL 是不够的：撤销的只是那个"名字"，元素这边还攥着已经解码和
+     * 缓冲的那一份数据，直到它自己觉得可以丢。实测（scripts/measure-memory.mjs）
+     * 连播八首，渲染进程从 107MB 一路涨到 286MB，每切一首涨二十几 MB，而强制 GC
+     * 只能收回 12MB —— 说明不是没回收的垃圾，是真被攥着。
+     *
+     * removeAttribute("src") + load() 会走一遍资源选择算法并把旧资源判定为不再需要，
+     * 这是让它松手的唯一办法。
+     */
+    const el = this.el
+    this.resetting = true
+    el.pause()
+    el.removeAttribute("src")
+    el.load()
+    this.resetting = false
+
     this.revoke()
     // A-B 区间是按秒记的，换了曲目就没有意义了，必须清掉 ——
     // 否则新歌会在上一首的 B 点位置莫名其妙往回跳

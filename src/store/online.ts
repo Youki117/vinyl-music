@@ -1,6 +1,7 @@
 import { create } from "zustand"
 
 import { SOURCES, type SourceId } from "@/source/catalog"
+import { ensureSource } from "@/source/boot"
 import { onlineToTrack, useLibrary, type Track } from "./library"
 import { usePlayer } from "./player"
 
@@ -14,12 +15,12 @@ const MAX_LIST_PAGES = 10
 const MAX_LIST_TRACKS = 1000
 
 /**
- * `@/source` 一律**动态引入**：它会拉起整个 vendored musicSdk（几百 KB 加一串 node
- * polyfill）。只放本地文件的用户不该为一个没打开过的面板付这份加载成本 ——
- * App.tsx 与 store/player.ts 也是这么处理的。
+ * 音源模块**用到才拉**（`ensureSource` 负责只拉一次并启用内置音源）。它会带起整个
+ * vendored musicSdk、一串 node 垫片、以及一个跑音源脚本的 Worker —— 只放本地文件的
+ * 用户不该为一个没打开过的面板付这份内存。理由详见 source/boot.ts。
  */
 async function sourceModule() {
-  return import("@/source")
+  return ensureSource()
 }
 
 /**
