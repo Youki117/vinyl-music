@@ -1,7 +1,7 @@
 import { create } from "zustand"
 
 import { isLyricFile, platform, type FileRef } from "@/platform"
-import { readCover, readMetadata } from "@/audio/metadata"
+import { readCover, readMetadataLazy } from "@/audio/metadata"
 import { formatM3u, matchByName, parseM3u } from "@/lib/m3u"
 import { baseName, stripExt } from "@/lib/text"
 
@@ -420,8 +420,13 @@ export const useLibrary = create<LibraryState>((set, get) => {
 
       const readOne = async (ref: FileRef, i: number): Promise<void> => {
         try {
-          const bytes = await platform.readFile(ref)
-          const meta = await readMetadata(ref, bytes)
+          // 只为读标签而整读，是导入耗时与内存峰值（实测 701MB）的大头。
+          // readMetadataLazy 按需取片，取不动了才退回整读。
+          const meta = await readMetadataLazy(
+            ref,
+            (offset, length) => platform.readSlice(ref, offset, length),
+            () => platform.readFile(ref),
+          )
           // 内嵌歌词优先，没有就找旁边的同名 .lrc —— 网上下到的音频几乎都靠这个
           let lyrics = meta.lyrics
           if (!lyrics) {

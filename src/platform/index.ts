@@ -35,6 +35,8 @@ export const platform = {
   pickImage: (): Promise<FileRef | null> => impl().then((p) => p.pickImage()),
 
   readFile: (ref: FileRef): Promise<Uint8Array> => impl().then((p) => p.readFile(ref)),
+  readSlice: (ref: FileRef, offset: number, length: number): Promise<Uint8Array> =>
+    impl().then((p) => p.readSlice(ref, offset, length)),
   readText: (ref: FileRef): Promise<string> => impl().then((p) => p.readText(ref)),
   readSidecar: (ref: FileRef, ext: string): Promise<string | null> =>
     impl().then((p) => p.readSidecar(ref, ext)),

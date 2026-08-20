@@ -30,6 +30,15 @@ export interface Platform {
   /** 读取文件全部字节。 */
   readFile(ref: FileRef): Promise<Uint8Array>
 
+  /**
+   * 读取文件的一段字节。越过文件尾时返回实际能读到的部分，不报错。
+   *
+   * 导入只为读标签，却要把整首无损搬过 IPC —— 这是导入耗时与内存峰值的大头。
+   * 元数据解析走 audio/metadata.ts 的 SliceTokenizer，按需取片，
+   * 通常一首歌只读头部一片；ogg 求时长时会再取一片尾部。
+   */
+  readSlice(ref: FileRef, offset: number, length: number): Promise<Uint8Array>
+
   /** 读取文本文件，自动判码（UTF-8 / GBK / UTF-16）。 */
   readText(ref: FileRef): Promise<string>
 

@@ -101,6 +101,13 @@ export function create(): Platform {
       return new Uint8Array(await file.arrayBuffer())
     },
 
+    async readSlice(ref, offset, length) {
+      const file = handles.get(ref.id)
+      if (!file) throw new Error(`浏览器会话中找不到文件句柄：${ref.name}（刷新页面后需重新导入）`)
+      // Blob.slice 自己会把越界的终点夹到文件尾，语义与 Rust 侧一致
+      return new Uint8Array(await file.slice(offset, offset + length).arrayBuffer())
+    },
+
     async readText(ref) {
       const file = handles.get(ref.id)
       if (!file) throw new Error(`浏览器会话中找不到文件句柄：${ref.name}`)

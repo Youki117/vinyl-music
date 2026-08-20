@@ -1,5 +1,6 @@
 mod grant;
 mod scan;
+mod slice;
 #[cfg(target_os = "windows")]
 mod smtc;
 #[cfg(target_os = "windows")]
@@ -61,6 +62,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             scan::scan_audio_files,
             grant::allow_paths,
+            slice::read_file_slice,
             #[cfg(target_os = "windows")]
             smtc::smtc_update
         ])

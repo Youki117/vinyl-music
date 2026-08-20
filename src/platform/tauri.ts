@@ -125,6 +125,17 @@ export function create(): Platform {
       return fsReadFile(ref.id)
     },
 
+    async readSlice(ref, offset, length) {
+      // 走自家的 read_file_slice 而不是 plugin-fs：插件只给「整个文件」这一种粒度。
+      // Rust 侧回的是裸字节，不经 JSON 编码。
+      const buf = await invoke<ArrayBuffer>("read_file_slice", {
+        path: ref.id,
+        offset,
+        length,
+      })
+      return new Uint8Array(buf)
+    },
+
     async readText(ref) {
       return decodeText(await fsReadFile(ref.id))
     },

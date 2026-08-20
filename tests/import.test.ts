@@ -21,6 +21,12 @@ vi.mock("@/platform", () => ({
       if (ref.id === "boom") throw new Error("读不了")
       return new Uint8Array([1, 2, 3])
     }),
+    // 导入走的是切片，不再整读；延时与失败都挂在这条路上
+    readSlice: vi.fn(async (ref: FileRef) => {
+      await new Promise((r) => setTimeout(r, delays.get(ref.id) ?? 0))
+      if (ref.id === "boom") throw new Error("读不了")
+      return new Uint8Array([1, 2, 3])
+    }),
     readSidecar: vi.fn(async () => null),
     writeConfig: vi.fn(async () => {}),
     readConfig: vi.fn(async () => null),
@@ -30,14 +36,31 @@ vi.mock("@/platform", () => ({
   isLyricFile: () => false,
 }))
 
+const fakeMeta = (ref: FileRef) => ({
+  title: ref.name.replace(/\.mp3$/, ""),
+  artist: "测试",
+  album: "",
+  duration: 1,
+  lyrics: null,
+})
+
 vi.mock("@/audio/metadata", () => ({
-  readMetadata: vi.fn(async (ref: FileRef) => ({
-    title: ref.name.replace(/\.mp3$/, ""),
-    artist: "测试",
-    album: "",
-    duration: 1,
-    lyrics: null,
-  })),
+  readMetadata: vi.fn(async (ref: FileRef) => fakeMeta(ref)),
+  // 照真实实现的形状：先取一片头部，取不到才整读
+  readMetadataLazy: vi.fn(
+    async (
+      ref: FileRef,
+      read: (offset: number, length: number) => Promise<Uint8Array>,
+      readAll: () => Promise<Uint8Array>,
+    ) => {
+      try {
+        await read(0, 256 * 1024)
+      } catch {
+        await readAll()
+      }
+      return fakeMeta(ref)
+    },
+  ),
   readCover: vi.fn(async () => null),
 }))
 
@@ -125,7 +148,7 @@ describe("addFiles · 并发导入", () => {
     let inFlight = 0
     let peak = 0
     const { platform } = await import("@/platform")
-    vi.mocked(platform.readFile).mockImplementation(async () => {
+    vi.mocked(platform.readSlice).mockImplementation(async () => {
       inFlight++
       peak = Math.max(peak, inFlight)
       await new Promise((r) => setTimeout(r, 5))
