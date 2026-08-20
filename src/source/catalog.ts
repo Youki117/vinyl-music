@@ -45,3 +45,20 @@ export function sourceOfLink(text: string): SourceId | null {
   if (!s) return null
   return LINK_DOMAINS.find((d) => d.re.test(s))?.id ?? null
 }
+
+/**
+ * 从 QQ 歌单输入里取出数字 id。
+ *
+ * QQ 目前同时流通两类链接：`/playlist/123` 与分享页的 `?id=123`。后者正是手机 QQ
+ * 音乐复制出来的常见格式，不能只依赖 vendored SDK 的旧页面正则。纯数字也接受，因为
+ * 界面允许用户手动选择 QQ 后直接贴 id。
+ */
+export function qqPlaylistIdOfInput(text: string): string | null {
+  const s = text.trim()
+  if (/^\d+$/.test(s)) return s
+  return (
+    /[?&](?:id|disstid|taoge_id)=(\d+)/i.exec(s)?.[1] ??
+    /\/(?:playlist|playsquare)\/(\d+)/i.exec(s)?.[1] ??
+    null
+  )
+}

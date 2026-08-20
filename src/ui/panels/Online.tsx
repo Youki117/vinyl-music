@@ -131,6 +131,7 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
   const playlists = useLibrary((s) => s.playlists)
   const libTracks = useLibrary((s) => s.tracks)
   const playNext = usePlayer((s) => s.playNext)
+  const playFrom = usePlayer((s) => s.playFrom)
   const currentId = usePlayer((s) => s.current()?.id ?? null)
 
   const [tab, setTab] = useState<Tab>("search")
@@ -149,6 +150,11 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
     if (!pid) return
     const n = preview?.tracks.length ?? 0
     setNote(`已导入 ${n} 首到「${preview?.name || "导入的歌单"}」，去曲库 (P) 里看`)
+  }
+
+  const playPreview = (i = 0) => {
+    if (!preview || preview.tracks.length === 0) return
+    void playFrom(preview.tracks, i)
   }
 
   return (
@@ -301,19 +307,24 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
                 {preview.tracks.length} 首
                 {preview.total > preview.tracks.length ? ` / 平台说有 ${preview.total} 首` : ""}
               </span>
-              <button onClick={doImport}>导入为歌单</button>
+              <span className="online-preview-actions">
+                <button className="primary" onClick={() => playPreview()}>
+                  播放全部
+                </button>
+                <button onClick={doImport}>导入为歌单</button>
+              </span>
             </div>
           )}
 
           <ol>
-            {preview?.tracks.map((t) => (
+            {preview?.tracks.map((t, i) => (
               <li key={t.id} data-active={t.id === currentId}>
-                <span className="row">
+                <button className="row" onDoubleClick={() => playPreview(i)} data-tooltip="双击从这里播放整张歌单">
                   <b>{t.title}</b>
                   <span>{t.artist}</span>
                   {inLibrary.has(t.id) && <i title="已在曲库">库</i>}
                   <em>{t.duration > 0 ? formatTime(t.duration) : "--:--"}</em>
-                </span>
+                </button>
               </li>
             ))}
             {listStatus === "loading" && <li className="drawer-empty">正在解析歌单…</li>}

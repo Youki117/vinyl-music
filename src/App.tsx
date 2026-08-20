@@ -163,10 +163,17 @@ export default function App() {
     return platform.onCommand((cmd) => {
       const p = usePlayer.getState()
       if (cmd === "toggle") p.toggle()
-      else if (cmd === "pause") engine.pause()
+      else if (cmd === "pause") p.pause()
       else if (cmd === "next") void p.next()
       else if (cmd === "prev") void p.prev()
     })
+  }, [])
+
+  // 关闭 WebView 时主动作废在途切歌。下载即使刚好晚到，也不能在后台重新开声。
+  useEffect(() => {
+    const stop = () => usePlayer.getState().pause()
+    window.addEventListener("pagehide", stop)
+    return () => window.removeEventListener("pagehide", stop)
   }, [])
 
   // 应用内快捷键（F8.8）

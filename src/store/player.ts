@@ -1,7 +1,12 @@
 import { create } from "zustand"
 
 import { platform } from "@/platform"
-import { engine, type EngineStatus } from "@/audio/engine"
+import {
+  AudioLoadCancelledError,
+  engine,
+  isAudioLoadCancelled,
+  type EngineStatus,
+} from "@/audio/engine"
 import { clampGainDb, gainDbFor, loadLoudness } from "@/audio/loudness"
 import { ensureSource } from "@/source/boot"
 import { localRef, useLibrary, type Track } from "./library"
@@ -67,6 +72,8 @@ type PlayerState = {
   refreshQueueMeta(): void
 
   toggle(): void
+  /** 暂停并作废尚未完成的切歌，防止晚到请求重新开声。 */
+  pause(): void
   next(auto?: boolean): Promise<void>
   prev(): Promise<void>
   cycleMode(): void
@@ -118,11 +125,14 @@ function asOnlineTrack(track: Track) {
 }
 
 /** 解析地址 → 取回字节。换源与地址验证都在 resolvePlayUrl 里，这里不重复。 */
-async function loadOnline(track: Track): Promise<Uint8Array> {
+async function loadOnline(track: Track, stillCurrent: () => boolean): Promise<Uint8Array> {
   const online = asOnlineTrack(track)
   if (!online) throw new Error("曲目来源不明")
   const { resolvePlayUrl } = await onlineModule()
+  if (!stillCurrent()) throw new AudioLoadCancelledError()
   const { url } = await resolvePlayUrl(online, DEFAULT_ONLINE_QUALITY)
+  // 地址解析本身也可能很慢。旧请求不能在这里才闯进引擎、反过来取消新歌。
+  if (!stillCurrent()) throw new AudioLoadCancelledError()
   return engine.loadUrl(url)
 }
 
@@ -302,6 +312,8 @@ let consecutiveErrors = 0
  * 把人家刚选的歌跳掉。连续失败还能叠出好几个，一次跳好几首。
  */
 let retryTimer = 0
+/** 播放请求代际：只有最后一次用户选择有权开声、写元数据或安排失败重试。 */
+let playSeq = 0
 
 /** 取消待触发的失败重试。用户自己动了播放，就不该再自动跳。 */
 function cancelRetry(): void {
@@ -507,8 +519,11 @@ export const usePlayer = create<PlayerState>((set, get) => {
       const { queue } = get()
       if (i < 0 || i >= queue.length) return
       const track = queue[i]
-      set({ index: i })
+      const mine = ++playSeq
       cancelRetry()
+      // 先停旧声音，再更新界面；加载期间绝不能还放着上一首。
+      engine.pause()
+      set({ index: i })
       resetPlayCounter()
       // 上一首的归一化增益必须显式清掉，否则会留在节点上加到这一首头上
       engine.setTrackGainDb(0)
@@ -524,15 +539,19 @@ export const usePlayer = create<PlayerState>((set, get) => {
           await engine.loadBytes(ready)
           bytes = ready
         } else {
-          bytes = ref ? await engine.load(ref) : await loadOnline(track)
+          bytes = ref
+            ? await engine.load(ref)
+            : await loadOnline(track, () => mine === playSeq)
         }
+        if (mine !== playSeq) return
         consecutiveErrors = 0
         await engine.play()
+        if (mine !== playSeq) return
         save()
 
         // 响度对齐。标签命中是同步的，测量那条要解码整首歌，所以不 await ——
         // 声音先出来，量完再用斜坡滑过去
-        void applyTrackGain(track, bytes, () => get().index === i)
+        void applyTrackGain(track, bytes, () => mine === playSeq && get().index === i)
 
         // 把下一首提前拿到手上（F1.6）。延后一点点开始，别和刚起播时的封面歌词抢
         schedulePrefetch()
@@ -545,7 +564,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
             lib.ensureLyrics(track.id).catch(() => null),
             lib.ensureCover(track.id, bytes).catch(() => null),
           ]).then(([lrc, cover]) => {
-            if (get().index !== i) return
+            if (mine !== playSeq || get().index !== i) return
             if (lrc || cover) get().refreshQueueMeta()
             // 封面要等解出来、落盘之后才报给系统媒体面板，否则任务栏那格是空的
             if (cover?.path) {
@@ -562,7 +581,11 @@ export const usePlayer = create<PlayerState>((set, get) => {
            */
           useLibrary.getState().addTracks([track])
           // 在线曲目的歌词与封面来自平台接口，和本地那条路完全不同
-          void fillOnlineMeta(track, () => get().index === i, () => get().refreshQueueMeta())
+          void fillOnlineMeta(
+            track,
+            () => mine === playSeq && get().index === i,
+            () => get().refreshQueueMeta(),
+          )
         }
 
         pushNowPlaying(track, true, 0)
@@ -571,7 +594,9 @@ export const usePlayer = create<PlayerState>((set, get) => {
         // 播放路径已经没人要这份数据了 —— 而算它要把整首歌解码一遍（约 16MB PCM）。
         // 混音面板仍然用得上波形，但它自己会惰性取（audio/peaks.ts 的 loadPeaks
         // 支持传取字节的函数，缓存命中时连文件都不读）。
-      } catch {
+      } catch (error) {
+        // 新的切歌或暂停主动取代了它：不是坏文件，不能标丢失或自动跳下一首。
+        if (mine !== playSeq || isAudioLoadCancelled(error)) return
         useLibrary.getState().markMissing(track.id)
         // 连续 3 首失败则停止，避免整个列表都坏时无限跳转
         if (++consecutiveErrors >= 3) {
@@ -619,7 +644,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
     },
 
     clearQueue() {
-      engine.pause()
+      get().pause()
       dropPrefetch()
       set({ queue: [], index: -1 })
     },
@@ -644,6 +669,10 @@ export const usePlayer = create<PlayerState>((set, get) => {
       if (queue.length === 0) return
       // 出错后手动暂停，不该在 2 秒后被自动跳转唤醒
       cancelRetry()
+      if (get().status === "loading") {
+        get().pause()
+        return
+      }
       if (index < 0) {
         void get().playAt(0)
         return
@@ -653,7 +682,14 @@ export const usePlayer = create<PlayerState>((set, get) => {
         void get().playAt(index)
         return
       }
-      engine.toggle()
+      if (engine.status === "playing") get().pause()
+      else void engine.play()
+    },
+
+    pause() {
+      playSeq++
+      cancelRetry()
+      engine.pause()
     },
 
     async next(auto = false) {
