@@ -69,7 +69,8 @@ await page.waitForTimeout(500)
 const lib = await page.evaluate(() =>
   Array.from(document.querySelectorAll(".lib-main ol li .row")).map((r) => ({
     title: r.querySelector("b")?.textContent ?? "",
-    artist: r.querySelector("span")?.textContent ?? "",
+    // 次行现在是「艺术家 · 专辑」（曲目行改成了两行），取第一段才是艺术家
+    artist: (r.querySelector("span")?.textContent ?? "").split(" · ")[0],
     duration: r.querySelector("em")?.textContent ?? "",
   })),
 )

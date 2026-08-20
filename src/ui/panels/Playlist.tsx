@@ -281,7 +281,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
                 title={canReorder ? "双击播放，按住拖动可排序" : "双击播放"}
               >
                 <b>{t.title}</b>
-                <span>{t.artist}</span>
+                <span>{[t.artist, t.album].filter(Boolean).join(" · ")}</span>
                 {t.playCount > 0 && <i title="播放次数">{t.playCount}</i>}
                 <em>{formatTime(t.duration)}</em>
               </button>

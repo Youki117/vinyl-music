@@ -1495,14 +1495,28 @@ header button.danger,
   opacity: 0.42;
 }
 
+/*
+ * 曲目行是两行的：上行歌名，下行「艺术家 · 专辑」，时长与角标右对齐在上行。
+ *
+ * 从前四样东西挤在一条 baseline 上，歌名一长就把艺术家挤没（span 还硬限了
+ * 110px），而时长和角标的左边界随内容浮动，一列扫下来对不齐。拆成两行之后
+ * 歌名独占一整行不再被挤，右侧那两列也有了固定的对齐线。
+ *
+ * 用 grid-template-areas 而不是列序：角标是条件渲染的，按列序排会在它缺席时
+ * 让时长顶到角标的位置上去。
+ */
 .drawer .row {
   flex: 1;
   min-width: 0;
   display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 10px;
-  align-items: baseline;
-  padding: 7px 6px 7px 14px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "title badge dur"
+    "meta  meta  meta";
+  column-gap: 10px;
+  row-gap: 1px;
+  align-items: center;
+  padding: 6px 6px 7px 14px;
   text-align: left;
 }
 
@@ -1511,6 +1525,7 @@ header button.danger,
 }
 
 .drawer .row b {
+  grid-area: title;
   font-weight: 400;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1518,18 +1533,30 @@ header button.danger,
 }
 
 .drawer .row span {
+  grid-area: meta;
   font-size: 10px;
   color: #8d8981;
-  max-width: 110px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* 空的次行不占高度，否则没有艺术家的曲目会比别人多出一条空隙 */
+.drawer .row span:empty {
+  display: none;
+}
+
+.drawer .row i {
+  grid-area: badge;
+}
+
 .drawer .row em {
+  grid-area: dur;
   font-size: 10px;
   font-style: normal;
   color: #8d8981;
+  /* 时长等宽，一列数字才对得齐 */
+  font-variant-numeric: tabular-nums;
 }
 
 .drawer .row-remove {
