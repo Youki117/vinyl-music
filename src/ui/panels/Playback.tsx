@@ -14,6 +14,10 @@ export default function Playback({ open, onClose }: { open: boolean; onClose: ()
   const speed = usePlayer((s) => s.speed)
   const setSpeed = usePlayer((s) => s.setSpeed)
   const setOutputDevice = usePlayer((s) => s.setOutputDevice)
+  // EQ 也走 store：engine 上的值只有 save() 会读，而 save() 只被 store 的
+  // setter 触发。直接调 engine 的话，调完 EQ 不碰别的设置就退出，这次调整就丢了
+  const setEqEnabled = usePlayer((s) => s.setEqEnabled)
+  const setEqGains = usePlayer((s) => s.setEqGains)
   const normalize = usePlayer((s) => s.normalize)
   const setNormalize = usePlayer((s) => s.setNormalize)
 
@@ -51,10 +55,10 @@ export default function Playback({ open, onClose }: { open: boolean; onClose: ()
 
   const applyGains = (next: number[]) => {
     setGains(next)
-    engine.setEqGains(next)
+    setEqGains(next)
     if (!eqOn) {
       setEqOn(true)
-      engine.setEqEnabled(true)
+      setEqEnabled(true)
     }
   }
 
@@ -161,7 +165,7 @@ export default function Playback({ open, onClose }: { open: boolean; onClose: ()
               checked={eqOn}
               onChange={(e) => {
                 setEqOn(e.target.checked)
-                engine.setEqEnabled(e.target.checked)
+                setEqEnabled(e.target.checked)
               }}
             />
             启用

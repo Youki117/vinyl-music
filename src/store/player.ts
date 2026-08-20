@@ -75,6 +75,14 @@ type PlayerState = {
   toggleMute(): void
   setSpeed(v: number): void
   setNormalize(on: boolean): void
+  /**
+   * 均衡器。开关与增益的权威都在 engine 上（store 不镜像一份），这里存在的
+   * 意义是**落盘**：settings 里的 eqEnabled/eqGains 是 save() 从 engine 上读的，
+   * 而 save() 只被这几个 setter 触发。界面直接调 engine 的话，改完 EQ 不碰
+   * 别的设置就退出，这次调整就丢了。
+   */
+  setEqEnabled(on: boolean): void
+  setEqGains(gains: number[]): void
   /** 切输出设备并落盘。失败时抛，由界面提示。 */
   setOutputDevice(id: string): Promise<void>
 }
@@ -286,6 +294,21 @@ let lastTime = 0
 let counted = false
 let consecutiveErrors = 0
 
+/**
+ * 播放失败后自动跳下一首的定时器。
+ *
+ * 本文件里另外三个定时器（save / seek 上报 / 预取）都带句柄且会被取消，唯独这条
+ * 早先是撒手不管的：那 2 秒里用户要是自己点了别的歌，孤儿定时器照样触发，
+ * 把人家刚选的歌跳掉。连续失败还能叠出好几个，一次跳好几首。
+ */
+let retryTimer = 0
+
+/** 取消待触发的失败重试。用户自己动了播放，就不该再自动跳。 */
+function cancelRetry(): void {
+  window.clearTimeout(retryTimer)
+  retryTimer = 0
+}
+
 function resetPlayCounter(): void {
   playedSec = 0
   lastTime = 0
@@ -485,6 +508,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
       if (i < 0 || i >= queue.length) return
       const track = queue[i]
       set({ index: i })
+      cancelRetry()
       resetPlayCounter()
       // 上一首的归一化增益必须显式清掉，否则会留在节点上加到这一首头上
       engine.setTrackGainDb(0)
@@ -555,7 +579,13 @@ export const usePlayer = create<PlayerState>((set, get) => {
           set({ status: "error", error: "连续多首无法播放，已停止" })
           return
         }
-        window.setTimeout(() => void get().next(true), 2000)
+        retryTimer = window.setTimeout(() => {
+          retryTimer = 0
+          // 这 2 秒里用户可能已经自己点了别的歌。文件里其它异步回调都用
+          // `get().index === i` 守着代际，这条也一样：还停在出错这首上才继续跳
+          if (get().index !== i) return
+          void get().next(true)
+        }, 2000)
       }
     },
 
@@ -612,6 +642,8 @@ export const usePlayer = create<PlayerState>((set, get) => {
     toggle() {
       const { index, queue } = get()
       if (queue.length === 0) return
+      // 出错后手动暂停，不该在 2 秒后被自动跳转唤醒
+      cancelRetry()
       if (index < 0) {
         void get().playAt(0)
         return
@@ -692,6 +724,16 @@ export const usePlayer = create<PlayerState>((set, get) => {
     setSpeed(v) {
       set({ speed: v })
       engine.setSpeed(v)
+      save()
+    },
+
+    setEqEnabled(on) {
+      engine.setEqEnabled(on)
+      save()
+    },
+
+    setEqGains(gains) {
+      engine.setEqGains(gains)
       save()
     },
 
