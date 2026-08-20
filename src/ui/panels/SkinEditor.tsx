@@ -1,6 +1,7 @@
 import { useRef, useState } from "react"
 
 import { platform } from "@/platform"
+import { BUILTIN_BACKDROPS } from "@/skin/backdrops"
 import { labelBackground } from "@/skin/resolve"
 import { useSkin } from "@/store/skin"
 import AiTab from "./AiTab"
@@ -112,6 +113,27 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
               选择底图图片…
             </button>
 
+            {/*
+              内置底图。装完不选图就只有一层 CSS 渐变，而整套配色都是从底图现算的，
+              没有图等于看不出效果。setBackdrop 只用 ref.id，所以这里给个合成的
+              FileRef 就够，loadImage 见到 builtin: 前缀会走打包后的资源 URL。
+            */}
+            <p className="hint">内置底图</p>
+            <div className="builtin-backdrops">
+              {BUILTIN_BACKDROPS.map((b) => (
+                <button
+                  key={b.id}
+                  className="builtin-backdrop"
+                  data-on={skin.backdrop === b.id}
+                  style={{ backgroundImage: `url(${b.url})` }}
+                  onClick={() => void setBackdrop({ id: b.id, name: b.name, size: 0, mtime: 0 })}
+                  aria-label={b.name}
+                  aria-pressed={skin.backdrop === b.id}
+                  title={b.name}
+                />
+              ))}
+            </div>
+
             {backdrop ? (
               <>
                 <p className="hint">拖动可调整底图焦点，避免人脸被裁掉</p>
@@ -124,6 +146,26 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
                   onPointerDown={startDrag("backdrop")}
                   onPointerMove={onDragMove}
                 />
+
+                <label className="row-field">
+                  <span>黑胶中心优先显示</span>
+                  <select
+                    value={skin.label.prefer}
+                    onChange={(e) =>
+                      patchSkin({
+                        label: { ...skin.label, prefer: e.target.value as "cover" | "skin" },
+                      })
+                    }
+                  >
+                    <option value="cover">曲目封面</option>
+                    <option value="skin">这里设的图</option>
+                  </select>
+                </label>
+                <p className="hint">
+                  {skin.label.prefer === "cover"
+                    ? "有内嵌封面就显示封面；没有封面的曲目（在线曲目、没打标签的文件）退回下面这张图。"
+                    : "永远用下面这张图，曲目自带的封面不显示。"}
+                </p>
 
                 <p className="hint">
                   唱片贴纸 —— 拖动调位置，滚轮调缩放

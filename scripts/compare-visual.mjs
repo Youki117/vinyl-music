@@ -79,6 +79,23 @@ page.on("console", (m) => {
   if (m.type() === "error") pageErrors.push(m.text())
 })
 
+/*
+ * 把皮肤钉到参考图那一版：**没有底图**。
+ *
+ * 参考图是按内置渐变底拍的。出厂默认后来改成了一张内置底图（装完就有完整效果），
+ * 那是产品决定，不该让这道回归关口失效 —— 关口盯的是版式、图层、字体，不是
+ * "默认底图选了哪张"。所以这里显式指定要比的状态，而不是听凭默认值。
+ *
+ * 只写 backdrop 一个字段：其余由 makeSkin 从 DEFAULT_SKIN 补全，
+ * 模型改了这里不用跟着改。浏览器实现下 readConfig 读的就是 localStorage。
+ */
+await page.addInitScript(() => {
+  localStorage.setItem(
+    "vinyl:skins",
+    JSON.stringify({ schemaVersion: 2, activeId: "default", skins: [{ id: "default", backdrop: null }] }),
+  )
+})
+
 await page.goto(URL, { waitUntil: "networkidle" })
 // 等 WebGL 首帧与字体就位
 await page.waitForTimeout(900)

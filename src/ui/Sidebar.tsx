@@ -1,3 +1,5 @@
+import VolumeControl from "./VolumeControl"
+
 /**
  * 右侧工具栏。常隐，鼠标碰到右边缘才显现。
  *
@@ -32,6 +34,8 @@ export default function Sidebar({
 }) {
   return (
     <div className="sidebar" data-keep-panel>
+      <VolumeControl />
+
       <button
         className="sb-tool"
         data-on={active === "playback"}

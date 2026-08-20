@@ -296,7 +296,12 @@
   display: flex;
   align-items: center;
   gap: 32px;
-  color: var(--ink-secondary);
+  /*
+   * 比 --ink-secondary 再实一档。次级墨色是跟着底图现算的（Stage.tsx 写进
+   * --ink-secondary），浅色底图下这几个图标会淡到几乎看不见，所以往主色掺一成半，
+   * 而不是写死一个颜色 —— 写死就跟不上换底图了。
+   */
+  color: color-mix(in srgb, var(--ink-primary) 25%, var(--ink-secondary));
 }
 
 .action {
@@ -400,7 +405,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: var(--ink-secondary);
+  /* 同 .actions：循环/上一首/下一首/列表也一起提实一档 */
+  color: color-mix(in srgb, var(--ink-primary) 25%, var(--ink-secondary));
 }
 
 .controls button {
@@ -446,25 +452,29 @@
   position: absolute;
   right: 22px;
   bottom: 28px;
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   display: grid;
   place-items: center;
   border-radius: 50%;
   color: rgba(245, 245, 245, 0.82);
-  background: rgba(20, 20, 20, 0.28);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  backdrop-filter: blur(6px);
+  /*
+   * 中空：不填底、只留一圈细环。原来那块半透明黑底压在底图上，右下角凭空多出
+   * 一个色块，反而比图标本身更抢眼。整体再淡两成，悬停时才回到清晰。
+   */
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  opacity: 0.8;
   transition:
+    opacity 160ms ease,
     color 160ms ease,
-    background 160ms ease,
     border-color 160ms ease;
 }
 
 .skin-quick:hover {
   color: #fff;
-  background: rgba(20, 20, 20, 0.46);
-  border-color: rgba(255, 255, 255, 0.32);
+  opacity: 1;
+  border-color: rgba(255, 255, 255, 0.75);
 }
 
 /* ── E15 窗口控制：悬停才显现，不打扰画面 ───────────────── */
@@ -582,25 +592,44 @@
   color: #fff;
 }
 
-.volume {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 3px 9px;
-  border-radius: 13px;
-  background: rgba(20, 20, 20, 0.55);
-  color: rgba(255, 255, 255, 0.8);
-}
-
-.volume button {
-  width: 18px;
-  height: 18px;
+/*
+ * 侧栏里的音量：平时只是一个和其它工具一样的图标位，悬停时向左飞出滑块。
+ * 竖栏只有 --rail-w 宽，横滑块塞不进去，飞出层用 absolute 脱离这条轨道。
+ */
+.sb-volume {
+  position: relative;
   display: grid;
   place-items: center;
 }
 
-.volume input[type="range"] {
-  width: 78px;
+.sb-volume-flyout {
+  position: absolute;
+  right: calc(100% + 6px);
+  top: 50%;
+  translate: 0 -50%;
+  display: flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 13px;
+  background: rgba(20, 20, 20, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(6px);
+  opacity: 0;
+  /* 收起时必须真的点不到，否则这块透明区会挡住底下的画面 */
+  visibility: hidden;
+  transition:
+    opacity 160ms ease,
+    visibility 160ms ease;
+}
+
+.sb-volume:hover .sb-volume-flyout,
+.sb-volume:focus-within .sb-volume-flyout {
+  opacity: 1;
+  visibility: visible;
+}
+
+.sb-volume-flyout input[type="range"] {
+  width: 84px;
   height: 3px;
   accent-color: #ddd9d2;
   cursor: pointer;
@@ -1914,4 +1943,54 @@ header button.danger,
 .layout-bar .layout-done {
   border-color: var(--ink-accent);
   color: #fff;
+}
+
+/* ── 滚动条隐形 ────────────────────────────────────────── */
+/*
+ * 面板与抽屉里的滚动条一律不画。Chromium 默认那根条是浅色方块，压在这套
+ * 半透明深色面板上非常刺眼，而这些列表都短、也都能滚轮滚动，画出来并不带来
+ * 什么信息。只关掉视觉，滚动能力一点不动。
+ */
+.skin-body,
+.drawer ol,
+.lib-side,
+.track-picker {
+  scrollbar-width: none;
+}
+
+.skin-body::-webkit-scrollbar,
+.drawer ol::-webkit-scrollbar,
+.lib-side::-webkit-scrollbar,
+.track-picker::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* ── 内置底图选择 ──────────────────────────────────────── */
+.builtin-backdrops {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.builtin-backdrop {
+  aspect-ratio: 16 / 10;
+  border-radius: 5px;
+  background-size: cover;
+  background-position: center;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+.builtin-backdrop:hover {
+  border-color: rgba(255, 255, 255, 0.45);
+  transform: translateY(-1px);
+}
+
+/* 当前用的那张描粗一圈，不然四张缩略图分不出哪张在用 */
+.builtin-backdrop[data-on="true"] {
+  border-color: var(--ink-accent, #b2845f);
+  border-width: 2px;
 }

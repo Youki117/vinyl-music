@@ -19,6 +19,7 @@ export default function Disc({
 }) {
   const label = useSkin((s) => s.label)
   const focus = useSkin((s) => s.skin.label.focus)
+  const prefer = useSkin((s) => s.skin.label.prefer)
   const status = usePlayer((s) => s.status)
   // 封面从曲库读，不读队列里那份副本 —— 曲库是唯一来源，它按 LRU 淘汰并 revoke 时
   // 这里会跟着变 null，而副本不会，那样贴纸就指着一个死 URL 了
@@ -26,14 +27,19 @@ export default function Disc({
   const cover = useLibrary((s) => (currentId ? (s.byId(currentId)?.cover ?? null) : null))
   const playing = status === "playing"
 
-  // 贴纸优先级：皮肤指定的图（跟随底图或单独指定）> 曲目内嵌封面 > 空。
-  // 底图联动是核心需求，永远排第一；但还没设过底图时，用曲目自带的专辑封面
-  // 总比留一个空盘好——这也是主流播放器的默认行为。
-  const art = label
-    ? labelBackground(label.url, focus, label.width, label.height)
-    : cover
-      ? { backgroundImage: `url(${cover})`, backgroundSize: "cover", backgroundPosition: "center" }
-      : undefined
+  /*
+   * 贴纸优先级由皮肤里的 `label.prefer` 决定，两种都保留了另一方作兜底：
+   *
+   * - `"cover"`（默认）：内嵌封面 > 皮肤图 > 空。唱片上放专辑封面是主流播放器的
+   *   样子；没有封面的曲目（在线曲目、没打标签的文件）照样由底图接管。
+   * - `"skin"`：皮肤图 > 内嵌封面 > 空。这是出厂带默认底图之前的老行为 ——
+   *   那时"还没设过底图"才轮得到封面，现在成了一个显式选项。
+   */
+  const skinArt = label ? labelBackground(label.url, focus, label.width, label.height) : undefined
+  const coverArt = cover
+    ? { backgroundImage: `url(${cover})`, backgroundSize: "cover", backgroundPosition: "center" }
+    : undefined
+  const art = prefer === "skin" ? (skinArt ?? coverArt) : (coverArt ?? skinArt)
 
   const hasArt = Boolean(label || cover)
 

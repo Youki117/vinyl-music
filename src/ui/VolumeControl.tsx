@@ -1,8 +1,14 @@
 import { usePlayer } from "@/store/player"
 
 /**
- * 音量控件。放在悬停才显现的标题栏里 —— 效果图上没有这个元素，硬塞进主画面
- * 会破坏版式，但只留快捷键又不好用（设计原则 1：能藏起来就藏起来）。
+ * 音量控件。作为右侧工具栏的一项。
+ *
+ * 原来挂在左上角标题栏上，和最小化/最大化/关闭排在一条 —— 那条应该只管窗口，
+ * 音量是应用功能，归属不对。挪进右侧栏之后左上角只剩窗口控制，画面也清爽了。
+ *
+ * 竖栏只有 44px 宽，塞不下滑块，所以做成**按钮 + 悬停左侧飞出滑块**：
+ * 平时只占一个和其它工具一样大的图标位，要调的时候才展开。飞出层用
+ * opacity + visibility 而不是 display，才有渐变；visibility 保证收起时点不到。
  */
 export default function VolumeControl() {
   const volume = usePlayer((s) => s.volume)
@@ -13,9 +19,14 @@ export default function VolumeControl() {
   const level = muted ? 0 : volume
 
   return (
-    <div className="volume">
-      <button onClick={toggleMute} aria-label={muted ? "取消静音" : "静音"} title="静音 (M)">
-        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+    <div className="sb-volume">
+      <button
+        className="sb-tool"
+        onClick={toggleMute}
+        aria-label={muted ? "取消静音" : "静音"}
+        title={`音量 ${Math.round(level * 100)}%　静音 (M)`}
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
           <path fill="currentColor" d="M4 9.2h3.4L12 5.2v13.6l-4.6-4H4z" />
           {level === 0 ? (
             <path
@@ -46,16 +57,19 @@ export default function VolumeControl() {
           )}
         </svg>
       </button>
-      <input
-        type="range"
-        min={0}
-        max={1}
-        step={0.01}
-        value={level}
-        onChange={(e) => setVolume(Number(e.target.value))}
-        aria-label="音量"
-        title={`音量 ${Math.round(level * 100)}%`}
-      />
+
+      <div className="sb-volume-flyout">
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.01}
+          value={level}
+          onChange={(e) => setVolume(Number(e.target.value))}
+          aria-label="音量"
+          title={`音量 ${Math.round(level * 100)}%`}
+        />
+      </div>
     </div>
   )
 }

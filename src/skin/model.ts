@@ -1,3 +1,4 @@
+import { BUILTIN_PREFIX } from "@/skin/backdrops"
 import { DEFAULT_VEIL, type VeilParams } from "@/stage/veil/renderer"
 
 export const SKIN_SCHEMA_VERSION = 2
@@ -35,6 +36,15 @@ export type Skin = {
     /** "backdrop" = 跟随底图切换；否则是另一张图的 FileRef.id */
     source: "backdrop" | string
     focus: LabelFocus
+    /**
+     * 黑胶中心那块贴纸，曲目自带的封面和皮肤指定的图谁优先。
+     *
+     * - `"cover"`（默认）：有内嵌封面就用封面，没有才退回皮肤的图。唱片上放专辑封面
+     *   是主流播放器的样子，多数人期待的也是这个。
+     * - `"skin"`：皮肤指定的图（跟随底图或单独指定）永远优先，封面只在没有皮肤图时出现。
+     *   想要整屏统一视觉、不被各家封面打断的人选这个。
+     */
+    prefer: "cover" | "skin"
   }
   veil: VeilParams
   /**
@@ -60,12 +70,19 @@ export const DEFAULT_LABEL_FOCUS: LabelFocus = { x: 0.5, y: 0.32, zoom: 2.2 }
 export const DEFAULT_SKIN: Skin = {
   id: "default",
   name: "默认",
-  backdrop: null,
+  // 装完就有一张真图。留 null 的话首屏只有一层 CSS 渐变，而蒙版、墨色、贴纸取色
+  // 全是从底图现算的 —— 没有底图，这套东西一样都看不出来
+  backdrop: `${BUILTIN_PREFIX}b`,
   backdropFocus: { x: 0.5, y: 0.5 },
-  label: { source: "backdrop", focus: { ...DEFAULT_LABEL_FOCUS } },
+  label: { source: "backdrop", focus: { ...DEFAULT_LABEL_FOCUS }, prefer: "cover" },
   veil: { ...DEFAULT_VEIL },
-  // 默认开：用户导入一张图就该立刻看到蒙版跟着变，不用先去翻设置
-  tintAuto: true,
+  /*
+   * 默认关：出厂就用 DEFAULT_VEIL 那层近白蒙版（#f7f5f0）。
+   *
+   * 自动取色会拿底图的三个主色去染蒙版，观感随图乱跳、也压掉了这套版式本来的
+   * 素白调子。想要的人在皮肤面板里一开就有，但不该是第一眼看到的样子。
+   */
+  tintAuto: false,
   ink: {
     auto: true,
     primary: "#3a3a37",
@@ -87,7 +104,21 @@ export type SkinsFile = {
   skins: Skin[]
 }
 
-export function makeSkin(patch: Partial<Skin> = {}): Skin {
+/**
+ * makeSkin 接受的补丁。
+ *
+ * 嵌套字段是**逐层浅合并**的，所以类型上也该允许只给其中几项 ——
+ * 从前写的是 `Partial<Skin>`，那要求 veil / ink / text / label 要给就给全套，
+ * 比函数实际的行为严格，调用方只好把不关心的字段也抄一遍。
+ */
+export type SkinPatch = Omit<Partial<Skin>, "veil" | "ink" | "text" | "label"> & {
+  veil?: Partial<VeilParams>
+  ink?: Partial<Ink>
+  text?: Partial<SkinText>
+  label?: Partial<Skin["label"]>
+}
+
+export function makeSkin(patch: SkinPatch = {}): Skin {
   return {
     ...DEFAULT_SKIN,
     ...patch,

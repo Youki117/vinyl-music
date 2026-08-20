@@ -49,7 +49,9 @@ function fitText(el: HTMLElement | null, min: number): void {
  * 大标题就在里面。折中办法是按状态切换 —— 没在播时保持参考图原样（对拍脚本本来就
  * 不加载曲目，关口不受影响），一旦开始播就换成歌名/艺术家/专辑。
  *
- * 署名条不跟着换：那是"这张皮肤是给谁的"，属于皮肤而不是曲目。
+ * 署名条在播时改显**歌手**。原来它固定是皮肤署名（"这张皮肤是给谁的"），
+ * 但画面上那块黑底白字是仅次于大标题的视觉锚点，拿去放一个与当前音乐无关的
+ * 词很浪费。歌手挪进去之后，红色副标题那行就空出来给专辑，信息不再重复。
  */
 export default function Masthead() {
   const text = useSkin((s) => s.skin.text)
@@ -59,9 +61,12 @@ export default function Masthead() {
   const subtitleRef = useRef<HTMLParagraphElement>(null)
 
   const title = track?.title || text.title
-  const subtitle = track ? track.artist : text.subtitle
+  // 在播时这行让给专辑（歌手已经去了黑色署名条），空闲时还是皮肤副标题
+  const subtitle = track ? "" : text.subtitle
   // 专辑常常是空的，空了就不占一行，版式不塌
   const third = track ? track.album : text.year
+  // 黑条优先用歌手名；没在播、或这首歌没有歌手时回到皮肤署名
+  const byline = track?.artist || text.byline
 
   useLayoutEffect(() => {
     const run = () => {
@@ -80,12 +85,16 @@ export default function Masthead() {
         <h1 ref={titleRef} data-cjk={hasCjk(title)} title={title}>
           {title}
         </h1>
-        <p ref={subtitleRef} data-cjk={hasCjk(subtitle)}>
-          {subtitle}
-        </p>
+        {subtitle && (
+          <p ref={subtitleRef} data-cjk={hasCjk(subtitle)}>
+            {subtitle}
+          </p>
+        )}
         {third && <small data-cjk={hasCjk(third)}>{third}</small>}
       </div>
-      <div className="byline" data-part="byline">{text.byline}</div>
+      <div className="byline" data-part="byline" title={byline}>
+        {byline}
+      </div>
     </>
   )
 }

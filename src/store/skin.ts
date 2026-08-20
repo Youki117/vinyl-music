@@ -4,6 +4,7 @@ import { FastAverageColor } from "fast-average-color"
 import { platform, toObjectUrl, type FileRef } from "@/platform"
 import { DEFAULT_SKIN, makeSkin, migrateSkins, SKIN_SCHEMA_VERSION, type Skin, type SkinsFile } from "@/skin/model"
 import { dominantColors, veilTintsFrom } from "@/skin/palette"
+import { builtinBackdropUrl } from "@/skin/backdrops"
 import { labelSourceId } from "@/skin/resolve"
 import type { VeilParams } from "@/stage/veil/renderer"
 
@@ -89,7 +90,12 @@ async function loadImage(id: string | null): Promise<LoadedImage | null> {
     return hit
   }
 
-  const url = await toObjectUrl({ id, name: id, size: 0, mtime: 0 })
+  /*
+   * 内置底图是打包进产物的静态资源，直接用它的 URL；用户导入的图才走
+   * platform.readFile 转 object URL。淘汰时对静态 URL 调 revokeObjectURL
+   * 是空操作（规范如此），所以下面那套缓存逻辑不用分叉。
+   */
+  const url = builtinBackdropUrl(id) ?? (await toObjectUrl({ id, name: id, size: 0, mtime: 0 }))
   const img = new Image()
   await new Promise<void>((resolve, reject) => {
     img.onload = () => resolve()
@@ -133,7 +139,15 @@ export const useSkin = create<SkinState>((set, get) => ({
   async load() {
     const raw = await platform.readConfig<SkinsFile>("skins")
     const file = migrateSkins(raw)
-    if (!file) return
+    /*
+     * 读不到存档就是首次运行。state 里已经是 DEFAULT_SKIN，但它引用的内置底图
+     * 还没加载过 —— 从前 DEFAULT_SKIN.backdrop 是 null，直接 return 什么都不做
+     * 是对的；现在它指向一张内置图，不刷这一次首屏就还是那层 CSS 渐变。
+     */
+    if (!file) {
+      await refreshImages(set, get)
+      return
+    }
 
     const active = file.skins.find((s) => s.id === file.activeId) ?? file.skins[0] ?? DEFAULT_SKIN
     set({ skin: active, skins: file.skins })

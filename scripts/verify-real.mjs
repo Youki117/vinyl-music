@@ -114,14 +114,22 @@ const playing = await readPlayback(page)
 check("真实 MP3 能播放", playing.playing)
 check("进度在推进", playing.time > 0.5, `${playing.time.toFixed(2)}s`)
 // 进度条上方那段小波形已删（见 src/ui/Progress.tsx），播放路径不再算峰值
-check("没有内嵌封面的曲目留空盘，不会串用上一首的封面", !playing.labelHasImage)
+// 本意是「不把上一首的封面留在盘上」。从前出厂没有底图，这条写成「盘上没有图」就够；
+// 现在出厂带默认底图，没封面的曲目会合法地退回底图裁切 —— 本意不变，判据要改成「不是上一首那张」。
+check(
+  "没有内嵌封面的曲目不串用上一首的封面",
+  playing.labelUrl !== covered.labelUrl,
+  `${short(covered.labelUrl)} → ${short(playing.labelUrl)}`,
+)
 
 // 大标题：在播时显示曲目信息而不是皮肤的装饰文案。
 // 原来画面上最大的字永远是 FASHION，真正的歌名只有进度条底下 10px 的小字。
 const head = await readMasthead(page)
-console.log(`\n大标题：「${head.title}」${head.titlePx}px / 「${head.subtitle}」/「${head.third}」`)
+console.log(`\n大标题：「${head.title}」${head.titlePx}px / 「${head.third}」/ 黑条「${head.byline}」`)
 check("在播时大标题换成歌名", head.title === "April Showers", head.title)
-check("副标题换成艺术家", head.subtitle === "ProleteR", head.subtitle)
+// 歌手改在黑色署名条上（原来是皮肤署名），红色副标题那行让给专辑，信息不再重复
+check("歌手显示在黑色署名条上", head.byline === "ProleteR", head.byline)
+check("副标题不再重复歌手", head.subtitle === "", head.subtitle || "(空)")
 check(
   "歌名比装饰文案长，字号自动缩过（不再是 97px）",
   head.titlePx > 0 && head.titlePx < 97,
@@ -227,11 +235,18 @@ await page.screenshot({ path: `${OUT}/real-skin-1.png` })
 check("底图铺上去了", skin1.backdropCount > 0)
 check("底图 cover 铺满", skin1.backdropSize === "cover")
 check("唱片贴纸自动跟随底图切换", skin1.labelUrl === skin1.backdropUrl && skin1.labelUrl !== "")
-check("文字配色随底图重推", skin1.inkPrimary !== "" && skin1.inkPrimary !== skinBefore.inkPrimary)
+check("底图换了之后墨色仍是推导出来的有效值", /^#[0-9a-f]{6}$/i.test(skin1.inkPrimary), skin1.inkPrimary)
 
-// 蒙版自动取色：默认开启，设了底图就该立刻用底图的主色，不需要用户去开开关
+// 蒙版自动取色：**默认关闭**，出厂是 DEFAULT_VEIL 那层素白；开关打开才用底图主色。
+// 先验默认态不该变色，再打开开关验功能本身还在。
 {
-  const tintAfter = await veilPixel()
+  const tintUntouched = await veilPixel()
+  const drift =
+    tintBefore && tintUntouched
+      ? Math.max(...[0, 1, 2].map((i) => Math.abs(tintUntouched[i] - tintBefore[i])))
+      : 0
+  check("默认不自动取色：换了底图蒙版仍是素白", drift < 8, `最大通道差 ${drift}`)
+
   // 换底图**不会**自动弹面板了（这正是这轮改掉的行为），要自己开
   await page.keyboard.press("s")
   await page.waitForTimeout(500)
@@ -239,16 +254,28 @@ check("文字配色随底图重推", skin1.inkPrimary !== "" && skin1.inkPrimary
     const tabs = document.querySelectorAll(".skin-editor .tabs button")
     tabs[1]?.click() // 蒙版页
     await new Promise((r) => setTimeout(r, 300))
+    // 打开「自动从底图取色」
+    const field = Array.from(document.querySelectorAll(".skin-editor .row-field")).find((f) =>
+      f.textContent.includes("自动从底图取色"),
+    )
+    const box = field?.querySelector('input[type="checkbox"]')
+    if (box && !box.checked) box.click()
+    await new Promise((r) => setTimeout(r, 700))
     return Array.from(document.querySelectorAll(".tint-swatches span")).map(
       (e) => getComputedStyle(e).backgroundColor,
     )
   })
+  const tintAfter = await veilPixel()
+  const inkTinted = (await readSkin(page)).inkPrimary
+
   const moved =
     tintBefore && tintAfter
       ? Math.max(...[0, 1, 2].map((i) => Math.abs(tintAfter[i] - tintBefore[i])))
       : 0
-  console.log(`\n蒙版取色：像素 ${tintBefore?.join(",")} → ${tintAfter?.join(",")}（差 ${moved}）`)
+  console.log("")
+  console.log(`蒙版取色：素白 ${tintUntouched?.join(",")} → 开启后 ${tintAfter?.join(",")}（差 ${moved}）`)
   console.log(`面板色块：${swatches.join("  ")}`)
+  console.log(`开启取色后的墨色：${skin1.inkPrimary} → ${inkTinted}`)
 
   // 这条以前写的是 `new Set(swatches).size >= 2`，太松：三个只差一两个通道值的颜色
   // 也是三个不同字符串，断言照过，而面板上肉眼就是同一个色块 —— 实际就这么漏过去了。
@@ -266,9 +293,12 @@ check("文字配色随底图重推", skin1.inkPrimary !== "" && skin1.inkPrimary
 
   // 允许 2 个：色调很窄的图聚类后本来就凑不满三个，硬塞一个看不出差别的更糟，
   // 三色轮换会自动退化成两段（见 useTintPhase 用的是 tintColors.length）
-  check("从底图提取出了主色", swatches.length >= 2 && swatches.length <= 3, `${swatches.length} 个`)
+  check("开启后从底图提取出了主色", swatches.length >= 2 && swatches.length <= 3, `${swatches.length} 个`)
   check("三个色块肉眼分得出来（不是三个相邻色阶）", minGap >= 25, `最近两色距离 ${minGap}：${swatches.join(" / ")}`)
-  check("自动取色真的作用到了蒙版画布上（不是只显示在面板里）", moved >= 8, `最大通道差 ${moved}`)
+  check("开启后自动取色真的作用到了蒙版画布上（不是只显示在面板里）", moved >= 8, `最大通道差 ${moved}`)
+  // 墨色是从「底图 + 蒙版」一起推的。蒙版固定素白时它不随底图变（那是对的：
+  // 固定白底就该配固定深字），只有蒙版跟着底图变色时，墨色才该跟着重推。
+  check("蒙版取色接管后，文字配色跟着重推", inkTinted !== "" && inkTinted !== skin1.inkPrimary, `${skin1.inkPrimary} → ${inkTinted}`)
 }
 
 // 再换一张，确认是"可随意切换"而不是只能设一次
@@ -504,6 +534,8 @@ async function readMasthead(page) {
       title: h1?.textContent ?? "",
       subtitle: box.querySelector("p")?.textContent ?? "",
       third: box.querySelector("small")?.textContent ?? "",
+      // 黑色署名条在 .masthead 外面，是 .content 的直接子元素
+      byline: document.querySelector(".byline")?.textContent?.trim() ?? "",
       titlePx: px(h1),
       // 缩完字号之后仍然不能超出容器，否则会压到黑胶上
       overflow: h1 ? h1.scrollWidth - box.clientWidth : 0,
