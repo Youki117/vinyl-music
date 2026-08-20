@@ -15,11 +15,18 @@ import sdk from "@/vendor/lx-music/musicSdk/index.js"
 import { hasUserApi, registerUserApi, clearUserApi, type SourceApi } from "@/vendor/lx-music/store"
 import { loadUserApi, type LoadedScript } from "./userApi/host"
 /*
- * 内置音源脚本，随应用一起发布。理由与它对宿主的要求见 builtin/UPSTREAM.md。
- * `?raw` 拿的是源文本 —— 它不是我们的模块，绝不能让打包器去解析它，
- * 它要原样丢进 Worker 里当第三方代码跑。
+ * 内置音源脚本。**开源仓库里不带**，见 builtin/README.md ——
+ * 聚合音源脚本原样分发有法律风险，用户自己放一份进去，或用界面上的「导入音源」。
+ *
+ * 用 glob 而不是写死 import：目录空着时它得到一个空对象，构建照常通过；
+ * 放了脚本就自动被收进来。`?raw` 拿的是源文本 —— 它不是我们的模块，
+ * 绝不能让打包器去解析它，要原样丢进 Worker 当第三方代码跑。
  */
-import builtinScript from "./builtin/qdy.js?raw"
+const builtinScripts = import.meta.glob("./builtin/*.js", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http"
 import { lxLyricToEnhancedLrc } from "./lyric"
 import type { SourceId } from "./catalog"
@@ -280,14 +287,26 @@ export async function getMusicUrl(track: OnlineTrack, quality?: string): Promise
   return url
 }
 
+/** 仓库里有没有放音源脚本。界面据此决定要不要提示用户去导入。 */
+export function hasBuiltinSource(): boolean {
+  return Object.keys(builtinScripts).length > 0
+}
+
 /**
- * 载入内置音源。**应用启动时调一次**，之后用户导入自己的脚本会覆盖它（loadUserApi 会先停掉旧的）。
+ * 载入内置音源。**应用启动时调一次**，之后用户导入自己的脚本会覆盖它
+ * （loadUserApi 会先停掉旧的）。
  *
- * 为什么要内置：见 builtin/UPSTREAM.md。一句话是 —— 让用户自己找一份能用的音源脚本，
- * 等于这个功能不存在（实测他手上那四份在 2026-08-19 已全部失效）。
+ * 开源版本不附带脚本，所以这里会抛 —— boot.ts 对此有降级：搜索和歌词不依赖
+ * 音源脚本，只有解析播放地址依赖它。
  */
 export function loadBuiltinSource(): Promise<LoadedScript> {
-  return loadUserApi(builtinScript)
+  const script = Object.values(builtinScripts)[0]
+  if (!script) {
+    return Promise.reject(
+      new Error("没有内置音源脚本。在设置里用「导入音源」放一份，或参见 src/source/builtin/README.md"),
+    )
+  }
+  return loadUserApi(script)
 }
 
 /** 跨平台换源时的尝试顺序。酷我排前面：实测它的直链最稳，且不挑音质。 */

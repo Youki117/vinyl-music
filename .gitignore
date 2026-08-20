@@ -17,3 +17,16 @@ tests/fixtures/
 tests/real/*
 !tests/real/SOURCES.md
 !tests/real/测试歌单.m3u
+
+# codebase-memory-mcp 的索引产物（本机重建即可，别入库）
+.codebase-memory/
+CODEBASE_GRAPH.md
+
+# 聚合音源脚本不入库：原样分发这类脚本，风险落在仓库上。
+# 使用者自己放一份进来，或用界面上的「导入音源」。见 src/source/builtin/README.md
+src/source/builtin/*.js
+src/source/builtin/UPSTREAM.md
+
+# 设计参考（录屏裁切、Figma 导出包）只在本地做视觉对拍用，不随仓库分发。
+# 缺了它只影响 npm run visual，构建与运行都不受影响。
+design-ref/

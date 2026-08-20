@@ -1,0 +1,23 @@
+# Exclude test suites, test helpers and mocks
+tests/**
+**/*.test.ts
+**/*.test.tsx
+**/*.test.js
+**/*.spec.ts
+**/*.spec.tsx
+**/*.spec.js
+
+# Exclude auxiliary scripts, visual diff tools and benchmarks
+scripts/**
+
+# Exclude design reference mockups and documentation
+design-ref/**
+docs/**
+*.md
+**/*.md
+
+# Exclude build output, cache and generated schemas
+dist/**
+node_modules/**
+src-tauri/target/**
+src-tauri/gen/**

@@ -163,18 +163,37 @@ src-tauri/      Rust 外壳，只做目录递归扫描与窗口
 | [docs/PRD.md](docs/PRD.md) | 产品需求：功能清单、界面规格、验收标准、版本规划 |
 | [docs/TECH-DESIGN.md](docs/TECH-DESIGN.md) | 技术设计：选型理由、架构、雾化蒙版着色器、音频引擎 |
 
+## 在线音源
+
+搜索与歌词开箱即用。**解析播放地址需要一份音源脚本，本仓库不附带** —— 聚合音源
+脚本原样分发的风险落在仓库上，所以留给使用者自己提供：
+
+- 在「在线音乐」面板点**导入音源**选一个 `.js` 脚本，不需要重新构建；
+- 或把脚本放进 `src/source/builtin/`（该目录的 `*.js` 已在 `.gitignore` 中），
+  重新构建后随应用一起发布。
+
+没有脚本时应用照常工作，只是点播放时拿不到地址。协议与宿主实现见
+[src/source/builtin/README.md](src/source/builtin/README.md)。
+
 ## 参考资料
 
-`design-ref/` 为只读参考，不参与构建。
-
-| 文件 | 说明 |
-| --- | --- |
-| `target/ref-veil-primary.png` | 主参考图，白色蒙版与 UI 的基准。**右半部分那张大黑胶是多余元素，不实现** |
-| `target/ref-dark-variant.png` | 全暗变体，没有白色蒙版 |
-| `figma-make/figma-input.png` | 用户喂给 Figma 的原始参考 |
-| `figma-make/figma-output-hard-edge.png` | Figma Make 的输出，蒙版右缘是一条硬边——本项目要解决的首要问题 |
-| `figma-make/original-export.zip` | 原始导出包存档 |
+设计参考图（`design-ref/`）不随仓库分发，因此 `npm run visual` 这道视觉对拍
+在克隆下来的仓库里跑不了 —— 它是开发期的回归关口，不影响构建与运行。
+其余校验脚本（见上）都可以正常跑。
 
 ## 许可
 
-标题字体 Cormorant Garamond 采用 SIL OFL 1.1，许可证见 `src/assets/fonts/OFL.txt`。
+本项目采用 **GNU AGPL-3.0**，全文见 [LICENSE](LICENSE)。
+
+要点：可以自由使用、修改、分发，但**衍生版本必须同样以 AGPL-3.0 开源** ——
+包括仅通过网络提供服务的情形（这正是 AGPL 相对 GPL 多出的一条）。
+如需在闭源或商业产品中使用，请联系作者获取商业授权。
+
+第三方组件各自的许可证：
+
+| 组件 | 许可证 |
+| --- | --- |
+| `src/vendor/lx-music/`（洛雪音乐助手，音源 SDK 与歌词工具） | Apache-2.0，见 `src/vendor/lx-music/LICENSE` |
+| 标题字体 Cormorant Garamond | SIL OFL 1.1，见 `src/assets/fonts/OFL.txt` |
+
+音源脚本不随本仓库分发，见[在线音源](#在线音源)一节。
