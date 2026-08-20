@@ -170,7 +170,8 @@ src-tauri/      Rust 外壳，只做目录递归扫描与窗口
 
 - 在「在线音乐」面板点**导入音源**选一个 `.js` 脚本，不需要重新构建；
 - 或把脚本放进 `src/source/builtin/`（该目录的 `*.js` 已在 `.gitignore` 中），
-  重新构建后随应用一起发布。
+  用 `VINYL_BUNDLE_SOURCE=1 npm run tauri build` 打成自用版。**默认构建会拒绝**
+  带着脚本出包 —— 那样的产物不该发出去。
 
 没有脚本时应用照常工作，只是点播放时拿不到地址。协议与宿主实现见
 [src/source/builtin/README.md](src/source/builtin/README.md)。

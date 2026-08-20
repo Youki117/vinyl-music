@@ -126,6 +126,11 @@ export function create(): Platform {
       return file ? toRef(file) : null
     },
 
+    async pickScript() {
+      const [file] = await openPicker({ accept: ".js" })
+      return file ? toRef(file) : null
+    },
+
     async saveText(suggestedName, text) {
       const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }))
       const a = document.createElement("a")

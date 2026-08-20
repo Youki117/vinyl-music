@@ -2021,3 +2021,51 @@ header button.danger,
   border-color: var(--ink-accent, #b2845f);
   border-width: 2px;
 }
+
+/* ── 音源脚本导入 ──────────────────────────────────────── */
+/*
+ * 常驻在搜索结果上方。脚本不随应用分发，没有它「搜得到但播不了」，
+ * 而这个因果关系用户是猜不出来的 —— 所以状态和后果都摆在明面上，不收进二级菜单。
+ */
+.source-script {
+  margin: 2px 0 4px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.source-script-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: #ddd9d2;
+}
+
+.source-script-actions {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.source-script-actions button {
+  padding: 3px 9px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #c2beb7;
+  font-size: 10.5px;
+}
+
+.source-script-actions button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.source-script-actions button:disabled {
+  color: #74716b;
+}
+
+.source-script .hint {
+  margin: 5px 0 0;
+}

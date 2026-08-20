@@ -26,9 +26,9 @@ let booting: Promise<SourceModule> | null = null
 /**
  * 拿到就绪的音源模块。**幂等**：并发调用共用同一次启动。
  *
- * 内置音源在这里自动启用，用户不需要先去哪里「导入音源」（理由见
- * source/builtin/UPSTREAM.md：能用的音源脚本寿命以周计）。用户导入自己的脚本
- * 会覆盖它，两条路并存。
+ * 音源在这里自动拉起，优先用用户导入的那份，其次是随构建附带的内置脚本
+ * （开源构建不带，见 source/builtin/README.md）。两份都没有时只是警告：
+ * 搜索与歌词不依赖音源脚本，只有解析播放地址依赖它。
  */
 export function ensureSource(): Promise<SourceModule> {
   if (!booting) {
@@ -36,13 +36,12 @@ export function ensureSource(): Promise<SourceModule> {
       // 端到端核查要的入口（scripts/verify-source.mjs），只读，不含写权限
       window.__source = m
       try {
-        const loaded = await m.loadBuiltinSource()
+        const loaded = await m.loadConfiguredSource()
         console.info(
-          `[source] 内置音源就绪：${loaded.info.name}｜${Object.keys(loaded.sources).join(",")}`,
+          `[source] 音源就绪：${loaded.info.name}｜${Object.keys(loaded.sources).join(",")}`,
         )
       } catch (err) {
-        // 搜索和歌词不依赖音源脚本，只有解析播放地址依赖它，所以这里只警告
-        console.warn("[source] 内置音源载入失败，搜索仍可用，播放地址解析不可用", err)
+        console.warn("[source] 没有可用音源，搜索仍可用，播放地址解析不可用", err)
       }
       return m
     })

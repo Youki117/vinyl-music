@@ -52,6 +52,14 @@ export interface Platform {
   /** 选一个播放列表文件（m3u / m3u8）。用户取消返回 null。 */
   pickPlaylistFile(): Promise<FileRef | null>
 
+  /**
+   * 选一个音源脚本（.js）。用户取消返回 null。
+   *
+   * 音源脚本不随应用分发（见 src/source/builtin/README.md），所以必须给用户
+   * 一条自己放进来的路。
+   */
+  pickScript(): Promise<FileRef | null>
+
   /** 弹保存对话框写一个文本文件。用户取消返回 false。 */
   saveText(suggestedName: string, text: string): Promise<boolean>
 
@@ -156,6 +164,9 @@ export const LYRIC_EXTENSIONS = ["lrc"] as const
 
 /** 播放列表扩展名 */
 export const PLAYLIST_EXTENSIONS = ["m3u", "m3u8"] as const
+
+/** 音源脚本扩展名 */
+export const SCRIPT_EXTENSIONS = ["js"] as const
 
 function extOf(name: string): string {
   const dot = name.lastIndexOf(".")

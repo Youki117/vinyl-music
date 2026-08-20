@@ -122,6 +122,52 @@ for (const source of TARGETS) {
 }
 
 /*
+ * 导入音源：**选文件 → 落盘 → 重启后仍在**。
+ *
+ * 脚本不随应用分发（src/source/builtin/README.md），所以这条路是公开版能不能
+ * 播在线曲目的唯一入口 —— 它断了，用户会看到「搜得到但播不了」而不知道少了什么。
+ * 这里不碰文件对话框（那是外壳的事），验的是对话框之后的全部逻辑。
+ */
+{
+  const script = readFileSync(join("tests", "real", "fake-source.js"), "utf8")
+
+  const imported = await page.evaluate(async (src) => {
+    try {
+      const loaded = await window.__source.importUserScript("fake-source.js", src)
+      const saved = await window.__source.savedScriptInfo()
+      return { name: loaded.info.name, saved }
+    } catch (e) {
+      return { err: String(e?.message ?? e) }
+    }
+  }, script)
+
+  check("导入的音源会落盘，读得回来", !imported.err && imported.saved?.file === "fake-source.js",
+    imported.err ?? `${imported.saved?.file}｜${imported.saved?.name}`)
+
+  // 重新载入页面，模拟重启：存下来的那份必须自己回来
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await page.waitForTimeout(600)
+  const afterReload = await page.evaluate(async () => {
+    const m = await window.__initSource()
+    try {
+      const loaded = await m.loadConfiguredSource()
+      return { name: loaded.info.name, sources: Object.keys(loaded.sources) }
+    } catch (e) {
+      return { err: String(e?.message ?? e) }
+    }
+  })
+  check("重启后自动装回导入的那份", !afterReload.err && afterReload.sources?.length > 0,
+    afterReload.err ?? `${afterReload.name}｜${afterReload.sources.join(",")}`)
+
+  const cleared = await page.evaluate(async () => {
+    const m = await window.__initSource()
+    await m.clearUserScript()
+    return m.savedScriptInfo()
+  })
+  check("清除之后不再残留", cleared === null, String(cleared))
+}
+
+/*
  * 音源运行时。用**自带的测试音源**（tests/real/fake-source.js），不打第三方服务器。
  *
  * 理由写在那个脚本的注释里：真实音源全挂在别人的服务器上，实测四份全部失效，

@@ -2,7 +2,7 @@
  * Tauri 实现。所有 @tauri-apps/* 的 import 都收敛在本文件里。
  */
 import type { FileRef, Platform, WindowControls } from "./types"
-import { AUDIO_EXTENSIONS, PLAYLIST_EXTENSIONS } from "./types"
+import { AUDIO_EXTENSIONS, PLAYLIST_EXTENSIONS, SCRIPT_EXTENSIONS } from "./types"
 import { decodeText } from "@/lib/text"
 import { isUnderDir, normalizeWin } from "@/lib/path"
 
@@ -161,6 +161,18 @@ export function create(): Platform {
         filters: [{ name: "播放列表", extensions: [...PLAYLIST_EXTENSIONS] }],
       })
       if (!picked || Array.isArray(picked)) return null
+      return refOf(picked)
+    },
+
+    async pickScript() {
+      const picked = await open({
+        multiple: false,
+        directory: false,
+        filters: [{ name: "音源脚本", extensions: [...SCRIPT_EXTENSIONS] }],
+      })
+      if (!picked || Array.isArray(picked)) return null
+      // 脚本通常放在下载目录之外，读之前得先放行
+      await grantPaths([picked])
       return refOf(picked)
     },
 

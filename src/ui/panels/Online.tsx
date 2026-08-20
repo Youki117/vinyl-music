@@ -1,6 +1,8 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 import { formatTime } from "@/lib/format"
+import { platform } from "@/platform"
+import { ensureSource } from "@/source/boot"
 import { useLibrary, type Track } from "@/store/library"
 import { SOURCES, useOnline, type SourceId } from "@/store/online"
 import { usePlayer } from "@/store/player"
@@ -16,6 +18,89 @@ type Tab = "search" | "list"
  * 只是曲目从哪来不同。搜索结果**不入库**，播了的那首才入库（理由见 player 的 playAt）；
  * 歌单导入则是明确的收藏动作，整批入库。
  */
+/**
+ * 音源脚本的导入入口。
+ *
+ * 脚本不随应用分发（见 src/source/builtin/README.md），所以必须有这条路 ——
+ * 否则「搜得到但播不了」，而用户完全不知道少了什么。状态常驻显示，没导入时
+ * 直接说清楚后果，不藏进二级菜单。
+ */
+function SourceScript() {
+  const [info, setInfo] = useState<{ file: string; name: string; version: string } | null>(null)
+  // 这份构建自带脚本吗。自用构建会带，开源构建不带 —— 状态得说清楚当前**生效的是哪个**，
+  // 只报"有没有导入过"会让自用构建显示"未导入"，而音源其实是活的
+  const [builtin, setBuiltin] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const refresh = () =>
+    void ensureSource()
+      .then(async (m) => {
+        setBuiltin(m.hasBuiltinSource())
+        setInfo(await m.savedScriptInfo())
+      })
+      .catch(() => setInfo(null))
+
+  useEffect(refresh, [])
+
+  const pick = async () => {
+    setErr(null)
+    const ref = await platform.pickScript()
+    if (!ref) return
+    setBusy(true)
+    try {
+      const text = await platform.readText(ref)
+      const m = await ensureSource()
+      const loaded = await m.importUserScript(ref.name, text)
+      setInfo({ file: ref.name, name: loaded.info.name, version: loaded.info.version })
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const clear = async () => {
+    const m = await ensureSource()
+    await m.clearUserScript()
+    setInfo(null)
+  }
+
+  return (
+    <div className="source-script">
+      <div className="source-script-row">
+        <span>
+          {info ? (
+            <>
+              音源：{info.name}
+              {info.version && ` v${info.version}`}
+            </>
+          ) : builtin ? (
+            "音源：随构建附带"
+          ) : (
+            "未导入音源"
+          )}
+        </span>
+        <span className="source-script-actions">
+          <button onClick={() => void pick()} disabled={busy}>
+            {busy ? "载入中…" : info ? "更换" : "导入音源"}
+          </button>
+          {info && <button onClick={() => void clear()}>清除</button>}
+        </span>
+      </div>
+      <p className="hint">
+        {err
+          ? `载入失败：${err}`
+          : info
+            ? `来自 ${info.file}。脚本正文已存下，源文件挪走也不影响。`
+            : builtin
+              ? "这份构建自带了一份音源。导入自己的脚本会覆盖它。"
+              : "搜索与歌词不需要音源脚本，但播放需要 —— 没有它，点播放会一直失败。"}
+      </p>
+    </div>
+  )
+}
+
 export default function Online({ open, onClose }: { open: boolean; onClose: () => void }) {
   // 逐片订阅，不要整店订阅：别把关键词的每次按键都变成整棵子树重渲染
   const source = useOnline((s) => s.source)
@@ -118,6 +203,8 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
               </button>
             ))}
           </div>
+
+          <SourceScript />
 
           {status === "error" && error && <p className="lib-note online-error">{error}</p>}
 

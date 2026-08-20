@@ -42,6 +42,7 @@ export const platform = {
     impl().then((p) => p.readSidecar(ref, ext)),
 
   pickPlaylistFile: (): Promise<FileRef | null> => impl().then((p) => p.pickPlaylistFile()),
+  pickScript: (): Promise<FileRef | null> => impl().then((p) => p.pickScript()),
   saveText: (name: string, text: string): Promise<boolean> =>
     impl().then((p) => p.saveText(name, text)),
   resolvePath: (baseId: string, entry: string): Promise<FileRef | null> =>

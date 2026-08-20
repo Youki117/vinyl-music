@@ -13,7 +13,8 @@
 // @ts-expect-error vendored 的上游代码没有类型声明，且原则是不改它
 import sdk from "@/vendor/lx-music/musicSdk/index.js"
 import { hasUserApi, registerUserApi, clearUserApi, type SourceApi } from "@/vendor/lx-music/store"
-import { loadUserApi, type LoadedScript } from "./userApi/host"
+import { platform } from "@/platform"
+import { loadUserApi, unloadUserApi, parseScriptInfo, type LoadedScript } from "./userApi/host"
 /*
  * 内置音源脚本。**开源仓库里不带**，见 builtin/README.md ——
  * 聚合音源脚本原样分发有法律风险，用户自己放一份进去，或用界面上的「导入音源」。
@@ -287,6 +288,55 @@ export async function getMusicUrl(track: OnlineTrack, quality?: string): Promise
   return url
 }
 
+/** 用户导入的音源脚本存这里。存的是脚本正文本身，不是路径 —— 用户把源文件挪走
+ *  或删掉之后，已经导入的音源不该跟着失效。 */
+const SCRIPT_CONFIG = "source-script"
+
+export type SavedScript = {
+  /** 文件名，只用于界面显示 */
+  file: string
+  text: string
+  savedAt: number
+}
+
+/** 当前导入的是哪一份。没导入过返回 null。 */
+export async function savedScriptInfo(): Promise<{ file: string; name: string; version: string } | null> {
+  const saved = await platform.readConfig<SavedScript>(SCRIPT_CONFIG)
+  if (!saved?.text) return null
+  const info = parseScriptInfo(saved.text)
+  return { file: saved.file, name: info.name, version: info.version }
+}
+
+/**
+ * 导入一份音源脚本：**先加载，成功了才落盘**。
+ *
+ * 顺序很关键 —— 反过来的话，一份跑不起来的脚本会被存下来，下次启动继续加载失败，
+ * 而用户在界面上看到的是"已导入某某音源"。
+ */
+export async function importUserScript(file: string, text: string): Promise<LoadedScript> {
+  const loaded = await loadUserApi(text)
+  await platform.writeConfig<SavedScript>(SCRIPT_CONFIG, { file, text, savedAt: Date.now() })
+  return loaded
+}
+
+/** 清掉导入的音源。之后要么回到内置脚本（如果这份构建带了），要么就没有音源。 */
+export async function clearUserScript(): Promise<void> {
+  unloadUserApi()
+  await platform.writeConfig<SavedScript | null>(SCRIPT_CONFIG, null)
+}
+
+/**
+ * 按优先级把音源拉起来：**用户导入的 > 随构建附带的内置脚本**。
+ *
+ * 用户显式导入过的那份优先级更高 —— 他既然特意放了一份进来，就不该被构建里
+ * 碰巧带着的那份盖掉。两份都没有时抛错，由 boot.ts 降级（搜索与歌词不受影响）。
+ */
+export async function loadConfiguredSource(): Promise<LoadedScript> {
+  const saved = await platform.readConfig<SavedScript>(SCRIPT_CONFIG)
+  if (saved?.text) return loadUserApi(saved.text)
+  return loadBuiltinSource()
+}
+
 /** 仓库里有没有放音源脚本。界面据此决定要不要提示用户去导入。 */
 export function hasBuiltinSource(): boolean {
   return Object.keys(builtinScripts).length > 0
@@ -303,7 +353,7 @@ export function loadBuiltinSource(): Promise<LoadedScript> {
   const script = Object.values(builtinScripts)[0]
   if (!script) {
     return Promise.reject(
-      new Error("没有内置音源脚本。在设置里用「导入音源」放一份，或参见 src/source/builtin/README.md"),
+      new Error("还没有音源脚本。在「在线音乐」面板点「导入音源」选一个 .js 脚本即可。"),
     )
   }
   return loadUserApi(script)
