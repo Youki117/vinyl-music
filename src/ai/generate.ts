@@ -14,9 +14,13 @@ import { buildLyricDigest, composeImagePrompt, SYSTEM_PROMPT, type PromptSource 
  */
 
 export type GenerateResult = {
-  scene: string
+  /** 文本模型给出的画面描述；直接用用户提示词时为 null */
+  scene: string | null
+  /** 真正送给生图模型的完整提示词（含风格后缀） */
   prompt: string
   ref: FileRef
+  /** 图片字节。调用方拿它现做缩略图，省一次回头读盘 */
+  bytes: Uint8Array
 }
 
 export type Progress = (stage: "text" | "image" | "saving") => void
@@ -144,11 +148,11 @@ export async function renderImage(
   throw new Error("返回里既没有 b64_json 也没有 url")
 }
 
-/** 完整流程。调用方负责判断配置是否齐全。 */
+/** 完整流程：歌词 → 画面描述 → 出图。调用方负责判断配置是否齐全。 */
 export async function generateArtwork(
   cfg: AiConfig,
   src: PromptSource,
-  trackId: string,
+  key: string,
   onProgress?: Progress,
   signal?: AbortSignal,
 ): Promise<GenerateResult> {
@@ -157,11 +161,39 @@ export async function generateArtwork(
 
   onProgress?.("image")
   const prompt = composeImagePrompt(scene, cfg.styleSuffix)
-  const bytes = await renderImage(cfg, prompt, signal)
+  return { scene, ...(await renderAndSave(cfg, prompt, key, onProgress, signal)) }
+}
 
+/**
+ * 跳过文本模型，直接拿用户写的提示词出图。
+ *
+ * 少一次调用就少一笔钱，而且用户自己写的话本来就不需要"把歌词转成画面"这一步。
+ * 风格后缀照样拼上 —— 左侧留白那条是硬要求（画面左侧要压蒙版），不是审美偏好。
+ */
+export async function generateFromPrompt(
+  cfg: AiConfig,
+  userPrompt: string,
+  key: string,
+  onProgress?: Progress,
+  signal?: AbortSignal,
+): Promise<GenerateResult> {
+  onProgress?.("image")
+  const prompt = composeImagePrompt(userPrompt, cfg.styleSuffix)
+  return { scene: null, ...(await renderAndSave(cfg, prompt, key, onProgress, signal)) }
+}
+
+async function renderAndSave(
+  cfg: AiConfig,
+  prompt: string,
+  key: string,
+  onProgress?: Progress,
+  signal?: AbortSignal,
+): Promise<{ prompt: string; ref: FileRef; bytes: Uint8Array }> {
+  const bytes = await renderImage(cfg, prompt, signal)
   onProgress?.("saving")
-  const ref = await platform.saveImage(`ai-${hash(trackId)}.png`, bytes)
-  return { scene, prompt, ref }
+  // 文件名带 key 的哈希：同一首歌可以生成多张，名字不能互相覆盖
+  const ref = await platform.saveImage(`ai-${hash(key)}.png`, bytes)
+  return { prompt, ref, bytes }
 }
 
 function base64ToBytes(b64: string): Uint8Array {

@@ -15,7 +15,7 @@ import Playback from "@/ui/panels/Playback"
 import Online from "@/ui/panels/Online"
 import LayoutEdit from "@/ui/LayoutEdit"
 import { useLibrary } from "@/store/library"
-import { useAi } from "@/store/ai"
+import { noteCurrentTrack, useAi } from "@/store/ai"
 import { useMix } from "@/store/mix"
 import MixPanel from "@/ui/panels/Mix"
 import { engine } from "@/audio/engine"
@@ -105,7 +105,9 @@ export default function App() {
       const t = s.current()
       if (!t || t.id === last) return
       last = t.id
-      void useAi.getState().maybeAuto(t)
+      noteCurrentTrack(t.id)
+      // 有专属图就临时盖上，没有就回到基础底图
+      void useAi.getState().applyForTrack(t)
       void useMix.getState().setHost(t.id)
     })
   }, [])

@@ -43,8 +43,22 @@ type SkinState = {
   /** 用户手动选过的底图；配置只存路径与小缩略图，不复制原始图片。 */
   customBackdrops: CustomBackdrop[]
 
+  /**
+   * **临时**盖在基础底图上的那张（歌曲专属 AI 配图）。null = 用基础底图。
+   *
+   * 刻意不写进 `skin.backdrop`：那个是要落盘的"基础底图"，代表用户的选择。
+   * 专属图只在那首歌播放时生效，切走就该回到基础 —— 写进去的话，随便听一首歌
+   * 就把用户手选的底图永久顶掉了，而且每切一首都触发一次存盘与历史记录。
+   */
+  overrideBackdrop: string | null
+
   load(): Promise<void>
   setBackdrop(ref: FileRef, remember?: boolean): Promise<void>
+  /**
+   * 设置/清除临时覆盖。传 null 回到基础底图。
+   * 与 setBackdrop 的区别：不落盘、不进"手选底图"历史、不改 skin。
+   */
+  setBackdropOverride(id: string | null): Promise<void>
   setLabelSource(ref: FileRef | "backdrop"): Promise<void>
   patchVeil(p: Partial<VeilParams>): void
   patchSkin(p: Partial<Skin>): void
@@ -174,6 +188,7 @@ export const useSkin = create<SkinState>((set, get) => ({
   tintColors: [],
   backdropAvg: null,
   customBackdrops: [],
+  overrideBackdrop: null,
 
   async load() {
     const [raw, rawHistory] = await Promise.all([
@@ -209,8 +224,12 @@ export const useSkin = create<SkinState>((set, get) => ({
     }
 
     const prev = get().backdrop
-    fadingId = get().skin.backdrop
-    set((s) => ({ skin: { ...s.skin, backdrop: ref.id }, fading: prev }))
+    fadingId = get().overrideBackdrop ?? get().skin.backdrop
+    /*
+     * 手动选图 = 用户明确表达"我要这张"，所以它成为新的基础底图，并且**清掉临时覆盖** ——
+     * 否则会出现"选了图但画面没变"（专属图还盖在上面），是最让人困惑的一类 bug。
+     */
+    set((s) => ({ skin: { ...s.skin, backdrop: ref.id }, fading: prev, overrideBackdrop: null }))
     await refreshImages(set, get)
     scheduleSave(get)
 
@@ -229,6 +248,27 @@ export const useSkin = create<SkinState>((set, get) => ({
       }
     }
     // 转场结束后丢掉旧图引用，同时解除钉住
+    window.setTimeout(() => {
+      fadingId = null
+      set({ fading: null })
+    }, 700)
+  },
+
+  async setBackdropOverride(id) {
+    if (get().overrideBackdrop === id) return
+
+    if (id) {
+      await platform.ensureReadable([id])
+      // 先确认能读再切；专属图被手动删掉时不该把画面变空白，而是留在基础底图上
+      const ok = await loadImage(id).catch(() => null)
+      if (!ok) return
+    }
+
+    const prev = get().backdrop
+    fadingId = get().overrideBackdrop ?? get().skin.backdrop
+    set({ overrideBackdrop: id, fading: prev })
+    await refreshImages(set, get)
+    // 刻意不调 scheduleSave：这一层本来就不该落盘
     window.setTimeout(() => {
       fadingId = null
       set({ fading: null })
@@ -350,12 +390,20 @@ async function refreshImages(
   set: (p: Partial<SkinState>) => void,
   get: () => SkinState,
 ): Promise<void> {
-  const { skin } = get()
+  const { skin, overrideBackdrop } = get()
+  /*
+   * 真正要显示的那张 = 临时覆盖优先，否则基础底图。
+   *
+   * 取色、平均色、贴纸都跟着它走 —— 否则听一首有专属图的歌时，画面是 A 而配色
+   * 取自 B，文字对比度会算错。
+   */
+  const activeBackdrop = overrideBackdrop ?? skin.backdrop
+  const activeLabel = skin.label.source === "backdrop" ? activeBackdrop : labelSourceId(skin)
   try {
     // 先钉住这一轮要用的两张，免得加载第二张时把第一张淘汰掉
-    pinnedIds = [skin.backdrop, labelSourceId(skin), fadingId].filter((v): v is string => !!v)
-    const backdrop = await loadImage(skin.backdrop)
-    const label = await loadImage(labelSourceId(skin))
+    pinnedIds = [activeBackdrop, activeLabel, fadingId].filter((v): v is string => !!v)
+    const backdrop = await loadImage(activeBackdrop)
+    const label = await loadImage(activeLabel)
     set({ backdrop, label })
 
     // 蒙版自动取色：看**整张图**。

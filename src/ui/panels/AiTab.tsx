@@ -1,13 +1,16 @@
+import { useEffect, useState } from "react"
+
 import { configWarning, isConfigured } from "@/ai/config"
 import {
   MAX_ARTWORK_BUDGET,
   MIN_ARTWORK_BUDGET,
-  findArtwork,
+  artworkForTrack,
   formatBytes,
   totalBytes,
 } from "@/ai/artworkStore"
 import { useAi } from "@/store/ai"
 import { usePlayer } from "@/store/player"
+import { useSkin } from "@/store/skin"
 
 const STAGE_TEXT: Record<string, string> = {
   text: "正在读歌词、构思画面…",
@@ -18,19 +21,31 @@ const STAGE_TEXT: Record<string, string> = {
 /**
  * AI 配图设置。
  *
- * 默认关闭：不开这个开关，应用仍然全程离线、不发任何网络请求。
+ * 功能模型（见 artworkStore 顶部）：底图只有一个"基础"槽，歌曲专属图只在那首歌
+ * 播放时临时盖上去。所以这一页分三块 —— 定基础的、给当前这首歌配的、以及回头
+ * 翻查全部生成过的图库。
+ *
+ * 默认关闭：不开这个开关，应用仍然全程离线、不发起任何网络请求。
  */
 export default function AiTab() {
   const ai = useAi()
   const track = usePlayer((s) => s.current())
+  const baseBackdrop = useSkin((s) => s.skin.backdrop)
+  const [prompt, setPrompt] = useState("")
+
   const ready = isConfigured(ai.config)
   const busy = ai.stage !== "idle"
-  const hasArtwork = track ? Boolean(findArtwork(ai.artwork, track.id)) : false
   const warning = configWarning(ai.config)
   const used = totalBytes(ai.artwork)
   // 大小未知的那些（旧版本迁移来的）不计入已用。如实说明，免得用户拿这个数字
   // 去对文件夹属性时对不上
   const unsized = ai.artwork.filter((item) => item.bytes === 0).length
+  const forTrack = track ? artworkForTrack(ai.artwork, ai.pinned, track.id) : null
+
+  // 迁移来的旧条目没有缩略图，第一次打开这一页时按原图补上
+  useEffect(() => {
+    if (ai.config.enabled) void useAi.getState().ensureThumbnails()
+  }, [ai.config.enabled])
 
   return (
     <>
@@ -49,30 +64,40 @@ export default function AiTab() {
             <span />
           </label>
         </div>
+        {!ready && ai.config.enabled && (
+          <p className="hint danger-text">接口地址、密钥和模型名填齐后才能生成。</p>
+        )}
+        {warning && <p className="hint danger-text">{warning}</p>}
+        {busy && <p className="hint">{STAGE_TEXT[ai.stage]}</p>}
+        {ai.error && <p className="hint danger-text">失败：{ai.error}</p>}
+      </section>
 
-        {ai.config.enabled && (
-          <>
-            <div className="setting-toggle-row compact">
-              <div>
-                <b>切歌时自动生成</b>
-                <span>已有配图直接复用；连续切歌时不会生成，停下来听满 8 秒才开始</span>
-              </div>
-              <label className="switch">
-                <input
-                  type="checkbox"
-                  checked={ai.config.auto}
-                  onChange={(e) => ai.patch({ auto: e.target.checked })}
-                />
-                <span />
-              </label>
+      {ai.config.enabled && (
+        <>
+          {/*
+            基础底图：整个应用平时用的那张。自己写一句想要的画面，跳过文本模型
+            直接出图 —— 少一次调用就少一笔钱，用户自己写本来也不需要"歌词转画面"。
+          */}
+          <section className="panel-section">
+            <div className="panel-title-row">
+              <h3>基础底图</h3>
+              <span>平时显示的那张</span>
             </div>
+            <textarea
+              className="style-suffix"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="写一句你想要的画面，例如：黄昏的海边公路，一辆旧车停在路肩"
+              rows={3}
+            />
             <div className="ai-generate-actions">
               <button
                 className="primary"
-                disabled={!track || !ready || busy}
-                onClick={() => track && void ai.generate(track)}
+                disabled={!ready || busy || !prompt.trim()}
+                onClick={() => void ai.generateGlobal(prompt)}
+                title="按这句话生成，并设为基础底图"
               >
-                {hasArtwork ? "重新生成当前歌曲" : "为当前歌曲生成意境配图"}
+                {ai.generatingFor === "custom" ? "生成中…" : "生成并设为基础底图"}
               </button>
               {busy && (
                 <button className="danger" onClick={() => ai.cancel()}>
@@ -80,47 +105,56 @@ export default function AiTab() {
                 </button>
               )}
             </div>
-            {!ready && <p className="hint danger-text">接口地址、密钥和模型名填齐后才能生成。</p>}
-            {warning && <p className="hint danger-text">{warning}</p>}
-            {!track && <p className="hint">先选一首歌。</p>}
-            {busy && <p className="hint">{STAGE_TEXT[ai.stage]}</p>}
-            {!busy && ai.pendingFor !== null && (
-              <p className="hint">停留满 8 秒后开始生成；这期间切歌就不生成，也不产生费用。</p>
-            )}
-            {ai.error && <p className="hint danger-text">失败：{ai.error}</p>}
-          </>
-        )}
-      </section>
-
-      {ai.config.enabled && (
-        <>
-          <section className="panel-section">
-            <div className="panel-title-row">
-              <h3>风格后缀与画面提示词</h3>
-            </div>
-            <textarea
-              className="style-suffix"
-              value={ai.config.styleSuffix}
-              onChange={(e) => ai.patch({ styleSuffix: e.target.value })}
-              rows={6}
-            />
             <p className="hint">
-              追加到每次提示词末尾。其中“人物主体位于画面右侧、左侧留白”用于避开左侧蒙版。
+              不读歌词，直接按这句话出图，比走歌词那条少一次模型调用。
+              在「底图」页手动选图同样会成为基础底图。
             </p>
           </section>
 
-          {ai.lastScene && (
-            <section className="panel-section">
-              <div className="panel-title-row">
-                <h3>模型理解的画面意境</h3>
-              </div>
-              <p className="hint scene-text">{ai.lastScene}</p>
-            </section>
-          )}
-
+          {/*
+            歌曲专属图：只在这首歌播放时临时盖住基础底图，切走就回来。
+          */}
           <section className="panel-section">
             <div className="panel-title-row">
-              <h3>配图存储</h3>
+              <h3>当前歌曲专属图</h3>
+              <span>{track ? track.title : "没有在放的歌"}</span>
+            </div>
+            {forTrack ? (
+              <div className="artwork-current">
+                {forTrack.thumbnail ? (
+                  <img src={forTrack.thumbnail} alt="当前歌曲的专属配图" />
+                ) : (
+                  <div className="artwork-thumb-empty" aria-hidden="true" />
+                )}
+                <div>
+                  <b>已有专属图</b>
+                  <span>
+                    这首歌名下共 {ai.artwork.filter(
+                      (a) => a.origin.kind === "song" && a.origin.trackId === track?.id,
+                    ).length} 张，正在用的是
+                    {ai.pinned[track?.id ?? ""] ? "你指定的那张" : "最新的一张"}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <p className="hint">这首歌还没有专属图，现在显示的是基础底图。</p>
+            )}
+            <div className="ai-generate-actions">
+              <button
+                disabled={!track || !ready || busy}
+                onClick={() => track && void ai.generateForTrack(track)}
+                title="读这首歌的歌词构思画面，生成一张只属于它的图"
+              >
+                {forTrack ? "再生成一张" : "为这首歌生成"}
+              </button>
+            </div>
+            {ai.lastScene && <p className="hint scene-text">{ai.lastScene}</p>}
+          </section>
+
+          {/* 图库：回头翻查、用回旧图、删掉不要的 */}
+          <section className="panel-section">
+            <div className="panel-title-row">
+              <h3>AI 图库</h3>
               <span>
                 {ai.artwork.length} 张 · {formatBytes(used)} / {formatBytes(ai.budgetBytes)}
               </span>
@@ -128,6 +162,77 @@ export default function AiTab() {
             <div className="artwork-meter" aria-hidden="true">
               <span style={{ width: `${Math.min(100, (used / ai.budgetBytes) * 100)}%` }} />
             </div>
+
+            {ai.artwork.length === 0 ? (
+              <p className="hint">还没有生成过图片。</p>
+            ) : (
+              <ul className="artwork-gallery">
+                {ai.artwork.map((item) => {
+                  const isBase = item.path === baseBackdrop
+                  const isPinned = track ? ai.pinned[track.id] === item.id : false
+                  return (
+                    <li key={item.id} data-on={isBase}>
+                      {item.thumbnail ? (
+                        <img src={item.thumbnail} alt="" />
+                      ) : (
+                        <div className="artwork-thumb-empty" aria-hidden="true" />
+                      )}
+                      <div className="artwork-meta">
+                        <b>
+                          {item.origin.kind === "custom"
+                            ? "自定义提示词"
+                            : item.origin.title || "（曲目已不在库中）"}
+                        </b>
+                        <span title={item.prompt || undefined}>
+                          {item.scene || item.prompt || "（这张没有留下提示词）"}
+                        </span>
+                        <em>
+                          {new Date(item.createdAt).toLocaleString("zh-CN", {
+                            month: "numeric",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                          {item.bytes > 0 ? ` · ${formatBytes(item.bytes)}` : ""}
+                          {isBase ? " · 基础底图" : ""}
+                        </em>
+                      </div>
+                      <div className="artwork-actions">
+                        <button
+                          disabled={isBase}
+                          onClick={() => void ai.useAsBase(item.id)}
+                          title="设为平时显示的基础底图"
+                        >
+                          设为底图
+                        </button>
+                        <button
+                          disabled={!track}
+                          data-on={isPinned}
+                          onClick={() =>
+                            track && ai.pinToTrack(track.id, isPinned ? null : item.id)
+                          }
+                          title={
+                            isPinned
+                              ? "取消指定，回到用最新的一张"
+                              : "让当前这首歌固定用这张，而不是最新的那张"
+                          }
+                        >
+                          {isPinned ? "已指定" : "指定给本曲"}
+                        </button>
+                        <button
+                          className="danger"
+                          onClick={() => void ai.removeArtwork(item.id)}
+                          title="删除这张图片文件"
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+
             <label className="row-field">
               <span>磁盘上限</span>
               <input
@@ -141,17 +246,10 @@ export default function AiTab() {
               />
             </label>
             <p className="hint">
-              超过上限时，从最久没听到的那几首开始删。正在用的那张永远保留。
+              超过上限时从最久没用到的开始删；正在用的那张和基础底图永远保留。
               {unsized > 0 && ` 另有 ${unsized} 张是旧版本留下的，没记大小，重新生成后才会计入。`}
             </p>
             <div className="ai-generate-actions">
-              <button
-                disabled={!track || !hasArtwork}
-                onClick={() => track && void ai.removeArtwork(track.id)}
-                title="删掉这首歌的配图，下次会重新生成"
-              >
-                删除当前这首的配图
-              </button>
               <button
                 className="danger"
                 disabled={ai.artwork.length === 0}
@@ -161,6 +259,22 @@ export default function AiTab() {
                 清空全部（{ai.artwork.length}）
               </button>
             </div>
+          </section>
+
+          <section className="panel-section">
+            <div className="panel-title-row">
+              <h3>风格后缀</h3>
+            </div>
+            <textarea
+              className="style-suffix"
+              value={ai.config.styleSuffix}
+              onChange={(e) => ai.patch({ styleSuffix: e.target.value })}
+              rows={6}
+            />
+            <p className="hint">
+              追加到每次提示词末尾，自定义提示词那条也会拼上。
+              其中“人物主体位于画面右侧、左侧留白”用于避开左侧蒙版，不是审美偏好。
+            </p>
           </section>
 
           <section className="panel-section ai-config-section">

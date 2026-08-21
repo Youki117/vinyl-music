@@ -21,9 +21,11 @@ export type AiConfig = {
   imageModel: string
   imageSize: string
 
-  /** 切歌后自动为没有配图的曲目生成 */
-  auto: boolean
-  /** 追加到提示词末尾的固定风格描述 */
+  /**
+   * 追加到提示词末尾的固定风格描述。
+   *
+   * 自定义提示词那条路也会拼上它 —— 「主体偏右、左侧留白」是硬要求，不是审美偏好。
+   */
   styleSuffix: string
 }
 
@@ -45,7 +47,6 @@ export const DEFAULT_AI: AiConfig = {
   imageApiKey: "",
   imageModel: "",
   imageSize: "1792x1024",
-  auto: false,
   styleSuffix: DEFAULT_STYLE_SUFFIX,
 }
 

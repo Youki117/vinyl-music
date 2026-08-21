@@ -174,7 +174,14 @@ describe("composeImagePrompt", () => {
 describe("config", () => {
   it("默认关闭 —— 不开就仍然全程离线", () => {
     expect(DEFAULT_AI.enabled).toBe(false)
-    expect(DEFAULT_AI.auto).toBe(false)
+  })
+
+  /*
+   * 自动生成整块删掉了：新模型里图只由用户手动生成（全局一张 + 按需给某首歌配），
+   * 不再有"听满 8 秒就自动烧一笔钱"这回事。这条盯着它别被无意中加回来。
+   */
+  it("配置里不该再有自动生成开关", () => {
+    expect("auto" in DEFAULT_AI).toBe(false)
   })
 
   it("图像接口留空时复用文本那套", () => {
