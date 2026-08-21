@@ -12,6 +12,7 @@
 - Rendered native release implementation:
   - `artifacts/final-library-restored.png`
   - `artifacts/final-library-import.png`
+  - `artifacts/final-playlist-live-preview.png`
   - `artifacts/final-online-two-tabs.png`
   - `artifacts/final-source-status-dot.png`
   - `artifacts/final-backdrop-four-half.png`
@@ -29,7 +30,7 @@
 - Source pixels: library 1022 × 951, source status 449 × 683, backdrop strip 777 × 183, switch 437 × 693, masthead 774 × 722.
 - Implementation pixels: final focused captures are 1289 × 714; the populated library capture is 1709 × 946.
 - Combined evidence preserves aspect ratio and normalizes each pair to a common height. The user screenshots contain annotations and different app-window sizes, so comparison is by the named component, state, hierarchy and proportion rather than a false full-frame pixel match.
-- States: populated library with restored custom playlists; platform-import empty state; online-search two-tab state; active-source state; backdrop tab; veil tab; playing masthead.
+- States: populated library with restored custom playlists; platform-import empty and real-preview states; online-search two-tab state; active-source state; backdrop tab; veil tab; playing masthead.
 
 ## Required fidelity surfaces
 
@@ -44,6 +45,7 @@
 - Keyboard shortcut `P` opened the final library build with an empty search input; `F` opened online search with an empty search input. The shortcut letter is no longer inserted into the newly focused field.
 - The restored custom playlists render as “我喜欢 465” and “老歌 0”; the track library remains 471 items and the active view is “全部音乐”.
 - Clicking the list-level “导入歌单” entry opens the migrated platform parser inside the library main area. Its input, automatic/manual platform selection, parse button, preview/list, play-all and import callbacks remain connected to the single online store implementation.
+- The final packaged executable parsed the real QQ playlist `4010674675` through the migrated view and rendered “我喜欢 / 465 首”, “播放全部”, “导入为歌单” and the ordered track preview. The test deliberately stopped before “导入为歌单”; after closing the app the persisted library remained 471 tracks and two playlists.
 - Online search displays exactly two tabs. Source management displays one green availability dot instead of the old visible status text; its accessible label and CSS hover/focus tooltip retain the explanation.
 - The backdrop rail is non-wrapping, hides its scrollbar, converts usable mouse-wheel movement to horizontal scrolling, and releases vertical scrolling at either end.
 - “自动从底图取色” renders as the established switch control and preserves the existing checkbox state/handler underneath.
