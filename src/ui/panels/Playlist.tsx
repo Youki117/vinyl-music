@@ -287,6 +287,16 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
               title={`排序：${SORT_LABEL[sort]}${sortDesc ? "（降序）" : ""}`}
             />
             {sortMenuOpen && (
+              /*
+               * 用 role="group" + 一排原生 button，而**不是** role="menu"。
+               *
+               * role="menu" 是一份完整的交互契约：上下键在项之间移动、焦点由菜单
+               * 自己管、Home/End 跳首尾、字母键快速定位。只贴标签不兑现这些，读屏
+               * 用户会按预期去按方向键，然后什么都不发生 —— 比不加标签更糟。
+               * 这里要的其实就是"一组可选项"，原生 button + aria-pressed 表达得
+               * 更准，键盘行为也天然正确（Tab 遍历、回车选中）。
+               * Escape 关闭与焦点回到触发器在上面的 onKeyDown 里补齐。
+               */
               <div
                 id="playlist-sort-options"
                 className="lib-sort-popover"
