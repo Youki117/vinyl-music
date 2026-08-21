@@ -4,6 +4,7 @@ import { platform } from "@/platform"
 import { BUILTIN_BACKDROPS } from "@/skin/backdrops"
 import { labelBackground } from "@/skin/resolve"
 import { useSkin } from "@/store/skin"
+import { IconPlus } from "../icons"
 import AiTab from "./AiTab"
 import { useDismiss } from "../useDismiss"
 
@@ -24,6 +25,7 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
   const patchSkin = useSkin((s) => s.patchSkin)
   const skins = useSkin((s) => s.skins)
   const tintColors = useSkin((s) => s.tintColors)
+  const customBackdrops = useSkin((s) => s.customBackdrops)
   const saveAs = useSkin((s) => s.saveAs)
   const activate = useSkin((s) => s.activate)
   const removeSkin = useSkin((s) => s.removeSkin)
@@ -107,21 +109,14 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
         {tab === "image" && (
           <>
             <section className="panel-section">
-            <button
-              className="wide"
-              onClick={() => void platform.pickImage().then((r) => r && setBackdrop(r))}
-            >
-              选择底图图片…
-            </button>
-            </section>
-
-            <section className="panel-section">
             {/*
-              内置底图。装完不选图就只有一层 CSS 渐变，而整套配色都是从底图现算的，
+              背景图片。装完不选图就只有一层 CSS 渐变，而整套配色都是从底图现算的，
               没有图等于看不出效果。setBackdrop 只用 ref.id，所以这里给个合成的
               FileRef 就够，loadImage 见到 builtin: 前缀会走打包后的资源 URL。
+              用户手动选过的图保留小缩略图和原路径，排在内置图之后；最后一格才是
+              “继续选择”，这样它与其它选项等大，也不用每次从独立大按钮重新进入。
             */}
-            <p className="hint">内置底图</p>
+            <p className="hint">背景图片</p>
             <div className="builtin-backdrops">
               {BUILTIN_BACKDROPS.map((b) => (
                 <button
@@ -135,6 +130,29 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
                   title={b.name}
                 />
               ))}
+              {customBackdrops.map((item) => (
+                <button
+                  key={item.id}
+                  className="builtin-backdrop"
+                  data-on={skin.backdrop === item.id}
+                  style={{ backgroundImage: `url(${item.thumbnail})` }}
+                  onClick={() =>
+                    void setBackdrop({ id: item.id, name: item.name, size: 0, mtime: 0 })
+                  }
+                  aria-label={`使用自定义底图 ${item.name}`}
+                  aria-pressed={skin.backdrop === item.id}
+                  title={item.name}
+                />
+              ))}
+              <button
+                className="builtin-backdrop backdrop-picker"
+                onClick={() => void platform.pickImage().then((r) => r && setBackdrop(r))}
+                aria-label="选择新的背景图片"
+                title="选择新的背景图片"
+              >
+                <IconPlus size={16} />
+                <span>选择</span>
+              </button>
             </div>
             </section>
 
@@ -165,7 +183,7 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
                     }
                   >
                     <option value="cover">曲目封面</option>
-                    <option value="skin">这里设的图</option>
+                    <option value="skin">背景图片</option>
                   </select>
                 </label>
                 <p className="hint">

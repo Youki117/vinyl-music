@@ -2056,7 +2056,8 @@ header button.danger,
 /* ── 内置底图选择 ──────────────────────────────────────── */
 .builtin-backdrops {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  /* 四张内置图 + “选择”正好同排；自定义历史继续按相同尺寸向后换行。 */
+  grid-template-columns: repeat(5, 1fr);
   gap: 6px;
 }
 
@@ -2082,6 +2083,23 @@ header button.danger,
   border-width: 2px;
 }
 
+.backdrop-picker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: var(--panel-bg-soft);
+  color: var(--panel-text-muted);
+}
+
+.backdrop-picker span {
+  font-size: 9px;
+}
+
+.backdrop-picker:hover {
+  color: var(--panel-gold-bright);
+}
+
 /* ── 统一功能面板设计系统 ─────────────────────────────────
  * 目标稿只负责定下暖黑金语言；所有真实面板共用下面这些令牌、间距和控件状态，
  * 避免在线页、设置页、皮肤页各自长成一套 UI。
@@ -2092,7 +2110,13 @@ header button.danger,
 .skin-editor,
 .mix-panel,
 .library-drawer {
-  width: min(calc(880px + var(--rail-w)), calc(100% - 44px));
+  /*
+   * 功能区始终是“右侧抽屉”，不是覆盖主舞台的第二个页面。
+   * 34vw 对应参考图约 1/3 的占比；上下限保证常见桌面窗口里既不挤坏控件，
+   * 也不会因为窗口变宽而重新膨胀成半屏甚至全屏。
+   */
+  width: min(clamp(350px, 34vw, 460px), calc(100% - 72px));
+  box-sizing: border-box;
   padding-right: var(--rail-w);
   background: var(--panel-bg);
   border-left: 1px solid var(--panel-border);
@@ -2478,6 +2502,11 @@ header button.danger,
   border-color: var(--panel-border);
   border-radius: 4px;
   background: var(--panel-bg-soft);
+  flex-wrap: wrap;
+}
+
+.online-preview-actions {
+  margin-left: auto;
 }
 
 .source-manager {
@@ -2538,12 +2567,14 @@ header button.danger,
 
 .drawer .row {
   min-height: 58px;
-  padding: 10px 18px 10px 24px;
+  padding: 10px 12px;
+  column-gap: 6px;
 }
 
 .online-drawer .row,
 .library-drawer .row {
-  grid-template-columns: 42px minmax(0, 1fr) auto auto;
+  /* 编号只承担定位作用，不再用大块空白把歌名向右挤。 */
+  grid-template-columns: 20px minmax(0, 1fr) auto auto;
   grid-template-areas:
     "index title badge dur"
     "index meta  meta  meta";
@@ -2587,7 +2618,7 @@ header button.danger,
 
 .eq-presets {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(3, 1fr);
 }
 
 .eq-grid {
@@ -2733,16 +2764,16 @@ header button.danger,
 }
 
 .lib-side {
-  width: 210px;
-  gap: 8px;
-  padding: 18px 12px;
+  width: 124px;
+  gap: 6px;
+  padding: 14px 8px;
   border-right-color: var(--panel-border);
 }
 
 .lib-side-group button,
 .lib-side-group input {
-  min-height: 36px;
-  padding: 8px 12px;
+  min-height: 34px;
+  padding: 7px 9px;
   border-radius: 4px;
   color: var(--panel-text-muted);
 }
@@ -2755,11 +2786,11 @@ header button.danger,
 }
 
 .lib-local-button {
-  min-height: 38px;
+  min-height: 36px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
+  padding: 7px 9px;
   border: 1px solid transparent;
   border-radius: 4px;
   color: #c9c1b6;
@@ -2779,7 +2810,7 @@ header button.danger,
 
 .lib-side-title {
   margin-top: 8px;
-  padding: 0 10px;
+  padding: 0 7px;
   color: var(--panel-text-muted);
 }
 
@@ -2789,8 +2820,20 @@ header button.danger,
 }
 
 .lib-side-title button {
-  width: auto;
-  padding: 0 5px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+}
+
+.lib-side-title button:hover,
+.lib-playlist-export:hover {
+  border-color: var(--panel-border);
+  background: var(--panel-bg-soft);
+  color: var(--panel-gold-bright);
 }
 
 .lib-playlist-row {
@@ -2812,6 +2855,11 @@ header button.danger,
   text-align: left;
 }
 
+/* `.lib-side-group button { width: 100% }` 只适用于整行入口，不能把行尾图标撑满。 */
+.lib-side-group .lib-playlist-select {
+  width: auto;
+}
+
 .lib-playlist-select span {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2825,9 +2873,16 @@ header button.danger,
   font-style: normal;
 }
 
-.lib-playlist-export {
-  width: 28px;
-  height: 28px;
+.lib-side-group .lib-playlist-export {
+  width: 26px;
+  height: 26px;
+  min-height: 26px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
 }
 
 .lib-playlist-row:hover,
@@ -2837,25 +2892,62 @@ header button.danger,
 }
 
 .lib-main header {
-  min-height: 58px;
-  padding: 10px 16px;
+  min-height: 54px;
+  padding: 9px 12px;
   border-bottom-color: var(--panel-border);
   flex-wrap: nowrap;
+  gap: 6px;
 }
 
-.lib-current-view {
-  min-width: 98px;
-  overflow: hidden;
+.lib-main header input {
+  flex: 1;
+  min-width: 0;
+}
+
+.lib-main header .lib-sort-select {
+  width: 64px;
+  max-width: 64px;
+  height: 30px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--panel-text-muted);
+  cursor: pointer;
+}
+
+.lib-main header .lib-sort-select:hover,
+.lib-main header .lib-sort-select:focus {
   color: var(--panel-gold-bright);
-  font-family: var(--font-panel-title);
-  font-size: 13px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.lib-sort-direction {
+  width: 24px;
+  height: 30px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--panel-text-muted);
+}
+
+.lib-sort-direction:hover {
+  color: var(--panel-gold-bright);
+}
+
+.lib-sort-direction .sort-asc {
+  transform: rotate(-90deg);
+}
+
+.lib-sort-direction .sort-desc {
+  transform: rotate(90deg);
 }
 
 .lib-actions {
-  padding: 9px 16px;
+  padding: 8px 12px;
   border-bottom-color: var(--panel-border);
 }
 
@@ -2903,58 +2995,68 @@ header button.danger,
 
 .quality-popover {
   position: absolute;
-  right: -4px;
+  left: 50%;
+  right: auto;
   bottom: 40px;
   z-index: 16;
-  width: 286px;
-  padding: 13px;
+  width: 96px;
+  padding: 8px;
   border: 1px solid var(--panel-border-strong);
   border-radius: 5px;
   background: var(--panel-bg);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
   color: var(--panel-text);
-  text-align: left;
+  text-align: center;
+  transform: translateX(-50%);
 }
 
 .quality-popover header {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  margin-bottom: 11px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  margin-bottom: 7px;
 }
 
 .quality-popover header div {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 2px;
 }
 
 .quality-popover header b {
   font-family: var(--font-panel-title);
-  font-size: 13px;
+  font-size: 11px;
 }
 
 .quality-popover header span,
 .quality-popover header em {
   color: var(--panel-text-muted);
-  font-size: 9px;
+  font-size: 8px;
   font-style: normal;
+}
+
+.quality-popover header span {
+  display: none;
 }
 
 .quality-options {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 6px;
+  grid-template-columns: 1fr;
+  gap: 5px;
 }
 
 .controls .quality-options button {
-  width: auto;
+  width: 100%;
   height: auto;
   min-height: 42px;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  padding: 7px 9px;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 4px;
   border: 1px solid var(--panel-border);
   border-radius: 4px;
   background: var(--panel-bg-soft);
@@ -2967,26 +3069,27 @@ header button.danger,
 
 .quality-options button span {
   color: var(--panel-text);
-  font-size: 10.5px;
+  font-size: 10px;
 }
 
 .quality-options button em {
   margin-top: 2px;
   color: var(--panel-text-muted);
-  font-size: 8.5px;
+  font-size: 8px;
   font-style: normal;
+  line-height: 1.25;
 }
 
 .quality-options button[data-unavailable="true"] em::after {
-  content: " · 当前曲目无此档";
+  content: " · 缺档";
   color: var(--panel-text-dim);
 }
 
 .quality-note {
-  margin: 10px 0 0;
+  margin: 7px 0 0;
   color: var(--panel-text-muted);
-  font-size: 9px;
-  line-height: 1.55;
+  font-size: 8px;
+  line-height: 1.4;
 }
 
 .quality-note.error {
@@ -3015,7 +3118,7 @@ header button.danger,
   .skin-editor,
   .mix-panel,
   .library-drawer {
-    width: calc(100% - 28px);
+    width: min(350px, calc(100% - 28px));
   }
 
   .panel-section {
@@ -3023,7 +3126,7 @@ header button.danger,
   }
 
   .lib-side {
-    width: 176px;
+    width: 112px;
   }
 }
 

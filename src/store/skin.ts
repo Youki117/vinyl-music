@@ -2,6 +2,12 @@ import { create } from "zustand"
 import { FastAverageColor } from "fast-average-color"
 
 import { platform, toObjectUrl, type FileRef } from "@/platform"
+import {
+  backdropHistoryFile,
+  readBackdropHistory,
+  rememberBackdrop,
+  type CustomBackdrop,
+} from "@/skin/backdropHistory"
 import { DEFAULT_SKIN, makeSkin, migrateSkins, SKIN_SCHEMA_VERSION, type Skin, type SkinsFile } from "@/skin/model"
 import { dominantColors, veilTintsFrom } from "@/skin/palette"
 import { builtinBackdropUrl } from "@/skin/backdrops"
@@ -34,9 +40,11 @@ type SkinState = {
    * 当前生效的蒙版色现算。同样是派生数据，不落盘。
    */
   backdropAvg: [number, number, number] | null
+  /** 用户手动选过的底图；配置只存路径与小缩略图，不复制原始图片。 */
+  customBackdrops: CustomBackdrop[]
 
   load(): Promise<void>
-  setBackdrop(ref: FileRef): Promise<void>
+  setBackdrop(ref: FileRef, remember?: boolean): Promise<void>
   setLabelSource(ref: FileRef | "backdrop"): Promise<void>
   patchVeil(p: Partial<VeilParams>): void
   patchSkin(p: Partial<Skin>): void
@@ -127,6 +135,36 @@ function scheduleSave(get: () => SkinState): void {
   }, 1000)
 }
 
+function readableImageIds(skin: Skin, history: readonly CustomBackdrop[]): string[] {
+  return [...new Set([skin.backdrop, labelSourceId(skin), ...history.map((item) => item.id)])].filter(
+    (id): id is string => !!id && builtinBackdropUrl(id) === null,
+  )
+}
+
+/** 历史列表显示固定尺寸缩略图，避免打开面板就解码十几张原始 4K 图片。 */
+async function thumbnailOf(img: LoadedImage): Promise<string> {
+  const width = 160
+  const height = 100
+  const canvas = document.createElement("canvas")
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext("2d")
+  if (!ctx) throw new Error("无法创建底图缩略图")
+
+  const source = new Image()
+  await new Promise<void>((resolve, reject) => {
+    source.onload = () => resolve()
+    source.onerror = () => reject(new Error("无法读取底图缩略图"))
+    source.src = img.url
+  })
+
+  const scale = Math.max(width / img.width, height / img.height)
+  const drawWidth = img.width * scale
+  const drawHeight = img.height * scale
+  ctx.drawImage(source, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight)
+  return canvas.toDataURL("image/jpeg", 0.74)
+}
+
 export const useSkin = create<SkinState>((set, get) => ({
   skin: DEFAULT_SKIN,
   skins: [DEFAULT_SKIN],
@@ -135,31 +173,61 @@ export const useSkin = create<SkinState>((set, get) => ({
   fading: null,
   tintColors: [],
   backdropAvg: null,
+  customBackdrops: [],
 
   async load() {
-    const raw = await platform.readConfig<SkinsFile>("skins")
+    const [raw, rawHistory] = await Promise.all([
+      platform.readConfig<SkinsFile>("skins"),
+      platform.readConfig<unknown>("backdrop-history"),
+    ])
     const file = migrateSkins(raw)
+    const customBackdrops = readBackdropHistory(rawHistory)
+    const active = file?.skins.find((s) => s.id === file.activeId) ?? file?.skins[0] ?? DEFAULT_SKIN
+    set({ skin: active, skins: file?.skins ?? [DEFAULT_SKIN], customBackdrops })
+
+    // 对话框权限只活在当前进程；重启后要按已保存的路径重新放行，历史缩略图才能复选。
+    await platform.ensureReadable(readableImageIds(active, customBackdrops))
     /*
      * 读不到存档就是首次运行。state 里已经是 DEFAULT_SKIN，但它引用的内置底图
      * 还没加载过 —— 从前 DEFAULT_SKIN.backdrop 是 null，直接 return 什么都不做
      * 是对的；现在它指向一张内置图，不刷这一次首屏就还是那层 CSS 渐变。
      */
-    if (!file) {
-      await refreshImages(set, get)
-      return
-    }
-
-    const active = file.skins.find((s) => s.id === file.activeId) ?? file.skins[0] ?? DEFAULT_SKIN
-    set({ skin: active, skins: file.skins })
     await refreshImages(set, get)
   },
 
-  async setBackdrop(ref) {
+  async setBackdrop(ref, shouldRemember = true) {
+    await platform.ensureReadable([ref.id])
+    let loaded: LoadedImage
+    try {
+      // 先确认目标真的能读，再改 skin；历史文件被移走时不会把当前画面切成空白。
+      const target = await loadImage(ref.id)
+      if (!target) return
+      loaded = target
+    } catch (err) {
+      console.error("[skin] 底图无法加载", err)
+      return
+    }
+
     const prev = get().backdrop
     fadingId = get().skin.backdrop
     set((s) => ({ skin: { ...s.skin, backdrop: ref.id }, fading: prev }))
     await refreshImages(set, get)
     scheduleSave(get)
+
+    if (shouldRemember && builtinBackdropUrl(ref.id) === null) {
+      try {
+        const next = rememberBackdrop(get().customBackdrops, {
+          id: ref.id,
+          name: ref.name,
+          thumbnail: await thumbnailOf(loaded),
+        })
+        set({ customBackdrops: next })
+        await platform.writeConfig("backdrop-history", backdropHistoryFile(next))
+      } catch (err) {
+        // 记录失败不该回滚已经成功的换图；下一次仍可以重新选择原文件。
+        console.warn("[skin] 记录自定义底图失败", err)
+      }
+    }
     // 转场结束后丢掉旧图引用，同时解除钉住
     window.setTimeout(() => {
       fadingId = null

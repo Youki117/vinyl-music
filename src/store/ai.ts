@@ -69,7 +69,8 @@ export const useAi = create<AiState>((set, get) => {
       if (!path) return false
       const ref: FileRef = { id: path, name: `ai-${hash(track.id)}.png`, size: 0, mtime: 0 }
       try {
-        await useSkin.getState().setBackdrop(ref)
+        // 自动配图会随歌曲不断生成，不能挤进“用户手动选择过的底图”历史。
+        await useSkin.getState().setBackdrop(ref, false)
         return true
       } catch {
         // 图片被手动删掉了，把记录清掉以便下次重新生成
@@ -116,7 +117,7 @@ export const useAi = create<AiState>((set, get) => {
           stage: "idle",
         }))
         save()
-        await useSkin.getState().setBackdrop(result.ref)
+        await useSkin.getState().setBackdrop(result.ref, false)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         set({ stage: "idle", error: msg.includes("aborted") ? null : msg })

@@ -12,6 +12,7 @@ import {
   type Track,
 } from "@/store/library"
 import { usePlayer } from "@/store/player"
+import { IconArrowRight, IconExport, IconImport, IconPlus } from "../icons"
 import { useDismiss } from "../useDismiss"
 
 const SORT_KEYS: SortKey[] = ["added", "title", "artist", "album", "duration", "playCount", "lastPlayed"]
@@ -74,7 +75,6 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
 
   const inPlaylist = !(VIRTUAL_VIEWS as readonly string[]).includes(activeView)
 
-  const importFiles = () => void platform.pickAudioFiles().then(addFiles)
   const importFolder = () => void platform.pickAudioFolder().then(addFiles)
 
   const importM3u = () =>
@@ -88,9 +88,6 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
           : "歌单里的曲目一首都没找到",
       )
     })()
-
-  const exportM3u = () =>
-    void exportPlaylist().then((ok) => setNote(ok ? "已导出" : "当前列表是空的"))
 
   const exportOne = (id: string, name: string) =>
     void exportPlaylist(id).then((ok) => setNote(ok ? `已导出「${name}」` : `「${name}」没有可导出的本地曲目`))
@@ -172,14 +169,14 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
           <span>歌单</span>
           <div>
             <button onClick={importM3u} aria-label="导入歌单" title="导入 m3u / m3u8 歌单">
-              导入
+              <IconImport size={14} />
             </button>
             <button
               onClick={() => setRenaming(createPlaylist(`新建歌单 ${playlists.length + 1}`))}
               aria-label="新建歌单"
               title="新建歌单"
             >
-              ＋
+              <IconPlus size={14} />
             </button>
           </div>
         </div>
@@ -217,7 +214,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
                   aria-label={`导出歌单 ${p.name}`}
                   title="导出此歌单"
                 >
-                  导
+                  <IconExport size={14} />
                 </button>
               </div>
             ),
@@ -228,11 +225,6 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
 
       <section className="lib-main">
         <header>
-          <b className="lib-current-view">
-            {VIRTUAL_VIEWS.includes(activeView as never)
-              ? VIEW_LABEL[activeView as never]
-              : playlists.find((p) => p.id === activeView)?.name ?? "歌单"}
-          </b>
           <input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
@@ -240,6 +232,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
             aria-label="搜索曲目"
           />
           <select
+            className="lib-sort-select"
             value={sort}
             onChange={(e) => setSort(e.target.value as SortKey)}
             aria-label="排序方式"
@@ -251,20 +244,23 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
               </option>
             ))}
           </select>
-          <button onClick={() => setSort(sort)} aria-label="切换升降序" title="切换升降序">
-            {sortDesc ? "↓" : "↑"}
+          <button
+            className="lib-sort-direction"
+            onClick={() => setSort(sort)}
+            aria-label={`切换为${sortDesc ? "升序" : "降序"}`}
+            title={`当前${sortDesc ? "降序" : "升序"}，点击切换`}
+          >
+            <IconArrowRight size={14} className={sortDesc ? "sort-desc" : "sort-asc"} />
           </button>
         </header>
 
-        {/* 操作按钮单独一行：380px 的抽屉塞不下搜索框 + 排序 + 五个按钮，
-            挤在一行会把关闭按钮挤到第二行去 */}
-        <div className="lib-actions">
-          <button onClick={importFiles}>加文件</button>
-          <button onClick={importFolder}>加文件夹</button>
-          <button onClick={exportM3u} title="把当前列表导出为 m3u8">
-            导出当前列表
-          </button>
-          {inPlaylist && (
+        {/*
+          “加文件 / 加文件夹 / 导出当前列表”与左侧入口重复，所以只移除这三个按钮：
+          本地目录仍由左侧按钮导入，歌单导入、新建、逐歌单导出也仍由左侧图标调用原函数；
+          平台导入能力、拖放导入与 store 动作都不删除，避免以后其它入口失效。
+        */}
+        {inPlaylist && (
+          <div className="lib-actions">
             <button
               className="danger"
               onClick={() => deletePlaylist(activeView)}
@@ -272,8 +268,8 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
             >
               删歌单
             </button>
-          )}
-        </div>
+          </div>
+        )}
 
         {scanning && (
           <div className="drawer-progress">
