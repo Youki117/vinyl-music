@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>floor ③ WebGL2 画布</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <script>
+      /*
+       * 被测对象：一个 WebGL2 上下文 + 一块指定尺寸的后备缓冲。
+       *
+       * 后备缓冲大小由 ?w=&h= 决定，**不跟 CSS 尺寸走** —— 整个实验就是要把
+       * "画布显示多大"和"画布实际分配多少显存"分开量。缺省时才退回视口尺寸。
+       *
+       * 这个文件必须是真实文件、不能塞进 data: URL：下面的着色器以
+       * `#version 300 es` 开头，而 data: URL 会把 `#` 之后的部分当成片段标识符
+       * 截掉，着色器直接编译失败。dbg-floor.mjs 顶上那句注释说的就是这件事。
+       */
+      const q = new URLSearchParams(location.search)
+      const canvas = document.getElementById("c")
+      const dpr = devicePixelRatio || 1
+      canvas.width = Number(q.get("w")) || Math.round(innerWidth * dpr)
+      canvas.height = Number(q.get("h")) || Math.round(innerHeight * dpr)
+
+      const gl = canvas.getContext("webgl2", { antialias: false })
+      if (!gl) {
+        document.title = "WebGL2 不可用"
+        throw new Error("这台机器/这次启动拿不到 webgl2 上下文，测出来的数字没有意义")
+      }
+
+      const VERT = `#version 300 es
+in vec2 pos;
+out vec2 uv;
+void main() {
+  uv = pos * 0.5 + 0.5;
+  gl_Position = vec4(pos, 0.0, 1.0);
+}`
+
+      const FRAG = `#version 300 es
+precision highp float;
+in vec2 uv;
+uniform float t;
+out vec4 color;
+void main() {
+  // 有点计算量即可，重点不是画得多好看，是让驱动真的把这块缓冲用起来
+  float g = 0.5 + 0.5 * sin(uv.x * 12.0 + t) * cos(uv.y * 9.0 - t);
+  color = vec4(g * 0.85, g * 0.7, g * 0.45, 1.0);
+}`
+
+      function compile(type, src) {
+        const s = gl.createShader(type)
+        gl.shaderSource(s, src)
+        gl.compileShader(s)
+        if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+          throw new Error(gl.getShaderInfoLog(s) ?? "着色器编译失败")
+        }
+        return s
+      }
+
+      const prog = gl.createProgram()
+      gl.attachShader(prog, compile(gl.VERTEX_SHADER, VERT))
+      gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FRAG))
+      gl.linkProgram(prog)
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        throw new Error(gl.getProgramInfoLog(prog) ?? "着色器链接失败")
+      }
+      gl.useProgram(prog)
+
+      const buf = gl.createBuffer()
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf)
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW)
+      const loc = gl.getAttribLocation(prog, "pos")
+      gl.enableVertexAttribArray(loc)
+      gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0)
+      const tLoc = gl.getUniformLocation(prog, "t")
+
+      // 持续重绘：只画一帧的话驱动可能还没把资源真正落实，测量窗口内的数字会偏低
+      function frame(ms) {
+        gl.viewport(0, 0, canvas.width, canvas.height)
+        gl.uniform1f(tLoc, ms / 1000)
+        gl.drawArrays(gl.TRIANGLES, 0, 3)
+        requestAnimationFrame(frame)
+      }
+      requestAnimationFrame(frame)
+    </script>
+  </body>
+</html>

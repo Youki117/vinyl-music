@@ -2,17 +2,17 @@
 
 ## Comparison target
 
-- Source visual truth:
-  - `design-ref/target/ref-veil-primary.png`（标题、品牌行、年份与黑色署名条的原始比例和坐标）
-  - `C:/Users/mstanjw/AppData/Local/Temp/codex-clipboard-b4994ee6-e714-4948-b072-840c9ebf5205.png`（用户本轮提供的参考图）
-- Initial native implementation:
-  - `artifacts/review-before-masthead.png`
-  - `artifacts/review-playlist-sort-closed.png`
-  - `artifacts/review-playlist-sort-open.png`
-- Previous native implementation before the final 64 px / `117` adjustment:
-  - `artifacts/review-after-masthead-final.png`
-- Previous focused comparison evidence:
-  - `artifacts/qa-masthead-reference-vs-final.png`
+> **截图证据未随仓库保留。** 本轮比对用到的参考图与实现截图都只存在于当时的
+> 工作机上：参考图在 `design-ref/`（按 §4 约定不入库），实现截图在 `artifacts/`
+> （同上），用户当轮补充的那张来自系统剪贴板临时目录，早已随系统清理消失。
+> 这些文件曾以绝对路径写在本文件里，对任何 clone 下来的人都是死链，因此改为
+> 只记录**比对了什么、结论是什么**。下面的结论已是定稿，不依赖截图复现。
+
+- Source visual truth：`design-ref/` 里的目标稿（标题、品牌行、年份与黑色署名条的
+  原始比例和坐标），外加用户本轮提供的一张参考图。
+- Initial native implementation：改动前的标题区，以及排序弹层的收起态与展开态。
+- Previous native implementation：最终 64 px / `117` 两处调整之前的标题区。
+- Previous focused comparison evidence：参考图与实现的标题区叠放对比。
 - The final two-token adjustment is source-, test- and release-build-verified; no replacement screenshot was captured before packaging.
 
 ## Capture normalization

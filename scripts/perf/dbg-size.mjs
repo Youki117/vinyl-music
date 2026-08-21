@@ -36,8 +36,8 @@ function mem(tag) {
   }
 }
 
-const HERE =
-  "file:///C:/Users/mstanjw/AppData/Local/Temp/claude/C--Users-mstanjw/486c2642-e0bf-400d-8bc1-e5da29ade85d/scratchpad/floor"
+/** 测量页在 scripts/perf/floor/，路径现算不写死，理由见 dbg-floor.mjs 同一处 */
+const HERE = new URL("./floor", import.meta.url).href
 
 async function once(url) {
   const tag = `vp-size-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`

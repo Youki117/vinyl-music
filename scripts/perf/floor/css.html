@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>floor ② 全屏 CSS 模糊层</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #101010;
+        overflow: hidden;
+      }
+
+      /*
+       * 底下垫一层有内容的东西，模糊才有东西可糊 —— 糊一片纯色的话，
+       * 合成器可能整层跳过，量出来的就不是真实代价了。
+       */
+      .bed {
+        position: absolute;
+        inset: 0;
+        background:
+          radial-gradient(60% 80% at 30% 35%, #d8b06a 0%, transparent 60%),
+          radial-gradient(50% 70% at 75% 65%, #4a6f8a 0%, transparent 60%),
+          linear-gradient(160deg, #1b1714 0%, #0b0a09 100%);
+      }
+
+      /*
+       * 这一层就是被测对象：全屏 blur(40px)。
+       * 数值对齐蒙版当时的实际用法，改了就不能和历史数据比了。
+       */
+      .veil {
+        position: absolute;
+        inset: 0;
+        backdrop-filter: blur(40px);
+        background: rgba(255, 255, 255, 0.04);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bed"></div>
+    <div class="veil"></div>
+  </body>
+</html>
