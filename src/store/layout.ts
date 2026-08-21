@@ -99,6 +99,23 @@ export function clampOffset(rect: { x: number; y: number; w: number; h: number }
   }
 }
 
+/**
+ * 在已有偏移上叠加一个增量，并夹回可见范围。
+ *
+ * 方向键微调必须和拖动走同一条约束。早先微调是直接 `cur.x + dx` 的，绕过了
+ * clampOffset：按住 Shift+方向键几秒就能把部件推出画面，退出编辑后它已经不在
+ * 画面上、点不中，只剩"全部复位"一条路 —— 而那会把其它部件的自定义位置一起清掉，
+ * 正是 clampOffset 上面那段说要避免的结局。
+ */
+export function offsetAfterNudge(
+  rect: { x: number; y: number; w: number; h: number },
+  current: Offset,
+  dx: number,
+  dy: number,
+): Offset {
+  return clampOffset(rect, { x: current.x + dx, y: current.y + dy })
+}
+
 /** 至少要留在画面里的边长（设计像素） */
 const KEEP_VISIBLE = 24
 
@@ -130,10 +147,13 @@ type LayoutState = {
   load(): Promise<void>
   setEditing(on: boolean): void
   select(id: PartId | null): void
-  /** 直接设定偏移（拖动中调用，所以不落盘，松手时才落） */
+  /**
+   * 直接设定偏移（拖动中调用，所以不落盘，松手时才落）。
+   *
+   * 夹取在调用方做 —— 边界要按部件的默认位置与大小算，那只有量过 DOM 的
+   * LayoutEdit 知道。store 这一层不碰 DOM，见 offsetAfterNudge。
+   */
   setOffset(id: PartId, off: Offset): void
-  /** 相对当前偏移挪一点（方向键微调） */
-  nudge(id: PartId, dx: number, dy: number): void
   /** 把右侧栏里的某个按钮上移/下移一格 */
   moveSidebarTool(id: SidebarToolId, dir: -1 | 1): void
   /** 右侧栏顺序恢复默认 */
@@ -190,12 +210,6 @@ export const useLayout = create<LayoutState>((set, get) => {
 
     setOffset(id, off) {
       set((s) => ({ offsets: { ...s.offsets, [id]: off }, selected: id }))
-    },
-
-    nudge(id, dx, dy) {
-      const cur = get().offsets[id] ?? { x: 0, y: 0 }
-      set((s) => ({ offsets: { ...s.offsets, [id]: { x: cur.x + dx, y: cur.y + dy } }, selected: id }))
-      save()
     },
 
     moveSidebarTool(id, dir) {

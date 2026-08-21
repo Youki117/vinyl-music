@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import { formatTime } from "@/lib/format"
 import { platform } from "@/platform"
@@ -124,6 +124,9 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
   const loadingMore = useOnline((s) => s.loadingMore)
   const error = useOnline((s) => s.error)
   const total = useOnline((s) => s.total)
+  // 订阅而不是 getState() 里现读一次：现读的话这一格什么时候刷新，全看别的字段
+  // 碰巧在同一次变更里改没改。返回的是布尔值，zustand 默认的 Object.is 比较就够
+  const hasMore = useOnline((s) => s.hasMore())
   const {
     setSource,
     setKeyword,
@@ -142,11 +145,10 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
   const [menu, setMenu] = useState<{ track: Track; x: number; y: number } | null>(null)
   const rootRef = useDismiss<HTMLDivElement>(open, onClose)
   const menuRef = useDismiss<HTMLDivElement>(menu !== null, () => setMenu(null), false)
+  // 曲库上千首时，这个 Set 每次重渲染都重建一遍就是每次按键都扫一遍全库
+  const inLibrary = useMemo(() => new Set(libTracks.map((t) => t.id)), [libTracks])
 
   if (!open) return null
-
-  const inLibrary = new Set(libTracks.map((t) => t.id))
-  const hasMore = useOnline.getState().hasMore()
 
   return (
     <div ref={rootRef} className="drawer online-drawer" role="dialog" aria-label="在线音乐">
@@ -216,11 +218,17 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
                 <button
                   className="row"
                   onDoubleClick={() => void play(i)}
+                  // 焦点能走到这一行，回车就得能播 —— 详见 Playlist.tsx 同一处的说明
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return
+                    e.preventDefault()
+                    void play(i)
+                  }}
                   onContextMenu={(e) => {
                     e.preventDefault()
                     setMenu({ track: t, x: e.clientX, y: e.clientY })
                   }}
-                  title="双击播放，右键更多"
+                  title="双击或回车播放，右键更多"
                 >
                   <span className="song-index">{String(i + 1).padStart(2, "0")}</span>
                   <b>{t.title}</b>

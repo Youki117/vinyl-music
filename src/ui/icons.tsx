@@ -63,15 +63,6 @@ export function IconImport({ size = 18, className }: P) {
   )
 }
 
-export function IconExport({ size = 18, className }: P) {
-  return (
-    <svg viewBox="0 0 24 24" width={size} height={size} className={className} aria-hidden="true">
-      <path {...stroke} d="M12 15V4M8 8l4-4 4 4" />
-      <path {...stroke} d="M5 14.5V19c0 .8.7 1.5 1.5 1.5h11c.8 0 1.5-.7 1.5-1.5v-4.5" />
-    </svg>
-  )
-}
-
 export function IconPlus({ size = 18, className }: P) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} className={className} aria-hidden="true">

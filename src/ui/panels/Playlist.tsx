@@ -49,6 +49,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
     setSort,
     setView,
     toggleLike,
+    toggleSortDesc,
   } = useLibrary.getState()
 
   const playFrom = usePlayer((s) => s.playFrom)
@@ -313,7 +314,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
           </div>
           <button
             className="lib-sort-direction"
-            onClick={() => setSort(sort)}
+            onClick={toggleSortDesc}
             aria-label={`切换为${sortDesc ? "升序" : "降序"}`}
             title={`当前${sortDesc ? "降序" : "升序"}，点击切换`}
           >
@@ -352,12 +353,20 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
               <button
                 className="row"
                 onDoubleClick={() => void playFrom(rows, i)}
+                // 这一行是 <button>，会进 Tab 焦点序列、被读屏念作按钮 —— 只绑双击的话
+                // 焦点走到这儿按回车什么都不发生，比不可聚焦还糟。鼠标仍是双击才播，
+                // 单击要留给选中与拖动排序
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return
+                  e.preventDefault()
+                  void playFrom(rows, i)
+                }}
                 onPointerDown={(e) => beginDrag(e, i)}
                 onContextMenu={(e) => {
                   e.preventDefault()
                   setMenu({ track: t, x: e.clientX, y: e.clientY })
                 }}
-                title={canReorder ? "双击播放，按住拖动可排序" : "双击播放"}
+                title={canReorder ? "双击或回车播放，按住拖动可排序" : "双击或回车播放"}
               >
                 <span className="song-index">{String(i + 1).padStart(2, "0")}</span>
                 <b>{t.title}</b>
