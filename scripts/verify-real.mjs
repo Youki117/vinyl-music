@@ -128,15 +128,19 @@ check(
 const head = await readMasthead(page)
 console.log(`\n大标题：「${head.title}」${head.titlePx}px / 「${head.third}」/ 黑条「${head.byline}」`)
 check("在播时大标题换成歌名", head.title === "April Showers", head.title)
-// 歌手改在黑色署名条上（原来是皮肤署名），红色副标题那行让给专辑，信息不再重复
+// 歌手显示在黑色署名条上，第二行使用固定品牌文案。
 check("歌手显示在黑色署名条上", head.byline === "ProleteR", head.byline)
-check("副标题不再重复歌手", head.subtitle === "", head.subtitle || "(空)")
+check("副标题固定为品牌文案", head.subtitle === "MYRIAD AUDIO", head.subtitle || "(空)")
 check(
-  "歌名比装饰文案长，字号自动缩过（不再是 97px）",
-  head.titlePx > 0 && head.titlePx < 97,
+  "歌名始终使用固定字号",
+  head.titlePx === 64,
   `${head.titlePx}px`,
 )
-check("缩完仍在容器内，没压到黑胶上", head.overflow <= 1, `溢出 ${head.overflow}px`)
+check(
+  "标题容器不越界，不压到黑胶上",
+  head.scrollWidth <= head.clientWidth + 1,
+  `scroll/client ${head.scrollWidth}/${head.clientWidth}`,
+)
 
 // ── 三、外挂歌词 ──────────────────────────────────────────────────
 // April Showers 的歌词第一句是 [01:02.27]，第二句 [01:03.96]，跳到两者之间
@@ -538,8 +542,8 @@ async function readMasthead(page) {
       // 黑色署名条在 .masthead 外面，是 .content 的直接子元素
       byline: document.querySelector(".byline")?.textContent?.trim() ?? "",
       titlePx: px(h1),
-      // 缩完字号之后仍然不能超出容器，否则会压到黑胶上
-      overflow: h1 ? h1.scrollWidth - box.clientWidth : 0,
+      scrollWidth: h1?.scrollWidth ?? 0,
+      clientWidth: h1?.clientWidth ?? 0,
     }
   })
 }

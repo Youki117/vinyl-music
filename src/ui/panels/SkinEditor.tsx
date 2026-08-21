@@ -9,7 +9,7 @@ import AiTab from "./AiTab"
 import { useDismiss } from "../useDismiss"
 
 /**
- * 皮肤面板：导入底图、调整取景框、调蒙版参数、改文案。
+ * 皮肤面板：导入底图、调整取景框、调蒙版参数、查看固定标题规则。
  *
  * 取景框所见即所得 —— 左边拖底图焦点，右边拖/滚轮调贴纸取景，两边实时反映到
  * 舞台上。默认值（中心偏上、zoom 2.2）对人物照片通常一次就能取到脸，
@@ -361,13 +361,13 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
                   <span title={p.name}>{p.name}</span>
                   <button
                     onClick={() => void applyVeilFrom(p.id)}
-                    title="只把这个预设的蒙版参数搬过来，保留当前底图与文案"
+                    title="只把这个预设的蒙版参数搬过来，保留当前底图与标题显示规则"
                   >
                     只套蒙版
                   </button>
                   <button
                     onClick={() => void activate(p.id)}
-                    title="套用整张皮肤，底图与文案也会一起换"
+                    title="套用整张皮肤，底图与配色也会一起换"
                     disabled={p.id === skin.id}
                   >
                     全部套用
@@ -385,7 +385,7 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
               ))}
             </ul>
             <p className="hint">
-              预设存的是<b>整张皮肤</b>（底图、取景、蒙版、文案、配色）。只想换雾的感觉就点
+              预设存的是<b>整张皮肤</b>（底图、取景、蒙版、配色）。只想换雾的感觉就点
               「只套蒙版」—— 它会保留你当前的底图，并按新的蒙版参数重推一次文字配色。
             </p>
             </section>
@@ -394,15 +394,18 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
 
         {tab === "text" && (
           <section className="panel-section text-fields">
-            {(["title", "subtitle", "year", "byline"] as const).map((k) => (
-              <label key={k} className="row-field">
-                <span>{{ title: "主标题", subtitle: "副标题", year: "年份", byline: "署名" }[k]}</span>
-                <input
-                  value={skin.text[k]}
-                  onChange={(e) => patchSkin({ text: { ...skin.text, [k]: e.target.value } })}
-                />
-              </label>
-            ))}
+            <div className="row-field fixed-copy-row">
+              <span>主标题</span>
+              <output>当前歌曲名</output>
+            </div>
+            <div className="row-field fixed-copy-row">
+              <span>品牌行</span>
+              <output>MYRIAD AUDIO</output>
+            </div>
+            <div className="row-field fixed-copy-row">
+              <span>署名条</span>
+              <output>当前歌手名</output>
+            </div>
             <label className="row-field">
               <span>自动配色</span>
               <input
@@ -412,7 +415,7 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
               />
             </label>
             <p className="hint">
-              SELP-PORTRAIT 是效果图原样保留的拼写（还原优先），这里可以随时改掉。
+              标题区按参考图固定位置和字号显示；超长歌名会省略，成对标签符号会完整保留。
             </p>
           </section>
         )}

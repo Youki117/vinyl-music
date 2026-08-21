@@ -60,10 +60,13 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
   const [drag, setDrag] = useState<{ from: number; to: number } | null>(null)
   const [showImport, setShowImport] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<PlaylistModel | null>(null)
+  const [sortMenuOpen, setSortMenuOpen] = useState(false)
   const listRef = useRef<HTMLOListElement>(null)
+  const sortTriggerRef = useRef<HTMLButtonElement>(null)
   const rootRef = useDismiss<HTMLDivElement>(open, onClose)
   // 右键菜单点哪儿都该收起来，包括抽屉内部，所以不豁免常驻区
   const menuRef = useDismiss<HTMLDivElement>(menu !== null, () => setMenu(null), false)
+  const sortMenuRef = useDismiss<HTMLDivElement>(sortMenuOpen, () => setSortMenuOpen(false), false)
 
   // 筛选+排序是纯函数，按输入缓存即可。导入期间 tracks 直到最后才整体替换，
   // 所以这段在导入全程一次都不会重算 —— 这正是上面那条 O(n²) 的解药。
@@ -260,19 +263,54 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
             placeholder={`在 ${VIRTUAL_VIEWS.includes(activeView as never) ? VIEW_LABEL[activeView as never] : playlists.find((p) => p.id === activeView)?.name ?? ""} 中搜索`}
             aria-label="搜索曲目"
           />
-          <select
-            className="lib-sort-select"
-            value={sort}
-            onChange={(e) => setSort(e.target.value as SortKey)}
-            aria-label="排序方式"
-            title={`排序：${SORT_LABEL[sort]}${sortDesc ? "（降序）" : ""}`}
+          <div
+            ref={sortMenuRef}
+            className="lib-sort-container"
+            onKeyDown={(event) => {
+              if (event.key !== "Escape" || !sortMenuOpen) return
+              event.preventDefault()
+              setSortMenuOpen(false)
+              sortTriggerRef.current?.focus()
+            }}
           >
-            {SORT_KEYS.map((k) => (
-              <option key={k} value={k}>
-                {SORT_LABEL[k]}
-              </option>
-            ))}
-          </select>
+            <button
+              ref={sortTriggerRef}
+              type="button"
+              className="lib-sort-trigger"
+              data-on={sortMenuOpen}
+              onClick={() => setSortMenuOpen((v) => !v)}
+              aria-label={`排序方式：${SORT_LABEL[sort]}`}
+              aria-expanded={sortMenuOpen}
+              aria-haspopup="true"
+              aria-controls={sortMenuOpen ? "playlist-sort-options" : undefined}
+              title={`排序：${SORT_LABEL[sort]}${sortDesc ? "（降序）" : ""}`}
+            />
+            {sortMenuOpen && (
+              <div
+                id="playlist-sort-options"
+                className="lib-sort-popover"
+                role="group"
+                aria-label="排序选项"
+              >
+                {SORT_KEYS.map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    className="lib-sort-item"
+                    data-active={sort === k}
+                    aria-pressed={sort === k}
+                    onClick={() => {
+                      setSort(k)
+                      setSortMenuOpen(false)
+                      requestAnimationFrame(() => sortTriggerRef.current?.focus())
+                    }}
+                  >
+                    <span>{SORT_LABEL[k]}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             className="lib-sort-direction"
             onClick={() => setSort(sort)}

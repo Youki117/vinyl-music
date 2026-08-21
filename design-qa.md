@@ -1,71 +1,66 @@
-# Design QA
+# Design QA — 标题区与本轮四项修改
 
 ## Comparison target
 
 - Source visual truth:
-  - `C:/Users/mstanjw/AppData/Roaming/Typora/typora-user-images/image-20260821100138764.png`（歌单标题行改为删除/新建，导入歌单位于歌单列表末尾）
-  - `C:/Users/mstanjw/AppData/Roaming/Typora/typora-user-images/image-20260821091854870.png`（音源可用状态由文字改为绿点）
-  - `C:/Users/mstanjw/AppData/Roaming/Typora/typora-user-images/image-20260821093510951.png`（底图轨道显示四张半并横向滚动）
-  - `C:/Users/mstanjw/AppData/Roaming/Typora/typora-user-images/image-20260821092148595.png`（自动从底图取色改为开关）
-  - `C:/Users/mstanjw/AppData/Roaming/Typora/typora-user-images/image-20260821094854513.png`（播放状态下标题组位置）
-  - `docs/UI-REFINEMENT-BASELINE-2026-08-21.md`（编号越大越新的最终交互基线）
-- Rendered native release implementation:
-  - `artifacts/final-library-restored.png`
-  - `artifacts/final-library-import.png`
-  - `artifacts/final-playlist-live-preview.png`
-  - `artifacts/final-online-two-tabs.png`
-  - `artifacts/final-source-status-dot.png`
-  - `artifacts/final-backdrop-four-half.png`
-  - `artifacts/final-tint-switch.png`
-- Combined comparison evidence:
-  - `artifacts/qa-final-library-import-combined.png`
-  - `artifacts/qa-final-source-status-combined.png`
-  - `artifacts/qa-final-backdrop-combined.png`
-  - `artifacts/qa-final-switch-combined.png`
-  - `artifacts/qa-final-masthead-combined.png`
+  - `design-ref/target/ref-veil-primary.png`（标题、品牌行、年份与黑色署名条的原始比例和坐标）
+  - `C:/Users/mstanjw/AppData/Local/Temp/codex-clipboard-b4994ee6-e714-4948-b072-840c9ebf5205.png`（用户本轮提供的参考图）
+- Initial native implementation:
+  - `artifacts/review-before-masthead.png`
+  - `artifacts/review-playlist-sort-closed.png`
+  - `artifacts/review-playlist-sort-open.png`
+- Previous native implementation before the final 64 px / `117` adjustment:
+  - `artifacts/review-after-masthead-final.png`
+- Previous focused comparison evidence:
+  - `artifacts/qa-masthead-reference-vs-final.png`
+- The final two-token adjustment is source-, test- and release-build-verified; no replacement screenshot was captured before packaging.
 
 ## Capture normalization
 
-- Application: freshly rebuilt native Tauri release executable, not `目标效果.html` or a static web mock.
-- Source pixels: library 1022 × 951, source status 449 × 683, backdrop strip 777 × 183, switch 437 × 693, masthead 774 × 722.
-- Implementation pixels: final focused captures are 1289 × 714; the populated library capture is 1709 × 946.
-- Combined evidence preserves aspect ratio and normalizes each pair to a common height. The user screenshots contain annotations and different app-window sizes, so comparison is by the named component, state, hierarchy and proportion rather than a false full-frame pixel match.
-- States: populated library with restored custom playlists; platform-import empty and real-preview states; online-search two-tab state; active-source state; backdrop tab; veil tab; playing masthead.
+- Application: Tauri development executable with the current working-tree implementation and real library state.
+- Native window capture: 1431 × 792 physical pixels.
+- Source title crop: 600 × 200 pixels from the 1536 × 688 reference, after excluding the left letterbox.
+- Implementation title crop: 1200 × 400 physical pixels normalized to 600 × 200 because WebView `PrintWindow` output is double-density for this display.
+- State: playing `【FREE】 lucky`, artist `FuGa pang`; the source uses decorative copy, so comparison targets position, hierarchy, typography and truncation behavior rather than literal track text.
+- The full app states were inspected separately; the focused stacked comparison is used for the title because that is the only region expected to match the supplied reference in this task.
 
 ## Required fidelity surfaces
 
-- Fonts and typography: passed. Existing CJK serif headings, gold display title and compact sans-serif panel copy are preserved. Playing state now puts the album in the same second-line slot as the idle subtitle; title, subtitle, third line and byline no longer collapse vertically when content is empty.
-- Spacing and layout rhythm: passed. The drawer remains a bounded right-side panel. Playlist header icons share the same 24 px control size; per-row export controls are gone. The moved import form uses a full-width input followed by a compact platform/action row. The backdrop rail visibly shows four complete thumbnails plus half of the next tile.
-- Colors and visual tokens: passed. Delete/new/import controls, import form, confirmation dialog, source status dot and switch all reuse the existing warm-black/gold tokens. The only new semantic color is the subdued green availability dot.
-- Image quality and asset fidelity: passed. Built-in and remembered custom backgrounds continue using their real thumbnails; the stage and focal preview use the original selected image. No placeholder imagery was introduced.
-- Copy and content: passed. Online retains only “在线搜索 / 音源管理”. “导入歌单” appears after the user playlists. Picker wording is “自定义” alongside the plus icon. The delete confirmation explicitly says songs and local files are not deleted.
+- Fonts and typography: passed. Song titles now use one fixed 64 px display size. `MYRIAD AUDIO` is fixed at 33 px, `117` at 18 px and the artist label at 10 px. Long titles use a single-line ellipsis instead of dynamic font shrinking.
+- Spacing and layout rhythm: passed. The title group is restored to the reference anchors (`26/2`, subtitle at 115 px, year at 149 px, byline at `165/152`). The byline is again a sibling component so custom layout can move it independently.
+- Colors and visual tokens: passed. Main-stage text continues to use the skin accent; the artist remains white on a flat black label. The sort menu uses the existing warm-black/gold panel tokens.
+- Image quality and asset fidelity: passed. No image assets were replaced or generated; existing background and record artwork remain unchanged.
+- Copy and content: passed. The second line is always `MYRIAD AUDIO`; fallback content is `歌名` and `歌手名`, while real track title and artist replace those fallbacks during playback.
+- Symbols and truncation: passed. Leading paired tags such as `【FREE】`, `[Live]`, `（纯享版）` and `《翻唱》` keep both delimiters visible. The following title text is ellipsized independently. Full-width brackets receive optical sizing and side-bearing correction without changing the fixed title size.
+- Settings consistency: passed. The former editable skin-copy fields no longer present controls that cannot affect the now-fixed title contract; the tab shows the live title mapping and keeps automatic color control available.
 
-## Interaction verification
+## Other requested changes
 
-- Keyboard shortcut `P` opened the final library build with an empty search input; `F` opened online search with an empty search input. The shortcut letter is no longer inserted into the newly focused field.
-- The restored custom playlists render as “我喜欢 465” and “老歌 0”; the track library remains 471 items and the active view is “全部音乐”.
-- Clicking the list-level “导入歌单” entry opens the migrated platform parser inside the library main area. Its input, automatic/manual platform selection, parse button, preview/list, play-all and import callbacks remain connected to the single online store implementation.
-- The final packaged executable parsed the real QQ playlist `4010674675` through the migrated view and rendered “我喜欢 / 465 首”, “播放全部”, “导入为歌单” and the ordered track preview. The test deliberately stopped before “导入为歌单”; after closing the app the persisted library remained 471 tracks and two playlists.
-- Online search displays exactly two tabs. Source management displays one green availability dot instead of the old visible status text; its accessible label and CSS hover/focus tooltip retain the explanation.
-- The backdrop rail is non-wrapping, hides its scrollbar, converts usable mouse-wheel movement to horizontal scrolling, and releases vertical scrolling at either end.
-- “自动从底图取色” renders as the established switch control and preserves the existing checkbox state/handler underneath.
-- Playlist deletion is available only when a user playlist is selected and opens an application-styled `alertdialog`; Escape/cancel close it, while confirmation calls the existing delete action. Store regression coverage verifies that deletion keeps all tracks and returns to “全部音乐”.
-- During native coordinate QA, the confirmation action was accidentally activated. The 471-track library was unaffected; “我喜欢” was reconstructed from the authoritative QQ playlist `4010674675` as 465 ordered IDs, “老歌” was restored empty, and the accidentally changed like state was also restored. The final configuration was re-read after the app stopped and matched those counts.
-- Verification: `npm test` → 27 files, 333 tests passed; `VINYL_BUNDLE_SOURCE=1 npm run tauri build` → release executable and NSIS installer built.
+- Sidebar component gap: passed. The actual rail layout uses `gap: 5px`.
+- Quick background switcher: passed. The visible control is a 10 × 10 px hollow circle (one third of the former 30 px size) with a 26 px effective hit area and explicit keyboard focus feedback.
+- Playlist sort control: passed. The closed state is a hollow circle; clicking opens the frameless, warm-black/gold option list. The popup stayed inside the drawer, selection styling matched the theme, and the original sort-direction control remained independent.
+- Sort accessibility: passed. The popup is exposed as a labeled button group rather than an incomplete ARIA menu; the active option uses `aria-pressed`, Escape closes the popup, and focus returns to the trigger after selection.
 
 ## Comparison history
 
-1. P1: platform playlist import still lived under Online and duplicated the library task boundary. Fixed by extracting one `PlaylistImport` view, removing the Online tab, and mounting that view from the library list entry.
-2. P1: playlist deletion was a direct text action and per-playlist export buttons remained. Fixed with one disabled-aware trash button in the header, an application-styled second confirmation, and removal of per-row export UI.
-3. P2: the first horizontal-background implementation showed closer to four and one-quarter tiles at the narrow drawer width. Fixed with `calc(22.222% - 5.333px)`, which accounts for four 6 px gaps and yields exactly four and a half visible card widths; the final native capture confirms the half tile.
-4. P2: a long source name wrapped beside the new status dot. Fixed with a flexible, ellipsized one-line source label; the final native capture keeps the dot aligned at the right edge.
-5. P2: the migrated import parse action initially read as floating text. Fixed by giving it the same minimal border, background and hover states as the surrounding panel controls.
-6. P2: panel shortcut keydown mounted an autofocus field before the browser default completed, inserting `p`/`f` into that field. Fixed by preventing the default for panel shortcuts; final native captures show empty fields.
-7. P2: playing masthead content used a different DOM flow from the idle text and moved the album upward. Fixed with persistent DOM slots and absolute vertical anchors; the final masthead keeps the album and byline aligned with the intended reference positions.
+1. P1: the pending implementation replaced the original absolute composition with a 46 px flex column. This materially reduced the title and changed all vertical relationships. Fixed by restoring the reference anchors and a fixed type scale; the final user-approved title size is 64 px.
+2. P2: the artist label was nested inside the masthead, causing the custom-layout masthead offset to move the artist label too. Fixed by restoring the byline as a sibling with its own `data-part="byline"` offset.
+3. P2: a fixed-size title could truncate `【FREE】 lucky` as `【FREE…`, losing the closing symbol. Fixed by parsing a leading paired tag into a protected visual unit and ellipsizing the remaining title separately.
+4. P2: full-width opening brackets carried a large left side-bearing at display size, making the title appear shifted right. Fixed with punctuation-only optical sizing and a side-bearing correction; the final focused comparison aligns the visible title edge with the reference.
+5. P2: the custom sort popup used `role="menu"` without the corresponding complete menu interaction contract. Fixed by retaining native buttons in a labeled group and adding Escape/focus-return behavior.
+6. P2: the skin “文案” tab still exposed four editable values after the title contract became fixed, creating controls with no visible effect. Fixed by replacing those inputs with a read-only mapping of current song, brand line and current artist; stored legacy skin data remains untouched for compatibility.
+
+## Verification
+
+- `npm test` → 28 test files, 341 tests passed.
+- `npm run build` → intentionally blocked by the repository guard because `src/source/builtin/qdy.js` is present.
+- `$env:VINYL_BUNDLE_SOURCE='1'; npm run build` → passed; 772 modules transformed (local-source build check only).
+- Temporarily excluding the ignored local `qdy.js`, then `npm run tauri build` → passed; 771 modules transformed and the NSIS x64 installer was produced without bundling the private source script.
+- `git diff --check` → passed.
+- Build produced only the existing large-chunk warning and browser `vm` externalization warning; neither failed the build.
 
 ## Follow-up polish
 
-- P3: Native `<select>` dropdown menus still use the Windows/WebView platform popup when expanded; closed controls match the panel design.
-- P3: The reference and final implementation contain different live tracks and artwork state, so names, progress and liked state in the comparison images are not fidelity targets.
+- P3: the live title differs from the reference word `FASHION`, so exact glyph widths cannot match; the fixed type scale, left edge and four-level vertical rhythm are the fidelity targets.
 
 final result: passed

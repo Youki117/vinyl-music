@@ -5,26 +5,18 @@
   position: absolute;
   left: 26px;
   top: 2px;
-  /* 定宽是给自动缩字号用的：Masthead.tsx 拿这个宽度当上限。
-     参考图里 FASHION 占 424px，留到 470px 是为了让稍长的歌名也能保持满字号，
-     再长就自动往下缩。右边界不能再往外推，否则会压到黑胶上。 */
   width: 470px;
+  height: 172px;
   color: var(--ink-accent);
   font-family: var(--font-display);
   line-height: 0.95;
-  height: 172px;
 }
 
-/* 中文标题另走一套字体栈：展示字体只子集化了拉丁字母，中文会掉到宋体。
-   先试思源/宋体系的衬线中文，都没有再退到雅黑 —— 大字号下雅黑也比宋体耐看。 */
+/* 中文标题另走一套衬线字体栈，避免大字号时退回无衬线字体。 */
 .masthead [data-cjk="true"] {
   font-family: "Source Han Serif SC", "Noto Serif SC", "Songti SC", STSong, var(--font-cjk);
 }
 
-/* 字号与字距实测自 design-ref/target/ref-veil-primary.png：
-   FASHION 占 424px 宽、SELP-PORTRAIT 占 252px */
-/* 标题与副标题都不折行：折了行会把下面整排版式顶下去。
-   先按 Masthead.tsx 的测量缩字号，缩到下限还放不下才截断加省略号。 */
 .masthead h1,
 .masthead p {
   white-space: nowrap;
@@ -37,11 +29,51 @@
   inset: 0 0 auto;
   width: 100%;
   margin: 0;
-  font-size: 97px;
-  /* 参考图的字重很轻、笔画对比强，用 500 会明显偏粗 */
+  padding: 0;
+  display: flex;
+  align-items: baseline;
+  font-family: "Cormorant Garamond", Constantia, "Palatino Linotype", "Book Antiqua", Georgia,
+    "Times New Roman", "Source Han Serif SC", "Noto Serif SC", "Songti SC", STSong, serif;
+  font-size: 64px;
   font-weight: 400;
   letter-spacing: 3px;
   line-height: 1.1;
+}
+
+.masthead-title-main {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.masthead-title-tag {
+  max-width: 78%;
+  min-width: 0;
+  display: inline-flex;
+  flex: none;
+  margin-right: 0.16em;
+}
+
+.masthead-title-bracket {
+  flex: none;
+}
+
+/* 全角括号跟随固定标题字号会比字母高出一截；只做标点的光学校正。 */
+.masthead-title-tag[data-wide="true"] .masthead-title-bracket {
+  align-self: center;
+  font-size: 0.58em;
+  line-height: 1;
+}
+
+/* 全角左括号的字形靠在自身方框右侧；抵消空白边，不让标题看起来整体右移。 */
+.masthead-title-tag[data-wide="true"] .masthead-title-bracket:first-child {
+  margin-left: -0.68em;
+}
+
+.masthead-title-tag-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .masthead p {
@@ -64,28 +96,35 @@
   width: 100%;
   min-height: 18px;
   margin: 0;
+  font-family: var(--font-display);
   font-size: 18px;
   font-weight: 400;
   letter-spacing: 1px;
+  color: var(--ink-accent);
   opacity: 0.92;
 }
 
-/* ── E4 署名条 ─────────────────────────────────────────── */
+/* ── E4 歌手名纯黑署名条 ──────────────────────────────── */
 .byline {
   position: absolute;
   left: 165px;
   top: 152px;
   min-width: 94px;
+  max-width: 180px;
   height: 17px;
   padding: 0 7px;
   display: grid;
   place-items: center;
   background: #0a0a0a;
   color: #fff;
+  border: none;
+  border-radius: 0;
   font-family: var(--font-display);
   font-size: 10px;
   letter-spacing: 0.3px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ── E5 歌词 ───────────────────────────────────────────── */
@@ -466,18 +505,17 @@
   position: absolute;
   right: 22px;
   bottom: 28px;
-  width: 30px;
-  height: 30px;
+  width: 10px;
+  height: 10px;
   display: grid;
   place-items: center;
   border-radius: 50%;
   color: rgba(245, 245, 245, 0.82);
   /*
-   * 中空：不填底、只留一圈细环。原来那块半透明黑底压在底图上，右下角凭空多出
-   * 一个色块，反而比图标本身更抢眼。整体再淡两成，悬停时才回到清晰。
+   * 空心小圆圈：尺寸缩小为 10px（原尺寸 1/3），细边框 1.2px
    */
   background: none;
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  border: 1.2px solid rgba(255, 255, 255, 0.6);
   opacity: 0.8;
   transition:
     opacity 160ms ease,
@@ -485,10 +523,20 @@
     border-color 160ms ease;
 }
 
-.skin-quick:hover {
+/* 隐式热区扩展：视觉上保持 10px 小圆圈，但鼠标在周围 26px 范围内都能顺畅点击 */
+.skin-quick::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+}
+
+.skin-quick:hover,
+.skin-quick:focus-visible {
   color: #fff;
   opacity: 1;
-  border-color: rgba(255, 255, 255, 0.75);
+  border-color: rgba(255, 255, 255, 0.9);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(20, 20, 20, 0.26);
 }
 
 /* ── E15 窗口控制：悬停才显现，不打扰画面 ───────────────── */
@@ -605,7 +653,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 5px;
   opacity: 0;
   transition: opacity 200ms ease;
   z-index: 8;
@@ -2805,6 +2853,17 @@ header button.danger,
   gap: 14px;
 }
 
+.fixed-copy-row output {
+  min-width: 0;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--panel-border);
+  color: var(--panel-text);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .preset-list li {
   border: 1px solid var(--panel-border);
   border-radius: 4px;
@@ -3079,51 +3138,149 @@ header button.danger,
   color: #d9a59c;
 }
 
+.drawer .lib-main header,
 .lib-main header {
-  min-height: 54px;
-  padding: 9px 12px;
-  border-bottom-color: var(--panel-border);
+  min-height: 52px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--panel-border);
+  display: flex;
+  align-items: center;
   flex-wrap: nowrap;
-  gap: 6px;
+  gap: 0 !important;
 }
 
+.drawer .lib-main header input,
 .lib-main header input {
   flex: 1;
   min-width: 0;
+  height: 32px;
+  margin: 0 !important;
 }
 
-.lib-main header .lib-sort-select {
-  width: 64px;
-  max-width: 64px;
-  height: 30px;
-  padding: 0 2px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: var(--panel-text-muted);
-  cursor: pointer;
-}
-
-.lib-main header .lib-sort-select:hover,
-.lib-main header .lib-sort-select:focus {
-  color: var(--panel-gold-bright);
-}
-
-.lib-sort-direction {
-  width: 24px;
-  height: 30px;
+.lib-sort-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 11px;
+  height: 32px;
   flex: none;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
+  margin-left: 10px !important;
+  margin-right: 10px !important;
+}
+
+.drawer .lib-main header button.lib-sort-trigger,
+.lib-sort-trigger {
+  width: 11px !important;
+  height: 11px !important;
+  min-width: 11px !important;
+  min-height: 11px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  display: block !important;
+  border-radius: 50% !important;
+  background: none !important;
+  border: 1.3px solid rgba(255, 255, 255, 0.55) !important;
+  opacity: 0.8;
+  cursor: pointer;
+  position: relative;
+  box-sizing: border-box !important;
+  transition:
+    opacity 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+/* 隐式热区扩展：容易点中 */
+.lib-sort-trigger::after {
+  content: "";
+  position: absolute;
+  inset: -9px;
+}
+
+.lib-sort-trigger:hover,
+.lib-sort-trigger:focus-visible,
+.lib-sort-trigger[data-on="true"] {
+  opacity: 1;
+  border-color: var(--panel-gold-bright, #ecd7b5) !important;
+  box-shadow: 0 0 6px var(--color-gold-glow, rgba(197, 162, 101, 0.35));
+  outline: none;
+}
+
+/* 无框极简下拉列表 */
+.lib-sort-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: -8px;
+  z-index: 50;
+  min-width: 94px;
+  padding: 5px 0;
+  background: rgba(18, 16, 14, 0.95);
+  backdrop-filter: blur(20px);
+  border: none;
+  border-radius: 5px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+  display: flex;
+  flex-direction: column;
+}
+
+.lib-sort-item {
+  width: 100%;
+  height: 28px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
   background: transparent;
-  color: var(--panel-text-muted);
+  border: none;
+  font-size: 11px;
+  color: var(--panel-text-muted, #7e7569);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+  text-align: left;
+}
+
+.lib-sort-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
+
+.lib-sort-item[data-active="true"] {
+  color: var(--panel-gold-bright, #ecd7b5);
+  font-weight: 500;
+  background: rgba(197, 162, 101, 0.08);
+}
+
+.drawer .lib-main header button.lib-sort-direction,
+.lib-sort-direction {
+  width: 14px !important;
+  height: 32px !important;
+  min-width: 14px !important;
+  flex: none;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: var(--panel-text-muted, #7e7569) !important;
+  cursor: pointer;
+  position: relative;
+  transition: color 140ms ease;
+}
+
+/* 箭头隐式热区扩展 */
+.lib-sort-direction::after {
+  content: "";
+  position: absolute;
+  inset: -6px -8px;
 }
 
 .lib-sort-direction:hover {
-  color: var(--panel-gold-bright);
+  color: var(--panel-gold-bright, #ecd7b5) !important;
 }
 
 .lib-sort-direction .sort-asc {

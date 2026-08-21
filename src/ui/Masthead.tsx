@@ -1,97 +1,99 @@
-import { useLayoutEffect, useRef } from "react"
-
 import { usePlayer } from "@/store/player"
-import { useSkin } from "@/store/skin"
 
 /**
  * 含中日韩字符。
  *
  * 展示字体（Cormorant Garamond）为了把 1168KB 压到 17KB，只子集化了拉丁字母，
  * 一个汉字都没有。中文歌名走这套字体会一路掉到通用 serif —— Windows 上就是宋体，
- * 97px 的宋体和这套版式完全不搭。所以中文标题要换字体栈。
+ * 大字号的宋体和这套版式完全不搭。所以中文标题要换字体栈。
  */
 const hasCjk = (s: string) => /[㐀-鿿豈-﫿぀-ヿ가-힯]/.test(s)
 
-/**
- * 把字号压到内容能放进容器为止。
- *
- * 基准字号故意不写死在这里：先清掉内联样式让它回到样式表的值再读，
- * 这样字号只在 CSS 里定义一处，改版式不用两边对。
- *
- * **必须迭代，不能按比例一次算出来。** `letter-spacing` 是固定像素、不随字号缩放，
- * 「April Showers」十三个字符光字距就占 39px；按 `新字号 = 旧字号 × 容器宽/内容宽`
- * 一次到位会系统性地缩不够 —— 实测溢出 5px（verify-real.mjs 里有这条断言）。
- * 每轮至少减 1px 保证收敛。
- */
-function fitText(el: HTMLElement | null, min: number): void {
-  if (!el) return
-  el.style.fontSize = ""
-  const maxW = el.parentElement?.clientWidth ?? 0
-  if (!maxW || el.scrollWidth <= maxW) return
+const TITLE_TAG_PAIRS = [
+  ["【", "】"],
+  ["［", "］"],
+  ["[", "]"],
+  ["（", "）"],
+  ["(", ")"],
+  ["《", "》"],
+] as const
 
-  let size = parseFloat(getComputedStyle(el).fontSize)
-  for (let i = 0; i < 24 && el.scrollWidth > maxW && size > min; i++) {
-    size = Math.max(min, Math.min(size - 1, Math.floor(size * (maxW / el.scrollWidth))))
-    el.style.fontSize = `${size}px`
+export type LeadingTitleTag = {
+  open: string
+  label: string
+  close: string
+  rest: string
+}
+
+/**
+ * 提取歌名前面的版本/场景标签。
+ *
+ * 固定大字号下直接对整串文字做省略，`【FREE】 lucky` 会变成 `【FREE…`，闭合括号
+ * 被吃掉。把成对前缀单独排版后，括号始终成对显示，省略只发生在标签内容或正文中。
+ */
+export function splitLeadingTitleTag(title: string): LeadingTitleTag | null {
+  const value = title.trimStart()
+
+  for (const [open, close] of TITLE_TAG_PAIRS) {
+    if (!value.startsWith(open)) continue
+    const closeAt = value.indexOf(close, open.length)
+    if (closeAt <= open.length) return null
+
+    const rest = value.slice(closeAt + close.length).trimStart()
+    if (!rest) return null
+
+    return {
+      open,
+      label: value.slice(open.length, closeAt),
+      close,
+      rest,
+    }
   }
+
+  return null
 }
 
 /**
  * E1–E4：主标题、副标题、第三行、署名条。
  *
- * **在播时显示曲目信息，空闲时回到皮肤文案。**
- *
- * 原来这三行永远是皮肤里的装饰文案（FASHION / SELP-PORTRAIT / 1901），而真正的歌名
- * 只有进度条底下那个 10px 的小字，艺术家在主视图里根本不出现 —— 信息层级是反的：
- * 画面上最大的字是装饰，最小的字才是内容。
- *
- * 但装饰文案不能删：design-ref 的参考图就是这么排的，SSIM 硬关口比对的正是左侧 52%，
- * 大标题就在里面。折中办法是按状态切换 —— 没在播时保持参考图原样（对拍脚本本来就
- * 不加载曲目，关口不受影响），一旦开始播就换成歌名/艺术家/专辑。
- *
- * 署名条在播时改显**歌手**。原来它固定是皮肤署名（"这张皮肤是给谁的"），
- * 但画面上那块黑底白字是仅次于大标题的视觉锚点，拿去放一个与当前音乐无关的
- * 词很浪费。歌手挪进去之后，红色副标题那行就空出来给专辑，信息不再重复。
+ * 固定字号海报排版，超长直接省略号。
  */
 export default function Masthead() {
-  const text = useSkin((s) => s.skin.text)
   const track = usePlayer((s) => s.current())
 
-  const titleRef = useRef<HTMLHeadingElement>(null)
-  const subtitleRef = useRef<HTMLParagraphElement>(null)
-
-  const title = track?.title || text.title
-  // 在播时第二个固定槽位给专辑（歌手已经去了黑色署名条），空闲时还是皮肤副标题
-  const subtitle = track ? track.album : text.subtitle
-  // 第三个固定槽位只放皮肤年份；播放时即使为空也保留高度，避免其它文字上下跳
-  const third = track ? "" : text.year
-  // 黑条优先用歌手名；没在播、或这首歌没有歌手时回到皮肤署名
-  const byline = track?.artist || text.byline
-
-  useLayoutEffect(() => {
-    const run = () => {
-      fitText(titleRef.current, 34)
-      fitText(subtitleRef.current, 16)
-    }
-    run()
-    // 展示字体是异步加载的，字体换上之后宽度会变，必须再量一次，
-    // 否则首屏会按兜底字体的宽度定字号，字体到位后要么撑出去要么缩太多
-    void document.fonts?.ready.then(run).catch(() => {})
-  }, [title, subtitle])
+  const title = track?.title || "歌名"
+  const byline = track?.artist || "歌手名"
+  const titleTag = splitLeadingTitleTag(title)
 
   return (
     <>
       <div className="masthead" data-part="masthead">
-        <h1 ref={titleRef} data-cjk={hasCjk(title)} title={title}>
-          {title}
+        <h1 data-cjk={hasCjk(title)} title={title} aria-label={title}>
+          {titleTag ? (
+            <>
+              <span
+                className="masthead-title-tag"
+                data-wide={/[【［（《]/u.test(titleTag.open)}
+                aria-hidden="true"
+              >
+                <span className="masthead-title-bracket">{titleTag.open}</span>
+                <span className="masthead-title-tag-label">{titleTag.label}</span>
+                <span className="masthead-title-bracket">{titleTag.close}</span>
+              </span>
+              <span className="masthead-title-main" aria-hidden="true">
+                {titleTag.rest}
+              </span>
+            </>
+          ) : (
+            <span className="masthead-title-main" aria-hidden="true">
+              {title}
+            </span>
+          )}
         </h1>
-        <p ref={subtitleRef} data-cjk={hasCjk(subtitle)} aria-hidden={!subtitle}>
-          {subtitle || "\u00a0"}
-        </p>
-        <small data-cjk={hasCjk(third)} aria-hidden={!third}>
-          {third || "\u00a0"}
-        </small>
+        <p>MYRIAD AUDIO</p>
+        <small>117</small>
       </div>
+      {/* 署名条保持为标题组的兄弟节点，自定义布局仍可单独移动它。 */}
       <div className="byline" data-part="byline" title={byline}>
         {byline}
       </div>
