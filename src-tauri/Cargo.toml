@@ -1,6 +1,6 @@
 [package]
 name = "vinyl-player"
-version = "0.1.0"
+version = "0.2.0"
 description = "以视觉为第一卖点的本地音乐播放器"
 edition = "2021"
 rust-version = "1.77"
