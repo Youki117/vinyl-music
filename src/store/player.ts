@@ -355,8 +355,21 @@ let consecutiveErrors = 0
  * 把人家刚选的歌跳掉。连续失败还能叠出好几个，一次跳好几首。
  */
 let retryTimer = 0
-/** 播放请求代际：只有最后一次用户选择有权开声、写元数据或安排失败重试。 */
+/**
+ * **发声权**代际：只有最后一次用户操作有权开声、报错或安排失败重试。
+ *
+ * 暂停也会推进它 —— 加载中按暂停，晚回来的那份字节绝不能自己开声（这正是
+ * "连点几首再暂停，软件自己响起来并一首几秒地乱跳" 那个 bug 的根）。
+ */
 let playSeq = 0
+/**
+ * **当前曲目**代际：只在真的换歌时推进，暂停不推进。
+ *
+ * 歌词、封面、响度这三样补齐是慢的（在线的要等平台接口），而它们的有效性只取决于
+ * "还是不是这首歌"，跟"现在是放着还是停着"无关。早先这三样也挂在 playSeq 上，
+ * 于是起播后一两秒内按一下暂停，它们就被永久作废、恢复播放也不会重取。
+ */
+let trackSeq = 0
 /** 音质切换代际：连续点多个档位时只允许最后一次换入音频。 */
 let qualitySeq = 0
 
@@ -573,6 +586,8 @@ export const usePlayer = create<PlayerState>((set, get) => {
       if (i < 0 || i >= queue.length) return
       const track = queue[i]
       const mine = ++playSeq
+      // 换歌才作废元数据补齐；同一首歌上的暂停/继续不该把在途的歌词封面丢掉
+      const mineTrack = ++trackSeq
       qualitySeq++
       cancelRetry()
       // 先停旧声音，再更新界面；加载期间绝不能还放着上一首。
@@ -620,7 +635,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
 
         // 响度对齐。标签命中是同步的，测量那条要解码整首歌，所以不 await ——
         // 声音先出来，量完再用斜坡滑过去
-        void applyTrackGain(track, bytes, () => mine === playSeq && get().index === i)
+        void applyTrackGain(track, bytes, () => mineTrack === trackSeq && get().index === i)
 
         // 把下一首提前拿到手上（F1.6）。延后一点点开始，别和刚起播时的封面歌词抢
         schedulePrefetch()
@@ -633,7 +648,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
             lib.ensureLyrics(track.id).catch(() => null),
             lib.ensureCover(track.id, bytes).catch(() => null),
           ]).then(([lrc, cover]) => {
-            if (mine !== playSeq || get().index !== i) return
+            if (mineTrack !== trackSeq || get().index !== i) return
             if (lrc || cover) get().refreshQueueMeta()
             // 封面要等解出来、落盘之后才报给系统媒体面板，否则任务栏那格是空的
             if (cover?.path) {
@@ -652,7 +667,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
           // 在线曲目的歌词与封面来自平台接口，和本地那条路完全不同
           void fillOnlineMeta(
             track,
-            () => mine === playSeq && get().index === i,
+            () => mineTrack === trackSeq && get().index === i,
             () => get().refreshQueueMeta(),
           )
         }
@@ -903,8 +918,14 @@ export const usePlayer = create<PlayerState>((set, get) => {
         const bytes = await fetchOnlineBytes(track, effective)
         if (mine !== qualitySeq || get().current()?.id !== trackId) return
 
-        // 真正换入前留一份临时回滚副本。下载失败时完全不会走到这里，旧音频继续播放；
-        // 新字节万一解码失败，也能把旧音质放回原进度，而不是突然静音。
+        /*
+         * 真正换入前留一份临时回滚副本。下载失败时完全不会走到这里，旧音频继续播放；
+         * 新字节万一解码失败，也能把旧音质放回原进度，而不是突然静音。
+         *
+         * **代价：这一小段里内存同时压着新旧两份完整音频**，Hi-Res 切换时峰值约为
+         * 单曲体积的两倍（PRD 的播放峰值指标按 524MB 记）。所以副本只在"下载已成功、
+         * 马上要换入"这一刻才取，换入成功后立刻撒手，不让它活到 pushNowPlaying 之后。
+         */
         previousBytes = await engine.copyLoadedBytes()
         if (mine !== qualitySeq || get().current()?.id !== trackId) return
         position = engine.currentTime
@@ -919,6 +940,9 @@ export const usePlayer = create<PlayerState>((set, get) => {
         engine.setLoop(loop.a, loop.b)
         if (shouldResume) await engine.play()
         if (mine !== qualitySeq || get().current()?.id !== trackId) return
+
+        // 新音质已经稳定发声，回滚副本再无用处：立刻撒手，别让它多活一次事件循环
+        previousBytes = null
 
         set({
           activeOnlineQuality: effective,

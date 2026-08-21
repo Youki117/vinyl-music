@@ -62,13 +62,14 @@ vi.mock("@/audio/engine", () => ({
   isAudioLoadCancelled: (error: unknown) =>
     error instanceof Error && error.name === "AbortError",
 }))
+const updateNowPlaying = vi.fn(async (_info: unknown, _reason?: string) => {})
 vi.mock("@/platform", () => ({
   platform: {
     writeConfig,
     readConfig: vi.fn(async () => null),
     readFile: vi.fn(async () => new Uint8Array([1])),
     readSlice: vi.fn(async () => new Uint8Array([1])),
-    updateNowPlaying: vi.fn(async () => {}),
+    updateNowPlaying,
     ensureReadable: vi.fn(async () => {}),
   },
 }))
@@ -82,6 +83,9 @@ vi.mock("@/source/boot", () => ({
 }))
 
 const markMissing = vi.fn()
+// 提到模块级而不是每次 getState() 现造：用例要跨调用观察它们有没有被调用过
+const ensureLyrics = vi.fn(async (_id: string): Promise<string | null> => null)
+const ensureCover = vi.fn(async (_id: string, _bytes?: unknown): Promise<{ path: string } | null> => null)
 vi.mock("@/store/library", () => ({
   localRef: (t: Track) =>
     t.origin.kind === "local" ? { id: t.id, name: t.id, size: 1, mtime: 0 } : null,
@@ -89,8 +93,10 @@ vi.mock("@/store/library", () => ({
     getState: () => ({
       markMissing,
       addTracks: vi.fn(),
-      ensureLyrics: vi.fn(async () => null),
-      ensureCover: vi.fn(async () => null),
+      ensureLyrics,
+      ensureCover,
+      // refreshQueueMeta 会走 byId；补齐歌词封面的用例要跑到它，缺了会 TypeError
+      byId: () => null,
     }),
   },
 }))
@@ -158,6 +164,11 @@ beforeEach(() => {
   resolvePlayUrl.mockClear()
   resolvePlayUrl.mockImplementation(async () => ({ url: "https://example.test/audio" }))
   markMissing.mockClear()
+  updateNowPlaying.mockClear()
+  ensureLyrics.mockClear()
+  ensureLyrics.mockImplementation(async () => null)
+  ensureCover.mockClear()
+  ensureCover.mockImplementation(async () => null)
   engine.eqEnabled = false
   engine.eqGains = [0, 0, 0]
   engine.status = "paused"
@@ -395,6 +406,84 @@ describe("快速切歌的异步竞态", () => {
 
     expect(engine.play).not.toHaveBeenCalled()
     expect(markMissing).not.toHaveBeenCalled()
+  })
+
+  /*
+   * v0.1.0 的现场故障，原样复刻：短时间内连点好几首，然后按暂停 —— 软件自己响起来，
+   * 而且一首刚放几秒就跳下一首。根因是那几次点击各自留了一个在途加载，暂停并不作废
+   * 它们，晚回来的挨个调 engine.play()，其中失败的那些还各排了一个 2 秒自动跳转。
+   *
+   * 这条盯死三件事：暂停之后**一次都不准开声**、index 不准漂、不准有孤儿跳转。
+   */
+  it("连点多首后暂停：晚到的加载全部作废，不自动开声也不连环跳歌", async () => {
+    const finishers: Array<(bytes: Uint8Array<ArrayBuffer>) => void> = []
+    engine.load.mockImplementation(
+      () =>
+        new Promise<Uint8Array<ArrayBuffer>>((resolve) => {
+          finishers.push(resolve)
+        }),
+    )
+
+    // 连点三首，每首都还卡在读盘里
+    const first = usePlayer.getState().playAt(0)
+    await Promise.resolve()
+    const second = usePlayer.getState().playAt(1)
+    await Promise.resolve()
+    const third = usePlayer.getState().playAt(2)
+    await Promise.resolve()
+    expect(finishers).toHaveLength(3)
+
+    usePlayer.getState().pause()
+    const parked = usePlayer.getState().index
+
+    // 三份字节这才陆续到齐
+    for (const finish of finishers) finish(new Uint8Array(new ArrayBuffer(1)))
+    await Promise.all([first, second, third])
+
+    expect(engine.play, "暂停之后仍然有人把声音打开了").not.toHaveBeenCalled()
+    expect(markMissing, "被取代的加载被误判成坏文件").not.toHaveBeenCalled()
+
+    // 孤儿重试定时器要是还在，就是在这 2 秒后开始连环跳歌
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(usePlayer.getState().index, "暂停后播放位置仍然自己漂走了").toBe(parked)
+    expect(engine.play).not.toHaveBeenCalled()
+  })
+
+  /*
+   * 与上一条相反的方向：暂停必须掐掉发声，但**不该**把这首歌在途的歌词封面一起作废。
+   * 早先两件事共用一个代际计数，起播后一两秒内按暂停，封面就永远不来了。
+   */
+  it("暂停不影响当前这首在途的封面补齐", async () => {
+    let finishCover!: (v: { path: string }) => void
+    ensureCover.mockImplementationOnce(
+      () => new Promise<{ path: string }>((resolve) => (finishCover = resolve)),
+    )
+
+    await usePlayer.getState().playAt(0)
+    updateNowPlaying.mockClear()
+
+    // 声音刚出来就按了暂停，此时封面还在解
+    usePlayer.getState().pause()
+    finishCover({ path: "C:/cover.jpg" })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(updateNowPlaying, "暂停把在途的封面补齐一起作废了").toHaveBeenCalled()
+  })
+
+  it("换成别的歌之后，上一首在途的封面不准再写回来", async () => {
+    let finishCover!: (v: { path: string }) => void
+    ensureCover.mockImplementationOnce(
+      () => new Promise<{ path: string }>((resolve) => (finishCover = resolve)),
+    )
+
+    await usePlayer.getState().playAt(0)
+    await usePlayer.getState().playAt(1)
+    updateNowPlaying.mockClear()
+
+    finishCover({ path: "C:/stale-cover.jpg" })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(updateNowPlaying, "上一首的封面盖到了新歌头上").not.toHaveBeenCalled()
   })
 
   it("旧的在线地址解析晚返回时不能取消已经切到的新歌", async () => {

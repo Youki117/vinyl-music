@@ -21,6 +21,12 @@ export default function Playback({ open, onClose }: { open: boolean; onClose: ()
   const normalize = usePlayer((s) => s.normalize)
   const setNormalize = usePlayer((s) => s.setNormalize)
 
+  /*
+   * EQ 的权威在 engine 上，这里只是它的一份镜像 —— 且必须**订阅**着，不能只在挂载时
+   * 取一次快照。这个面板是常驻挂载的（App 里用 open 控制显隐），而存盘的 EQ 要等
+   * player.init() 读完盘才写回 engine，比挂载晚得多。只取快照的话面板永远显示全 0，
+   * 用户一拖滑块就拿这份全 0 覆盖掉存盘的整条曲线。
+   */
   const [eqOn, setEqOn] = useState(engine.eqEnabled)
   const [gains, setGains] = useState<number[]>(engine.eqGains)
   const [remaining, setRemaining] = useState<number | null>(null)
@@ -47,6 +53,18 @@ export default function Playback({ open, onClose }: { open: boolean; onClose: ()
     [],
   )
   useEffect(() => engine.onLoopChange(setLoop), [])
+  // 订阅时会立刻回调一次当前值，启动时的"面板比引擎早"就是在这里被补上的
+  useEffect(
+    () =>
+      engine.onEqChange(({ enabled, gains: next }) => {
+        setEqOn(enabled)
+        // 自己写进去的那次也会绕回来。值一样就不换引用，省掉一次无谓重渲染
+        setGains((cur) =>
+          cur.length === next.length && cur.every((v, i) => v === next[i]) ? cur : next,
+        )
+      }),
+    [],
+  )
 
   useEffect(() => {
     if (!open) return
@@ -181,7 +199,12 @@ export default function Playback({ open, onClose }: { open: boolean; onClose: ()
               <input
                 type="checkbox"
                 checked={afterTrack}
-                onChange={(e) => setAfterTrack(e.target.checked)}
+                onChange={(e) => {
+                  setAfterTrack(e.target.checked)
+                  // 已经在跑的定时器也要跟着改，否则这个开关要等下次重新选分钟数才生效。
+                  // 走 setSleepAfterTrack 而不是重设定时器：重设会把倒计时抹回满值。
+                  engine.setSleepAfterTrack(e.target.checked)
+                }}
               />
               <span />
             </label>
