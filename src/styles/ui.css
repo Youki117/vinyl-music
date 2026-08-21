@@ -2591,6 +2591,22 @@ header button.danger,
   flex: 1;
 }
 
+/* 配图占用条：让"攒了多少图"这件事有个地方能看见 */
+.artwork-meter {
+  height: 3px;
+  margin: 2px 0 10px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.artwork-meter span {
+  display: block;
+  height: 100%;
+  background: var(--panel-gold);
+  transition: width 260ms ease;
+}
+
 /* 统一曲目行 */
 .drawer ol {
   padding: 0;

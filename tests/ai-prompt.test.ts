@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest"
 
 import { buildLyricDigest, composeImagePrompt, extractLyricLines } from "@/ai/prompt"
-import { DEFAULT_AI, isConfigured, resolveImageEndpoint, resolveTextEndpoint } from "@/ai/config"
+import {
+  DEFAULT_AI,
+  configWarning,
+  isConfigured,
+  resolveImageEndpoint,
+  resolveTextEndpoint,
+} from "@/ai/config"
 
 describe("extractLyricLines", () => {
   it("从 LRC 里取出正文，丢掉时间戳", () => {
@@ -29,6 +35,92 @@ describe("extractLyricLines", () => {
   })
 })
 
+/*
+ * 平台歌词几乎都在正文前挂一串制作人员署名，纯音乐则返回一句占位说明。
+ * 这些不是歌词，喂给模型只会得到"一个叫某某的人在录音棚里"或者对着
+ * "请您欣赏"编出来的画面。
+ */
+describe("不是歌词的那些行", () => {
+  it("丢掉制作人员署名，中英文冒号都认", () => {
+    const lrc = [
+      "[00:00.00]作词 : 张三",
+      "[00:01.00]作曲：李四",
+      "[00:02.00]和声 : 王五",
+      "[00:03.00]混音：赵六",
+      "[00:04.00]Producer: Someone",
+      "[00:05.00]走在冷风里",
+    ].join("\n")
+    expect(extractLyricLines(lrc)).toEqual(["走在冷风里"])
+  })
+
+  it("不会因为含「作曲」两个字就误伤正经歌词", () => {
+    // 卡的是"行首职能词 + 冒号"这个形状，不是关键词
+    const lrc = "[00:01.00]作曲家的手在发抖\n[00:02.00]词句散落一地"
+    expect(extractLyricLines(lrc)).toEqual(["作曲家的手在发抖", "词句散落一地"])
+  })
+
+  it("丢掉平台给纯音乐的占位说明", () => {
+    expect(extractLyricLines("此歌曲为没有填词的纯音乐，请您欣赏")).toEqual([])
+    expect(extractLyricLines("[00:00.00]纯音乐，请欣赏")).toEqual([])
+    expect(extractLyricLines("暂无歌词")).toEqual([])
+  })
+
+  it("纯音乐会走「没有可用歌词」那条，而不是拿占位句去生图", () => {
+    const d = buildLyricDigest({
+      title: "夜航",
+      artist: "某人",
+      album: "",
+      lyrics: "[00:00.00]此歌曲为没有填词的纯音乐，请您欣赏",
+    })
+    expect(d).toContain("没有可用的歌词")
+    expect(d).not.toContain("请您欣赏")
+  })
+
+  it("整份歌词只有署名时，同样当作没有歌词", () => {
+    const d = buildLyricDigest({
+      title: "夜航",
+      artist: "某人",
+      album: "",
+      lyrics: "作词 : 张三\n作曲 : 李四\n和声 : 王五",
+    })
+    expect(d).toContain("没有可用的歌词")
+    expect(d).not.toContain("张三")
+  })
+
+  it("一行就有画面感的歌词要留住，不能因为短就丢掉", () => {
+    // 曾经按行数卡过门槛，把这类误伤了 —— 它正是 prompt.ts 举例的那种
+    const d = buildLyricDigest({
+      title: "山明水秀",
+      artist: "",
+      album: "",
+      lyrics: "[00:01.00]没有星星的夜空",
+    })
+    expect(d).toContain("没有星星的夜空")
+  })
+})
+
+describe("配置陷阱预警", () => {
+  const filled = {
+    ...DEFAULT_AI,
+    enabled: true,
+    textApiKey: "sk-x",
+    imageModel: "some-image-model",
+  }
+
+  it("图像接口留空回落到 DeepSeek 时提前警告", () => {
+    // DeepSeek 没有 /images/generations，等第二步 404 才发现时钱已经花了
+    expect(configWarning(filled)).toContain("没有生图接口")
+  })
+
+  it("单独填了支持生图的接口就不再警告", () => {
+    expect(configWarning({ ...filled, imageBaseUrl: "https://open.bigmodel.cn/api/paas/v4" })).toBeNull()
+  })
+
+  it("功能没开时不打扰", () => {
+    expect(configWarning({ ...filled, enabled: false })).toBeNull()
+  })
+})
+
 describe("buildLyricDigest", () => {
   const base = { title: "山明水秀", artist: "Xiaojie", album: "FASHION", lyrics: null }
 
@@ -41,7 +133,7 @@ describe("buildLyricDigest", () => {
 
   it("没歌词时明确告诉模型只能靠歌名想象", () => {
     const d = buildLyricDigest(base)
-    expect(d).toContain("没有歌词文件")
+    expect(d).toContain("没有可用的歌词")
     expect(d).toContain("山明水秀")
   })
 

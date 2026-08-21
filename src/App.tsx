@@ -87,9 +87,14 @@ export default function App() {
 
   useEffect(() => {
     void loadSkin()
-    void init()
     void useAi.getState().load()
     void useLayout.getState().load()
+    // init() 里会把曲库读进来，读完才知道哪些曲目还在，才能清理掉已删曲目的 AI 配图。
+    // 必须等它 resolve —— 曲库还没加载完时曲目集合是空的，那时清理等于全删。
+    void init().then(() => {
+      const live = new Set(useLibrary.getState().tracks.map((t) => t.id))
+      void useAi.getState().sweepLibrary(live)
+    })
   }, [loadSkin, init])
 
   // 切歌时：套用该曲已有的 AI 配图，并把混音编排切到这首歌上

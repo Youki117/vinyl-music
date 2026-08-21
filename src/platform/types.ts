@@ -126,6 +126,15 @@ export interface Platform {
   saveImage(name: string, bytes: Uint8Array): Promise<FileRef>
 
   /**
+   * 列出 saveImage 写出去的文件，按文件名前缀筛。
+   *
+   * 存在的理由只有一个：账本与磁盘会对不上。图片先落盘、账本走防抖，中间崩一次
+   * 就留下一个谁也不认识的文件。没有这个方法，面板上那句"已用 320MB"就只是
+   * 账本的自述，不是磁盘的实情。
+   */
+  listImages(prefix: string): Promise<FileRef[]>
+
+  /**
    * 删除应用自己写出去的文件（封面副本、AI 生成图）。
    * **只用于应用数据目录内的文件**，不碰用户的音乐库。
    */

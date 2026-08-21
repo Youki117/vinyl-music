@@ -1,4 +1,11 @@
-import { isConfigured } from "@/ai/config"
+import { configWarning, isConfigured } from "@/ai/config"
+import {
+  MAX_ARTWORK_BUDGET,
+  MIN_ARTWORK_BUDGET,
+  findArtwork,
+  formatBytes,
+  totalBytes,
+} from "@/ai/artworkStore"
 import { useAi } from "@/store/ai"
 import { usePlayer } from "@/store/player"
 
@@ -18,7 +25,12 @@ export default function AiTab() {
   const track = usePlayer((s) => s.current())
   const ready = isConfigured(ai.config)
   const busy = ai.stage !== "idle"
-  const hasArtwork = track ? Boolean(ai.artwork[track.id]) : false
+  const hasArtwork = track ? Boolean(findArtwork(ai.artwork, track.id)) : false
+  const warning = configWarning(ai.config)
+  const used = totalBytes(ai.artwork)
+  // 大小未知的那些（旧版本迁移来的）不计入已用。如实说明，免得用户拿这个数字
+  // 去对文件夹属性时对不上
+  const unsized = ai.artwork.filter((item) => item.bytes === 0).length
 
   return (
     <>
@@ -43,7 +55,7 @@ export default function AiTab() {
             <div className="setting-toggle-row compact">
               <div>
                 <b>切歌时自动生成</b>
-                <span>已有配图直接复用，不会重复产生费用</span>
+                <span>已有配图直接复用；连续切歌时不会生成，停下来听满 8 秒才开始</span>
               </div>
               <label className="switch">
                 <input
@@ -69,8 +81,12 @@ export default function AiTab() {
               )}
             </div>
             {!ready && <p className="hint danger-text">接口地址、密钥和模型名填齐后才能生成。</p>}
+            {warning && <p className="hint danger-text">{warning}</p>}
             {!track && <p className="hint">先选一首歌。</p>}
             {busy && <p className="hint">{STAGE_TEXT[ai.stage]}</p>}
+            {!busy && ai.pendingFor !== null && (
+              <p className="hint">停留满 8 秒后开始生成；这期间切歌就不生成，也不产生费用。</p>
+            )}
             {ai.error && <p className="hint danger-text">失败：{ai.error}</p>}
           </>
         )}
@@ -101,6 +117,51 @@ export default function AiTab() {
               <p className="hint scene-text">{ai.lastScene}</p>
             </section>
           )}
+
+          <section className="panel-section">
+            <div className="panel-title-row">
+              <h3>配图存储</h3>
+              <span>
+                {ai.artwork.length} 张 · {formatBytes(used)} / {formatBytes(ai.budgetBytes)}
+              </span>
+            </div>
+            <div className="artwork-meter" aria-hidden="true">
+              <span style={{ width: `${Math.min(100, (used / ai.budgetBytes) * 100)}%` }} />
+            </div>
+            <label className="row-field">
+              <span>磁盘上限</span>
+              <input
+                type="range"
+                min={MIN_ARTWORK_BUDGET}
+                max={MAX_ARTWORK_BUDGET}
+                step={100 * 1024 * 1024}
+                value={ai.budgetBytes}
+                onChange={(e) => ai.setBudget(Number(e.target.value))}
+                aria-label={`磁盘上限 ${formatBytes(ai.budgetBytes)}`}
+              />
+            </label>
+            <p className="hint">
+              超过上限时，从最久没听到的那几首开始删。正在用的那张永远保留。
+              {unsized > 0 && ` 另有 ${unsized} 张是旧版本留下的，没记大小，重新生成后才会计入。`}
+            </p>
+            <div className="ai-generate-actions">
+              <button
+                disabled={!track || !hasArtwork}
+                onClick={() => track && void ai.removeArtwork(track.id)}
+                title="删掉这首歌的配图，下次会重新生成"
+              >
+                删除当前这首的配图
+              </button>
+              <button
+                className="danger"
+                disabled={ai.artwork.length === 0}
+                onClick={() => void ai.clearArtwork()}
+                title="删掉全部已生成的配图文件"
+              >
+                清空全部（{ai.artwork.length}）
+              </button>
+            </div>
+          </section>
 
           <section className="panel-section ai-config-section">
             <div className="panel-title-row">

@@ -100,6 +100,7 @@ export const platform = {
 
   saveImage: (name: string, bytes: Uint8Array): Promise<FileRef> =>
     impl().then((p) => p.saveImage(name, bytes)),
+  listImages: (prefix: string): Promise<FileRef[]> => impl().then((p) => p.listImages(prefix)),
   removeFile: (path: string): Promise<void> => impl().then((p) => p.removeFile(path)),
 
   readCache: (key: string): Promise<Uint8Array | null> => impl().then((p) => p.readCache(key)),

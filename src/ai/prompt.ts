@@ -37,12 +37,46 @@ export function buildLyricDigest(src: PromptSource): string {
     if (text.length > MAX_LYRIC_CHARS) text = text.slice(0, MAX_LYRIC_CHARS) + "…"
     parts.push(`歌词：\n${text}`)
   } else {
-    parts.push("（这首歌没有歌词文件，请只依据歌名与专辑名想象画面）")
+    // 纯音乐、只有制作人署名、或滤完只剩零碎的，都走这条 ——
+    // 让模型知道"确实没有词"，好过让它对着"请您欣赏"编画面
+    parts.push("（这首歌没有可用的歌词，请只依据歌名与专辑名想象画面）")
   }
   return parts.join("\n")
 }
 
-/** 从 LRC 或纯文本里取出去重后的歌词行。 */
+/**
+ * 制作人员署名行。
+ *
+ * 平台歌词几乎都在正文前面挂一串这个（`作词 : 某某`、`和声：某某`），它们不是
+ * 歌词，喂给模型只会得到"一个叫某某的人在录音棚里"这种画面。
+ *
+ * 必须卡"行首职能词 + 冒号"这个形状，不能只匹配关键词 —— 「作曲家的手在发抖」
+ * 是正经歌词，不能因为含"作曲"两个字就被丢掉。
+ */
+const CREDIT_LINE =
+  /^\s*(作词|作曲|编曲|填词|制作人|出品人?|监制|录音|混音|母带|和声|配唱|统筹|策划|发行|企划|吉他|贝斯|鼓|键盘|弦乐|长笛|二胡|古筝|人声|录音室|录音棚|词|曲|OP|SP|OC|MV|Producer|Composer|Lyricist|Arranger|Mixing|Mastering)\s*[:：]/i
+
+/**
+ * 平台对纯音乐返回的占位句。
+ *
+ * 这类曲目在接口上不是"没有歌词"，而是"歌词内容是一句说明"。不识别的话，
+ * buildLyricDigest 会以为拿到了歌词，把"请您欣赏"当意象送去生图。
+ */
+const INSTRUMENTAL_LINE =
+  /(纯音乐[，,]?\s*请欣赏|此歌曲为没有填词的纯音乐|没有填词的纯音乐|暂无歌词|该歌曲暂时没有歌词|instrumental\s*(only)?$|no\s+lyrics)/i
+
+/** 这一行是不是根本不算歌词正文 */
+export function isNonLyricLine(line: string): boolean {
+  const t = line.trim()
+  if (!t) return true
+  // [ti:xxx] 这类 LRC 元信息标签
+  if (/^\[[a-z]+:.*\]$/i.test(t)) return true
+  if (CREDIT_LINE.test(t)) return true
+  if (INSTRUMENTAL_LINE.test(t)) return true
+  return false
+}
+
+/** 从 LRC 或纯文本里取出去重后的歌词正文，署名与占位说明都不算。 */
 export function extractLyricLines(lyrics: string | null): string[] {
   if (!lyrics?.trim()) return []
 
@@ -56,14 +90,22 @@ export function extractLyricLines(lyrics: string | null): string[] {
   const out: string[] = []
   for (const line of raw) {
     const t = line.trim()
-    // 跳过空行与 [ti:] 这类元信息行
-    if (!t || /^\[[a-z]+:.*\]$/i.test(t)) continue
+    if (isNonLyricLine(t)) continue
     if (seen.has(t)) continue
     seen.add(t)
     out.push(t)
   }
   return out
 }
+
+/*
+ * 这里刻意**不设"至少几行才算数"的门槛**。
+ *
+ * 试过按行数卡（少于三行就当没歌词），结果把「没有星星的夜空」这种一行就足够
+ * 撑起一个画面的歌词也滤掉了 —— 而它正是本文件开头拿来举例的那类。真正该挡的
+ * 是署名和占位说明，上面两条正则已经精确挡住了；再加个行数门槛只会误伤短歌词。
+ * 万一漏网一行零碎（一句"Hey"），模型自然会退回去靠歌名，损失远小于误伤。
+ */
 
 /** 文本模型的输出 + 固定风格后缀 = 最终送给生图模型的提示词。 */
 export function composeImagePrompt(scene: string, styleSuffix: string): string {

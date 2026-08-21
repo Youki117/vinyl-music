@@ -152,6 +152,11 @@ export function create(): Platform {
       // 浏览器没有能力域这回事
     },
 
+    async listImages() {
+      // 浏览器下 saveImage 只造了个内存里的 File，磁盘上没有可列的东西
+      return []
+    },
+
     async removeFile() {
       // 浏览器下 saveImage 只造了个内存里的 File，没有可删的东西
     },

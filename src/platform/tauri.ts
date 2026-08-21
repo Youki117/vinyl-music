@@ -17,6 +17,7 @@ import {
   BaseDirectory,
   exists,
   mkdir,
+  readDir,
   readFile as fsReadFile,
   readTextFile,
   remove,
@@ -202,6 +203,25 @@ export function create(): Platform {
 
     async ensureReadable(paths) {
       await grantPaths(paths)
+    },
+
+    async listImages(prefix) {
+      if (!(await exists(SKIN_DIR, { baseDir: BaseDirectory.AppData }))) return []
+      const root = await appDataDir()
+      const entries = await readDir(SKIN_DIR, { baseDir: BaseDirectory.AppData })
+      const out: FileRef[] = []
+      for (const entry of entries) {
+        if (!entry.isFile || !entry.name.startsWith(prefix)) continue
+        // 和 saveImage 拼绝对路径的方式保持一致，否则账本里的 path 对不上
+        const abs = `${root}\\${SKIN_DIR}/${entry.name}`.replace(/\//g, "\\")
+        try {
+          const info = await stat(abs)
+          out.push({ id: abs, name: entry.name, size: info.size, mtime: info.mtime?.getTime() ?? 0 })
+        } catch {
+          // 刚被别处删掉了，跳过就是
+        }
+      }
+      return out
     },
 
     async removeFile(path) {
