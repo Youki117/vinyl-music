@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { platform } from "@/platform"
 import { BUILTIN_BACKDROPS } from "@/skin/backdrops"
@@ -34,7 +34,30 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
   const [presetName, setPresetName] = useState("")
 
   const dragRef = useRef<{ mode: "backdrop" | "label"; x: number; y: number } | null>(null)
+  const backdropRailRef = useRef<HTMLDivElement>(null)
   const rootRef = useDismiss<HTMLDivElement>(open, onClose)
+
+  useEffect(() => {
+    const rail = backdropRailRef.current
+    if (!open || tab !== "image" || !rail) return
+
+    /*
+     * React/WebView 会把 wheel 监听器注册成 passive，SyntheticEvent.preventDefault 不能可靠
+     * 阻止外层面板同时纵向滚动。这里显式使用 non-passive 原生监听：轨道还能横移时消费
+     * 滚轮，到达两端后把滚轮还给外层，用户才能继续上下浏览设置。
+     */
+    const onWheel = (event: WheelEvent) => {
+      const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX
+      const max = rail.scrollWidth - rail.clientWidth
+      const canMove = (delta < 0 && rail.scrollLeft > 0) || (delta > 0 && rail.scrollLeft < max - 1)
+      if (!canMove) return
+      event.preventDefault()
+      event.stopPropagation()
+      rail.scrollLeft += delta
+    }
+    rail.addEventListener("wheel", onWheel, { passive: false })
+    return () => rail.removeEventListener("wheel", onWheel)
+  }, [open, tab])
 
   if (!open) return null
 
@@ -117,7 +140,7 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
               “继续选择”，这样它与其它选项等大，也不用每次从独立大按钮重新进入。
             */}
             <p className="hint">背景图片</p>
-            <div className="builtin-backdrops">
+            <div ref={backdropRailRef} className="builtin-backdrops" aria-label="背景图片选择">
               {BUILTIN_BACKDROPS.map((b) => (
                 <button
                   key={b.id}
@@ -147,11 +170,11 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
               <button
                 className="builtin-backdrop backdrop-picker"
                 onClick={() => void platform.pickImage().then((r) => r && setBackdrop(r))}
-                aria-label="选择新的背景图片"
-                title="选择新的背景图片"
+                aria-label="添加自定义背景图片"
+                title="添加自定义背景图片"
               >
                 <IconPlus size={16} />
-                <span>选择</span>
+                <span>自定义</span>
               </button>
             </div>
             </section>
@@ -275,13 +298,16 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
             />
             </section>
             <section className="panel-section">
-            <label className="row-field">
+            <label className="row-field row-switch">
               <span>自动从底图取色</span>
-              <input
-                type="checkbox"
-                checked={skin.tintAuto}
-                onChange={(e) => patchSkin({ tintAuto: e.target.checked })}
-              />
+              <span className="switch">
+                <input
+                  type="checkbox"
+                  checked={skin.tintAuto}
+                  onChange={(e) => patchSkin({ tintAuto: e.target.checked })}
+                />
+                <span aria-hidden="true" />
+              </span>
             </label>
 
             {skin.tintAuto &&

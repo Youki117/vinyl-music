@@ -8,12 +8,15 @@ import {
   VIRTUAL_VIEWS,
   selectTracks,
   useLibrary,
+  type Playlist as PlaylistModel,
   type SortKey,
   type Track,
+  type ViewId,
 } from "@/store/library"
 import { usePlayer } from "@/store/player"
-import { IconArrowRight, IconExport, IconImport, IconPlus } from "../icons"
+import { IconArrowRight, IconImport, IconPlus, IconTrash } from "../icons"
 import { useDismiss } from "../useDismiss"
+import PlaylistImport from "./PlaylistImport"
 
 const SORT_KEYS: SortKey[] = ["added", "title", "artist", "album", "duration", "playCount", "lastPlayed"]
 
@@ -38,8 +41,6 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
     addToPlaylist,
     createPlaylist,
     deletePlaylist,
-    exportPlaylist,
-    importPlaylist,
     removeFromPlaylist,
     removeTracks,
     renamePlaylist,
@@ -57,6 +58,8 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
   const [renaming, setRenaming] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const [drag, setDrag] = useState<{ from: number; to: number } | null>(null)
+  const [showImport, setShowImport] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<PlaylistModel | null>(null)
   const listRef = useRef<HTMLOListElement>(null)
   const rootRef = useDismiss<HTMLDivElement>(open, onClose)
   // 右键菜单点哪儿都该收起来，包括抽屉内部，所以不豁免常驻区
@@ -67,30 +70,18 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
   // 关着的时候不算：抽屉默认收起，没必要为看不见的列表付筛选排序的钱。
   const rows = useMemo(
     () =>
-      open ? selectTracks({ tracks, playlists, view: activeView, sort, sortDesc, filter }) : NO_ROWS,
-    [open, tracks, playlists, activeView, sort, sortDesc, filter],
+      open && !showImport
+        ? selectTracks({ tracks, playlists, view: activeView, sort, sortDesc, filter })
+        : NO_ROWS,
+    [open, showImport, tracks, playlists, activeView, sort, sortDesc, filter],
   )
 
   if (!open) return null
 
-  const inPlaylist = !(VIRTUAL_VIEWS as readonly string[]).includes(activeView)
+  const selectedPlaylist = showImport ? null : playlists.find((playlist) => playlist.id === activeView) ?? null
+  const inPlaylist = selectedPlaylist !== null
 
   const importFolder = () => void platform.pickAudioFolder().then(addFiles)
-
-  const importM3u = () =>
-    void (async () => {
-      const ref = await platform.pickPlaylistFile()
-      if (!ref) return
-      const r = await importPlaylist(ref)
-      setNote(
-        r.playlistId
-          ? `已导入 ${r.matched} 首${r.missing > 0 ? `，${r.missing} 首找不到文件` : ""}`
-          : "歌单里的曲目一首都没找到",
-      )
-    })()
-
-  const exportOne = (id: string, name: string) =>
-    void exportPlaylist(id).then((ok) => setNote(ok ? `已导出「${name}」` : `「${name}」没有可导出的本地曲目`))
 
   // 只有自建歌单里"顺序"才是用户定的；虚拟歌单与排序视图下拖动没有意义
   const canReorder = inPlaylist && sort === "added" && !filter.trim()
@@ -142,6 +133,25 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
     document.addEventListener("pointerup", up)
   }
 
+  const selectView = (view: ViewId) => {
+    setShowImport(false)
+    setMenu(null)
+    setView(view)
+  }
+
+  const createNewPlaylist = () => {
+    setShowImport(false)
+    setRenaming(createPlaylist(`新建歌单 ${playlists.length + 1}`))
+  }
+
+  const confirmDelete = () => {
+    if (!pendingDelete) return
+    deletePlaylist(pendingDelete.id)
+    setNote(`已删除歌单「${pendingDelete.name}」，歌曲文件没有删除`)
+    setPendingDelete(null)
+    setShowImport(false)
+  }
+
   return (
     <div ref={rootRef} className="drawer library-drawer" role="dialog" aria-label="曲库">
       <header className="panel-header library-header">
@@ -154,7 +164,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
       <aside className="lib-side">
         <div className="lib-side-group">
           {VIRTUAL_VIEWS.map((v) => (
-            <button key={v} data-on={activeView === v} onClick={() => setView(v)}>
+            <button key={v} data-on={!showImport && activeView === v} onClick={() => selectView(v)}>
               {VIEW_LABEL[v]}
             </button>
           ))}
@@ -168,11 +178,16 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
         <div className="lib-side-title">
           <span>歌单</span>
           <div>
-            <button onClick={importM3u} aria-label="导入歌单" title="导入 m3u / m3u8 歌单">
-              <IconImport size={14} />
+            <button
+              onClick={() => selectedPlaylist && setPendingDelete(selectedPlaylist)}
+              disabled={!selectedPlaylist}
+              aria-label={selectedPlaylist ? `删除歌单 ${selectedPlaylist.name}` : "请选择要删除的歌单"}
+              title={selectedPlaylist ? "删除当前歌单" : "选择一个自建歌单后才能删除"}
+            >
+              <IconTrash size={14} />
             </button>
             <button
-              onClick={() => setRenaming(createPlaylist(`新建歌单 ${playlists.length + 1}`))}
+              onClick={createNewPlaylist}
               aria-label="新建歌单"
               title="新建歌单"
             >
@@ -198,32 +213,46 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
                 }}
               />
             ) : (
-              <div key={p.id} className="lib-playlist-row" data-on={activeView === p.id}>
+              <div key={p.id} className="lib-playlist-row" data-on={!showImport && activeView === p.id}>
                 <button
                   className="lib-playlist-select"
-                  onClick={() => setView(p.id)}
+                  onClick={() => selectView(p.id)}
                   onDoubleClick={() => setRenaming(p.id)}
                   title={`${p.name}（${p.trackIds.length} 首，双击重命名）`}
                 >
                   <span>{p.name}</span>
                   <em>{p.trackIds.length}</em>
                 </button>
-                <button
-                  className="lib-playlist-export"
-                  onClick={() => exportOne(p.id, p.name)}
-                  aria-label={`导出歌单 ${p.name}`}
-                  title="导出此歌单"
-                >
-                  <IconExport size={14} />
-                </button>
               </div>
             ),
           )}
-          {playlists.length === 0 && <p className="lib-side-empty">还没有歌单</p>}
+          <button
+            className="lib-import-entry"
+            data-on={showImport}
+            onClick={() => {
+              setShowImport(true)
+              setMenu(null)
+            }}
+          >
+            <span>
+              <IconImport size={14} />
+              导入歌单
+            </span>
+          </button>
         </div>
       </aside>
 
-      <section className="lib-main">
+      <section className={`lib-main${showImport ? " lib-import-main" : ""}`}>
+        {showImport ? (
+          <PlaylistImport
+            onImported={({ id, name, count }) => {
+              setShowImport(false)
+              setView(id)
+              setNote(`已导入 ${count} 首到「${name}」`)
+            }}
+          />
+        ) : (
+          <>
         <header>
           <input
             value={filter}
@@ -255,21 +284,9 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
         </header>
 
         {/*
-          “加文件 / 加文件夹 / 导出当前列表”与左侧入口重复，所以只移除这三个按钮：
-          本地目录仍由左侧按钮导入，歌单导入、新建、逐歌单导出也仍由左侧图标调用原函数；
-          平台导入能力、拖放导入与 store 动作都不删除，避免以后其它入口失效。
+          本地 M3U 导入、歌单导出与加文件的底层动作仍保留在 store/platform；这里移除的是
+          重复或当前不需要的按钮。平台歌单导入改由左侧“导入歌单”入口承载，不复制逻辑。
         */}
-        {inPlaylist && (
-          <div className="lib-actions">
-            <button
-              className="danger"
-              onClick={() => deletePlaylist(activeView)}
-              title="删除当前歌单（不删除文件）"
-            >
-              删歌单
-            </button>
-          </div>
-        )}
 
         {scanning && (
           <div className="drawer-progress">
@@ -318,8 +335,41 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
             </li>
           )}
         </ol>
+          </>
+        )}
       </section>
       </div>
+
+      {pendingDelete && (
+        <div
+          className="confirm-backdrop"
+          role="presentation"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) setPendingDelete(null)
+          }}
+        >
+          <div
+            className="confirm-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-playlist-title"
+            aria-describedby="delete-playlist-description"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.stopPropagation()
+                setPendingDelete(null)
+              }
+            }}
+          >
+            <h3 id="delete-playlist-title">删除「{pendingDelete.name}」？</h3>
+            <p id="delete-playlist-description">只会删除这张歌单，不会删除曲库中的歌曲或本地文件。</p>
+            <div>
+              <button autoFocus onClick={() => setPendingDelete(null)}>取消</button>
+              <button className="danger" onClick={confirmDelete}>确认删除</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {menu && (
         <div

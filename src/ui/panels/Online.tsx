@@ -4,26 +4,25 @@ import { formatTime } from "@/lib/format"
 import { platform } from "@/platform"
 import { ensureSource } from "@/source/boot"
 import { useLibrary, type Track } from "@/store/library"
-import { SOURCES, useOnline, type SourceId } from "@/store/online"
+import { SOURCES, useOnline } from "@/store/online"
 import { usePlayer } from "@/store/player"
 import { useDismiss } from "../useDismiss"
 
-/** 抽屉里的两件事：搜歌、导歌单。共用一个抽屉是因为它们要的都是"从平台拿曲目" */
-type Tab = "search" | "list" | "source"
+type Tab = "search" | "source"
 
 /**
- * 在线音乐抽屉：换平台 → 搜索 → 播放 / 加进歌单；或者贴一条分享链接导整个歌单。
+ * 在线音乐抽屉：换平台 → 搜索 → 播放 / 加进歌单，并管理播放音源。
  *
  * 与曲库抽屉刻意长得一样（双击播放、右键菜单），因为它们做的是同一件事，
  * 只是曲目从哪来不同。搜索结果**不入库**，播了的那首才入库（理由见 player 的 playAt）；
- * 歌单导入则是明确的收藏动作，整批入库。
+ * 平台歌单导入已经迁到曲库抽屉，避免搜索页同时承担两条不同任务。
  */
 /**
  * 音源脚本的导入入口。
  *
  * 脚本不随应用分发（见 src/source/builtin/README.md），所以必须有这条路 ——
- * 否则「搜得到但播不了」，而用户完全不知道少了什么。状态常驻显示，没导入时
- * 直接说清楚后果，不藏进二级菜单。
+ * 否则「搜得到但播不了」，而用户完全不知道少了什么。状态点常驻，详细说明放在
+ * 鼠标悬停与下方提示里，避免重复文字挤占标题行。
  */
 function SourceScript() {
   const [info, setInfo] = useState<{ file: string; name: string; version: string } | null>(null)
@@ -84,7 +83,14 @@ function SourceScript() {
             )}
           </span>
         </div>
-        <em data-ready={Boolean(info || builtin)}>{info || builtin ? "可用于解析" : "需要配置"}</em>
+        <span
+          className="source-status-dot"
+          data-ready={Boolean(info || builtin)}
+          data-tooltip={info || builtin ? "音源可用，可以解析播放地址" : "音源未配置，在线歌曲暂时不能播放"}
+          role="status"
+          aria-label={info || builtin ? "音源可用，可以解析播放地址" : "音源未配置，在线歌曲暂时不能播放"}
+          tabIndex={0}
+        />
       </div>
       <div className="source-script-actions">
         <button onClick={() => void pick()} disabled={busy}>
@@ -118,11 +124,6 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
   const loadingMore = useOnline((s) => s.loadingMore)
   const error = useOnline((s) => s.error)
   const total = useOnline((s) => s.total)
-  const listInput = useOnline((s) => s.listInput)
-  const listSource = useOnline((s) => s.listSource)
-  const listStatus = useOnline((s) => s.listStatus)
-  const listError = useOnline((s) => s.listError)
-  const preview = useOnline((s) => s.preview)
   const {
     setSource,
     setKeyword,
@@ -130,20 +131,14 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
     more,
     play,
     collect,
-    setListInput,
-    setListSource,
-    fetchList,
-    importList,
   } = useOnline.getState()
 
   const playlists = useLibrary((s) => s.playlists)
   const libTracks = useLibrary((s) => s.tracks)
   const playNext = usePlayer((s) => s.playNext)
-  const playFrom = usePlayer((s) => s.playFrom)
   const currentId = usePlayer((s) => s.current()?.id ?? null)
 
   const [tab, setTab] = useState<Tab>("search")
-  const [note, setNote] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ track: Track; x: number; y: number } | null>(null)
   const rootRef = useDismiss<HTMLDivElement>(open, onClose)
   const menuRef = useDismiss<HTMLDivElement>(menu !== null, () => setMenu(null), false)
@@ -153,27 +148,12 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
   const inLibrary = new Set(libTracks.map((t) => t.id))
   const hasMore = useOnline.getState().hasMore()
 
-  const doImport = () => {
-    const pid = importList()
-    if (!pid) return
-    const n = preview?.tracks.length ?? 0
-    setNote(`已导入 ${n} 首到「${preview?.name || "导入的歌单"}」，去曲库 (P) 里看`)
-  }
-
-  const playPreview = (i = 0) => {
-    if (!preview || preview.tracks.length === 0) return
-    void playFrom(preview.tracks, i)
-  }
-
   return (
     <div ref={rootRef} className="drawer online-drawer" role="dialog" aria-label="在线音乐">
       <header className="panel-header">
         <div className="online-tabs" role="tablist" aria-label="在线音乐">
           <button role="tab" aria-selected={tab === "search"} data-on={tab === "search"} onClick={() => setTab("search")}>
             在线搜索
-          </button>
-          <button role="tab" aria-selected={tab === "list"} data-on={tab === "list"} onClick={() => setTab("list")}>
-            歌单导入
           </button>
           <button role="tab" aria-selected={tab === "source"} data-on={tab === "source"} onClick={() => setTab("source")}>
             音源管理
@@ -271,85 +251,6 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
                   <span>共 {results.length} 首</span>
                 )}
               </li>
-            )}
-          </ol>
-        </>
-      ) : tab === "list" ? (
-        <>
-          <section className="panel-section playlist-import-form">
-          <div className="online-bar">
-            <input
-              value={listInput}
-              autoFocus
-              onChange={(e) => setListInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void fetchList()
-              }}
-              placeholder="贴歌单分享链接，或歌单 id"
-              aria-label="歌单链接"
-            />
-            <select
-              value={listSource ?? ""}
-              onChange={(e) => setListSource((e.target.value || null) as SourceId | null)}
-              aria-label="歌单所属平台"
-              title="平台。贴分享链接时留在「自动」即可"
-            >
-              <option value="">自动</option>
-              {SOURCES.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-            <button onClick={() => void fetchList()} disabled={listStatus === "loading"}>
-              {listStatus === "loading" ? "解析中…" : "解析"}
-            </button>
-          </div>
-
-          <p className="online-tip">
-            自己的「我喜欢的音乐」也是一个歌单，只要不是私密的，贴分享链接就能导。
-            酷狗必须给分享链接，裸 id 不行。
-          </p>
-          </section>
-
-          {listStatus === "error" && listError && <p className="lib-note online-error">{listError}</p>}
-          {note && (
-            <p className="lib-note" onClick={() => setNote(null)}>
-              {note}
-            </p>
-          )}
-
-          {preview && (
-            <div className="online-preview">
-              <b>{preview.name || "（这个歌单没有名字）"}</b>
-              <span>
-                {preview.tracks.length} 首
-                {preview.total > preview.tracks.length ? ` / 平台说有 ${preview.total} 首` : ""}
-              </span>
-              <span className="online-preview-actions">
-                <button className="primary" onClick={() => playPreview()}>
-                  播放全部
-                </button>
-                <button onClick={doImport}>导入为歌单</button>
-              </span>
-            </div>
-          )}
-
-          <ol>
-            {preview?.tracks.map((t, i) => (
-              <li key={t.id} data-active={t.id === currentId}>
-                <button className="row" onDoubleClick={() => playPreview(i)} data-tooltip="双击从这里播放整张歌单">
-                  <span className="song-index">{String(i + 1).padStart(2, "0")}</span>
-                  <b>{t.title}</b>
-                  <span>{t.artist}</span>
-                  {inLibrary.has(t.id) && <i title="已在曲库">库</i>}
-                  <em>{t.duration > 0 ? formatTime(t.duration) : "--:--"}</em>
-                </button>
-              </li>
-            ))}
-            {listStatus === "loading" && <li className="drawer-empty">正在解析歌单…</li>}
-            {!preview && listStatus !== "loading" && (
-              <li className="drawer-empty">歌单只给曲目信息，播到哪首才解析哪首的播放地址</li>
             )}
           </ol>
         </>

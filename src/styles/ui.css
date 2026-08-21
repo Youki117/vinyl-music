@@ -12,6 +12,7 @@
   color: var(--ink-accent);
   font-family: var(--font-display);
   line-height: 0.95;
+  height: 172px;
 }
 
 /* 中文标题另走一套字体栈：展示字体只子集化了拉丁字母，中文会掉到宋体。
@@ -32,6 +33,9 @@
 }
 
 .masthead h1 {
+  position: absolute;
+  inset: 0 0 auto;
+  width: 100%;
   margin: 0;
   font-size: 97px;
   /* 参考图的字重很轻、笔画对比强，用 500 会明显偏粗 */
@@ -41,15 +45,25 @@
 }
 
 .masthead p {
-  margin: 8px 0 0;
+  position: absolute;
+  left: 0;
+  top: 115px;
+  width: 100%;
+  min-height: 32px;
+  margin: 0;
   font-size: 33px;
   font-weight: 400;
   letter-spacing: 1.6px;
 }
 
 .masthead small {
+  position: absolute;
+  left: 0;
+  top: 149px;
   display: block;
-  margin-top: 3px;
+  width: 100%;
+  min-height: 18px;
+  margin: 0;
   font-size: 18px;
   font-weight: 400;
   letter-spacing: 1px;
@@ -2041,6 +2055,7 @@ header button.danger,
 .skin-body,
 .drawer ol,
 .lib-side,
+.builtin-backdrops,
 .track-picker {
   scrollbar-width: none;
 }
@@ -2048,6 +2063,7 @@ header button.danger,
 .skin-body::-webkit-scrollbar,
 .drawer ol::-webkit-scrollbar,
 .lib-side::-webkit-scrollbar,
+.builtin-backdrops::-webkit-scrollbar,
 .track-picker::-webkit-scrollbar {
   width: 0;
   height: 0;
@@ -2055,14 +2071,20 @@ header button.danger,
 
 /* ── 内置底图选择 ──────────────────────────────────────── */
 .builtin-backdrops {
-  display: grid;
-  /* 四张内置图 + “选择”正好同排；自定义历史继续按相同尺寸向后换行。 */
-  grid-template-columns: repeat(5, 1fr);
+  display: flex;
   gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scroll-snap-type: x proximity;
 }
 
 .builtin-backdrop {
+  /* 4.5 张卡片 + 4 个 6px 间距正好占满轨道；下一张稳定露出一半。 */
+  flex: 0 0 calc(22.222% - 5.333px);
+  min-width: 0;
   aspect-ratio: 16 / 10;
+  scroll-snap-align: start;
   border-radius: 5px;
   background-size: cover;
   background-position: center;
@@ -2516,6 +2538,8 @@ header button.danger,
 .source-script-row > div {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-width: 0;
   gap: 4px;
 }
 
@@ -2530,18 +2554,57 @@ header button.danger,
   font-size: 12px;
 }
 
-.source-script-row > em {
-  padding: 3px 7px;
-  border: 1px solid var(--panel-border);
-  border-radius: 3px;
-  color: var(--panel-text-muted);
-  font-size: 10px;
-  font-style: normal;
+.source-script-row > div > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.source-script-row > em[data-ready="true"] {
-  border-color: rgba(112, 157, 104, 0.36);
-  color: #99bd8d;
+.source-status-dot {
+  position: relative;
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  background: #69645e;
+  box-shadow: 0 0 0 3px rgba(105, 100, 94, 0.1);
+  outline: none;
+}
+
+.source-status-dot[data-ready="true"] {
+  border-color: rgba(151, 202, 135, 0.7);
+  background: #7fb46f;
+  box-shadow: 0 0 0 3px rgba(127, 180, 111, 0.12), 0 0 8px rgba(127, 180, 111, 0.34);
+}
+
+.source-status-dot::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  right: 0;
+  top: calc(100% + 9px);
+  z-index: 2;
+  width: max-content;
+  max-width: 210px;
+  padding: 5px 7px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: #171411;
+  color: var(--panel-text);
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  translate: 0 -2px;
+  transition: opacity 120ms ease 160ms, translate 120ms ease 160ms;
+}
+
+.source-status-dot:hover::after,
+.source-status-dot:focus-visible::after {
+  opacity: 1;
+  translate: 0 0;
 }
 
 .source-script-actions,
@@ -2725,6 +2788,14 @@ header button.danger,
   color: #b8b0a5;
 }
 
+.row-field.row-switch {
+  grid-template-columns: 1fr auto;
+}
+
+.row-field.row-switch .switch {
+  justify-self: end;
+}
+
 .veil-sliders .slider {
   grid-template-columns: 116px 1fr 44px;
   min-height: 34px;
@@ -2830,10 +2901,21 @@ header button.danger,
 }
 
 .lib-side-title button:hover,
-.lib-playlist-export:hover {
+.lib-import-entry:hover {
   border-color: var(--panel-border);
   background: var(--panel-bg-soft);
   color: var(--panel-gold-bright);
+}
+
+.lib-side-title button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.lib-side-title button:disabled:hover {
+  border-color: transparent;
+  background: transparent;
+  color: inherit;
 }
 
 .lib-playlist-row {
@@ -2866,29 +2948,135 @@ header button.danger,
   white-space: nowrap;
 }
 
-.lib-playlist-select em,
-.lib-playlist-export {
+.lib-playlist-select em {
   color: var(--panel-text-dim);
   font-size: 10px;
   font-style: normal;
 }
 
-.lib-side-group .lib-playlist-export {
-  width: 26px;
-  height: 26px;
-  min-height: 26px;
-  flex: none;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 4px;
+.lib-import-entry > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
 }
 
 .lib-playlist-row:hover,
 .lib-playlist-row:hover .lib-playlist-select {
   background: var(--panel-bg-soft);
   color: var(--panel-text);
+}
+
+.playlist-import-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.playlist-import-view .playlist-import-form {
+  padding: 16px 12px 14px;
+}
+
+.playlist-import-view .online-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.playlist-import-view .online-bar input {
+  grid-column: 1 / -1;
+}
+
+.playlist-import-view .online-bar select,
+.playlist-import-view .online-bar button {
+  min-height: 36px;
+}
+
+.playlist-import-view .online-bar button {
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--panel-bg-soft);
+}
+
+.playlist-import-view .online-bar button:hover:not(:disabled) {
+  border-color: var(--panel-border-strong);
+  background: var(--panel-bg-active);
+  color: var(--panel-gold-bright);
+}
+
+.playlist-import-view .online-tip {
+  margin-top: 10px;
+}
+
+.playlist-import-view .online-preview {
+  margin: 12px;
+}
+
+.playlist-import-view > ol {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.confirm-backdrop {
+  position: absolute;
+  inset: 0 var(--rail-w) 0 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(5, 4, 3, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.confirm-dialog {
+  width: min(286px, 100%);
+  padding: 20px;
+  border: 1px solid var(--panel-border-strong);
+  border-radius: 5px;
+  background: #15120f;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+}
+
+.confirm-dialog h3 {
+  margin: 0;
+  color: var(--panel-text);
+  font-family: var(--font-panel-title);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.confirm-dialog p {
+  margin: 10px 0 18px;
+  color: var(--panel-text-muted);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.confirm-dialog > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.confirm-dialog button {
+  min-height: 34px;
+  padding: 7px 13px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--panel-bg-soft);
+  color: var(--panel-text);
+}
+
+.confirm-dialog button:hover,
+.confirm-dialog button:focus-visible {
+  border-color: var(--panel-border-strong);
+  color: var(--panel-gold-bright);
+  outline: none;
+}
+
+.confirm-dialog button.danger {
+  border-color: rgba(174, 83, 70, 0.5);
+  color: #d9a59c;
 }
 
 .lib-main header {

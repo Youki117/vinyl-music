@@ -61,10 +61,10 @@ export default function Masthead() {
   const subtitleRef = useRef<HTMLParagraphElement>(null)
 
   const title = track?.title || text.title
-  // 在播时这行让给专辑（歌手已经去了黑色署名条），空闲时还是皮肤副标题
-  const subtitle = track ? "" : text.subtitle
-  // 专辑常常是空的，空了就不占一行，版式不塌
-  const third = track ? track.album : text.year
+  // 在播时第二个固定槽位给专辑（歌手已经去了黑色署名条），空闲时还是皮肤副标题
+  const subtitle = track ? track.album : text.subtitle
+  // 第三个固定槽位只放皮肤年份；播放时即使为空也保留高度，避免其它文字上下跳
+  const third = track ? "" : text.year
   // 黑条优先用歌手名；没在播、或这首歌没有歌手时回到皮肤署名
   const byline = track?.artist || text.byline
 
@@ -85,12 +85,12 @@ export default function Masthead() {
         <h1 ref={titleRef} data-cjk={hasCjk(title)} title={title}>
           {title}
         </h1>
-        {subtitle && (
-          <p ref={subtitleRef} data-cjk={hasCjk(subtitle)}>
-            {subtitle}
-          </p>
-        )}
-        {third && <small data-cjk={hasCjk(third)}>{third}</small>}
+        <p ref={subtitleRef} data-cjk={hasCjk(subtitle)} aria-hidden={!subtitle}>
+          {subtitle || "\u00a0"}
+        </p>
+        <small data-cjk={hasCjk(third)} aria-hidden={!third}>
+          {third || "\u00a0"}
+        </small>
       </div>
       <div className="byline" data-part="byline" title={byline}>
         {byline}

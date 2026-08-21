@@ -80,6 +80,15 @@ export function IconPlus({ size = 18, className }: P) {
   )
 }
 
+export function IconTrash({ size = 18, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} aria-hidden="true">
+      <path {...stroke} d="M5.5 7.5h13M9 4.5h6l1 3H8l1-3Z" />
+      <path {...stroke} d="m7.2 7.5.7 12h8.2l.7-12M10 10.5v6M14 10.5v6" />
+    </svg>
+  )
+}
+
 export function IconPrev({ size = 20, className }: P) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} className={className} aria-hidden="true">

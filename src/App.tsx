@@ -217,22 +217,29 @@ export default function App() {
           break
         case "p":
         case "P":
+          e.preventDefault()
           togglePanel("playlist")
           break
         case "s":
         case "S":
+          e.preventDefault()
           togglePanel("skin")
           break
         case "e":
         case "E":
+          e.preventDefault()
           togglePanel("playback")
           break
         case "x":
         case "X":
+          e.preventDefault()
           togglePanel("mix")
           break
         case "f":
         case "F":
+          // 面板在同一次 keydown 里挂载并自动聚焦输入框；不拦默认行为的话，
+          // 用快捷键打开后会把字母本身写进搜索框（F → 搜索词变成 "f"）。
+          e.preventDefault()
           togglePanel("online")
           break
         case "Escape":
