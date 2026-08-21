@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import { onlineToTrack, type OnlineTrackInput, type Track } from "@/store/library"
 import { mergeTracks } from "@/store/online"
-import { sourceOfLink } from "@/source/catalog"
+import { qqPlaylistIdOfInput, sourceOfLink } from "@/source/catalog"
 
 const input = (id: string, p: Partial<OnlineTrackInput> = {}): OnlineTrackInput => ({
   source: "wy",
@@ -106,5 +106,31 @@ describe("分享链接认平台", () => {
     // 「不是 qq.com 而是 notqq.com」这种要认不出，而不是认成 QQ
     expect(sourceOfLink("https://notqq.com/x")).toBe(null)
     expect(sourceOfLink("https://163.com.evil.net/x")).toBe(null)
+  })
+})
+
+describe("QQ 歌单 id 提取", () => {
+  it("识别手机 QQ 音乐分享页的 id 参数", () => {
+    expect(
+      qqPlaylistIdOfInput(
+        "https://i2.y.qq.com/n3/other/pages/details/playlist.html?platform=11&appshare=android_qq&id=4010674675&ADTAG=qfshare",
+      ),
+    ).toBe("4010674675")
+    expect(
+      qqPlaylistIdOfInput(
+        "分享歌单：https://i2.y.qq.com/n3/other/pages/details/playlist.html?platform=11&id=7999113873&ADTAG=wxfshare",
+      ),
+    ).toBe("7999113873")
+  })
+
+  it("识别网页路径、disstid 与手动选择平台后的纯 id", () => {
+    expect(qqPlaylistIdOfInput("https://y.qq.com/n/ryqq/playlist/7217720898")).toBe("7217720898")
+    expect(qqPlaylistIdOfInput("https://y.qq.com/x?disstid=7217720898")).toBe("7217720898")
+    expect(qqPlaylistIdOfInput("7217720898")).toBe("7217720898")
+  })
+
+  it("不从无关文本里猜 id", () => {
+    expect(qqPlaylistIdOfInput("https://c6.y.qq.com/base/fcgi-bin/u?__=short-code")).toBe(null)
+    expect(qqPlaylistIdOfInput("QQ 歌单 7217720898")).toBe(null)
   })
 })

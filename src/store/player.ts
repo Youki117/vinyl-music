@@ -1,7 +1,12 @@
 import { create } from "zustand"
 
 import { platform } from "@/platform"
-import { engine, type EngineStatus } from "@/audio/engine"
+import {
+  AudioLoadCancelledError,
+  engine,
+  isAudioLoadCancelled,
+  type EngineStatus,
+} from "@/audio/engine"
 import { clampGainDb, gainDbFor, loadLoudness } from "@/audio/loudness"
 import { ensureSource } from "@/source/boot"
 import { localRef, useLibrary, type Track } from "./library"
@@ -21,7 +26,37 @@ export const REPEAT_LABEL: Record<RepeatMode, string> = {
   once: "顺序播放",
 }
 
-const SETTINGS_SCHEMA = 2
+export const ONLINE_QUALITY_OPTIONS = [
+  { id: "128k", label: "标准", detail: "128 kbps" },
+  { id: "320k", label: "高品", detail: "320 kbps" },
+  { id: "flac", label: "无损", detail: "FLAC" },
+  { id: "flac24bit", label: "Hi-Res", detail: "24-bit FLAC" },
+] as const
+
+export type OnlineQuality = (typeof ONLINE_QUALITY_OPTIONS)[number]["id"]
+
+const ONLINE_QUALITY_IDS = new Set<string>(ONLINE_QUALITY_OPTIONS.map((q) => q.id))
+const DEFAULT_ONLINE_QUALITY: OnlineQuality = "128k"
+
+/**
+ * 全局偏好不等于每首歌都真有这个档位。优先用所选档位；没有时向下取最接近的档位，
+ * 再没有才用这首歌声明的最低可用档，避免因为一首歌缺无损就整首无法播放。
+ */
+export function qualityForTrack(track: Track, preferred: OnlineQuality): OnlineQuality {
+  if (track.origin.kind !== "online") return preferred
+  const qualities = Array.isArray(track.origin.qualities) ? track.origin.qualities : []
+  const available = qualities.filter((q): q is OnlineQuality => ONLINE_QUALITY_IDS.has(q))
+  if (available.length === 0 || available.includes(preferred)) return preferred
+
+  const wanted = ONLINE_QUALITY_OPTIONS.findIndex((q) => q.id === preferred)
+  for (let i = wanted - 1; i >= 0; i--) {
+    const candidate = ONLINE_QUALITY_OPTIONS[i].id
+    if (available.includes(candidate)) return candidate
+  }
+  return ONLINE_QUALITY_OPTIONS.find((q) => available.includes(q.id))?.id ?? preferred
+}
+
+const SETTINGS_SCHEMA = 3
 
 type SettingsFile = {
   schemaVersion: number
@@ -35,6 +70,8 @@ type SettingsFile = {
   outputDevice: string
   /** 音量归一化。PRD F7.4 要求默认关闭 */
   normalize: boolean
+  /** 在线歌曲的全局首选音质；单曲缺档位时 qualityForTrack 会就近降级。 */
+  onlineQuality: OnlineQuality
 }
 
 type PlayerState = {
@@ -50,6 +87,12 @@ type PlayerState = {
   speed: number
   /** 音量归一化开关（F7.4），默认关闭 */
   normalize: boolean
+  /** 全局首选音质。 */
+  onlineQuality: OnlineQuality
+  /** 当前真正载入的在线音质；本地曲目为 null。 */
+  activeOnlineQuality: OnlineQuality | null
+  qualityStatus: "idle" | "switching" | "error"
+  qualityError: string | null
 
   current(): Track | null
   init(): Promise<void>
@@ -67,6 +110,8 @@ type PlayerState = {
   refreshQueueMeta(): void
 
   toggle(): void
+  /** 暂停并作废尚未完成的切歌，防止晚到请求重新开声。 */
+  pause(): void
   next(auto?: boolean): Promise<void>
   prev(): Promise<void>
   cycleMode(): void
@@ -75,6 +120,8 @@ type PlayerState = {
   toggleMute(): void
   setSpeed(v: number): void
   setNormalize(on: boolean): void
+  /** 立即切换当前在线曲目，准备完成后保持原播放位置与播放状态。 */
+  setOnlineQuality(quality: OnlineQuality): Promise<void>
   /**
    * 均衡器。开关与增益的权威都在 engine 上（store 不镜像一份），这里存在的
    * 意义是**落盘**：settings 里的 eqEnabled/eqGains 是 save() 从 engine 上读的，
@@ -118,25 +165,29 @@ function asOnlineTrack(track: Track) {
 }
 
 /** 解析地址 → 取回字节。换源与地址验证都在 resolvePlayUrl 里，这里不重复。 */
-async function loadOnline(track: Track): Promise<Uint8Array> {
+async function loadOnline(
+  track: Track,
+  quality: OnlineQuality,
+  stillCurrent: () => boolean,
+): Promise<Uint8Array> {
   const online = asOnlineTrack(track)
   if (!online) throw new Error("曲目来源不明")
   const { resolvePlayUrl } = await onlineModule()
-  const { url } = await resolvePlayUrl(online, DEFAULT_ONLINE_QUALITY)
+  if (!stillCurrent()) throw new AudioLoadCancelledError()
+  const { url } = await resolvePlayUrl(online, quality)
+  // 地址解析本身也可能很慢。旧请求不能在这里才闯进引擎、反过来取消新歌。
+  if (!stillCurrent()) throw new AudioLoadCancelledError()
   return engine.loadUrl(url)
 }
 
 /** 只取回字节，不碰 `<audio>`。预取用它 —— 那时当前这首还在放。 */
-async function fetchOnlineBytes(track: Track): Promise<Uint8Array> {
+async function fetchOnlineBytes(track: Track, quality: OnlineQuality): Promise<Uint8Array> {
   const online = asOnlineTrack(track)
   if (!online) throw new Error("曲目来源不明")
   const { resolvePlayUrl } = await onlineModule()
-  const { url } = await resolvePlayUrl(online, DEFAULT_ONLINE_QUALITY)
+  const { url } = await resolvePlayUrl(online, quality)
   return engine.fetchAudio(url)
 }
-
-/** 在线曲目播放音质。音源脚本对各平台声明的档位不一，128k 是唯一五平台都有的。 */
-const DEFAULT_ONLINE_QUALITY = "128k"
 
 /**
  * 补齐在线曲目的歌词与封面。**不阻塞播放** —— 声音已经出来了，这两样晚几百毫秒到没关系。
@@ -215,7 +266,7 @@ async function applyTrackGain(
  * 代价是常驻一份下一首的字节（几 MB 到几十 MB）。留两首就是双倍代价换一个更不准的
  * 猜测：用户按下一首的次数远多于按下下一首。
  */
-let prefetched: { id: string; bytes: Uint8Array } | null = null
+let prefetched: { id: string; quality: OnlineQuality | null; bytes: Uint8Array } | null = null
 /** 预取序号，用来作废在途的过期预取（切歌比下载快时会发生） */
 let prefetchSeq = 0
 let prefetchTimer = 0
@@ -261,17 +312,19 @@ async function prefetchNext(): Promise<void> {
   const i = peekNextIndex()
   if (i == null) return
   const track = usePlayer.getState().queue[i]
-  if (!track || prefetched?.id === track.id) return
-
+  if (!track) return
   const ref = localRef(track)
+  const quality = ref ? null : qualityForTrack(track, usePlayer.getState().onlineQuality)
+  if (prefetched?.id === track.id && prefetched.quality === quality) return
+
   if (ref && ref.size > PREFETCH_MAX_BYTES) return
 
   const mine = ++prefetchSeq
   try {
-    const bytes = ref ? await platform.readFile(ref) : await fetchOnlineBytes(track)
+    const bytes = ref ? await platform.readFile(ref) : await fetchOnlineBytes(track, quality!)
     // 切歌比下载快时会走到这里：这份字节已经没人要了，别占着内存
     if (mine !== prefetchSeq || bytes.byteLength > PREFETCH_MAX_BYTES) return
-    prefetched = { id: track.id, bytes }
+    prefetched = { id: track.id, quality, bytes }
 
     // 顺带把响度也量出来。测量要解码整首歌（几百毫秒），放在这里意味着下一首
     // 一开声就是对齐的，不用等测量回来再滑一次音量
@@ -302,6 +355,10 @@ let consecutiveErrors = 0
  * 把人家刚选的歌跳掉。连续失败还能叠出好几个，一次跳好几首。
  */
 let retryTimer = 0
+/** 播放请求代际：只有最后一次用户选择有权开声、写元数据或安排失败重试。 */
+let playSeq = 0
+/** 音质切换代际：连续点多个档位时只允许最后一次换入音频。 */
+let qualitySeq = 0
 
 /** 取消待触发的失败重试。用户自己动了播放，就不该再自动跳。 */
 function cancelRetry(): void {
@@ -395,6 +452,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
         lastTrackId: s.current()?.id ?? null,
         outputDevice: engine.outputDevice,
         normalize: s.normalize,
+        onlineQuality: s.onlineQuality,
       }
       void platform.writeConfig("settings", file)
     }, 1000)
@@ -411,6 +469,10 @@ export const usePlayer = create<PlayerState>((set, get) => {
     mode: "all",
     speed: 1,
     normalize: false,
+    onlineQuality: DEFAULT_ONLINE_QUALITY,
+    activeOnlineQuality: null,
+    qualityStatus: "idle",
+    qualityError: null,
 
     current() {
       const { queue, index } = get()
@@ -477,6 +539,9 @@ export const usePlayer = create<PlayerState>((set, get) => {
           mode: s.mode ?? "all",
           speed: s.speed ?? 1,
           normalize: s.normalize ?? false,
+          onlineQuality: ONLINE_QUALITY_IDS.has(s.onlineQuality)
+            ? s.onlineQuality
+            : DEFAULT_ONLINE_QUALITY,
         })
         engine.setNormalize(s.normalize ?? false)
         engine.setVolume(s.volume ?? 0.8)
@@ -507,14 +572,28 @@ export const usePlayer = create<PlayerState>((set, get) => {
       const { queue } = get()
       if (i < 0 || i >= queue.length) return
       const track = queue[i]
-      set({ index: i })
+      const mine = ++playSeq
+      qualitySeq++
       cancelRetry()
+      // 先停旧声音，再更新界面；加载期间绝不能还放着上一首。
+      engine.pause()
+      const onlineQuality = qualityForTrack(track, get().onlineQuality)
+      set({
+        index: i,
+        activeOnlineQuality: null,
+        qualityStatus: "idle",
+        qualityError: null,
+      })
       resetPlayCounter()
       // 上一首的归一化增益必须显式清掉，否则会留在节点上加到这一首头上
       engine.setTrackGainDb(0)
 
       // 预取命中就直接用手上的字节。必须在 dropPrefetch 之前取走
-      const ready = prefetched?.id === track.id ? prefetched.bytes : null
+      const ready =
+        prefetched?.id === track.id &&
+        (track.origin.kind === "local" || prefetched.quality === onlineQuality)
+          ? prefetched.bytes
+          : null
       dropPrefetch()
 
       try {
@@ -524,15 +603,24 @@ export const usePlayer = create<PlayerState>((set, get) => {
           await engine.loadBytes(ready)
           bytes = ready
         } else {
-          bytes = ref ? await engine.load(ref) : await loadOnline(track)
+          bytes = ref
+            ? await engine.load(ref)
+            : await loadOnline(track, onlineQuality, () => mine === playSeq)
         }
+        if (mine !== playSeq) return
         consecutiveErrors = 0
         await engine.play()
+        if (mine !== playSeq) return
+        set({
+          activeOnlineQuality: ref ? null : onlineQuality,
+          qualityStatus: "idle",
+          qualityError: null,
+        })
         save()
 
         // 响度对齐。标签命中是同步的，测量那条要解码整首歌，所以不 await ——
         // 声音先出来，量完再用斜坡滑过去
-        void applyTrackGain(track, bytes, () => get().index === i)
+        void applyTrackGain(track, bytes, () => mine === playSeq && get().index === i)
 
         // 把下一首提前拿到手上（F1.6）。延后一点点开始，别和刚起播时的封面歌词抢
         schedulePrefetch()
@@ -545,7 +633,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
             lib.ensureLyrics(track.id).catch(() => null),
             lib.ensureCover(track.id, bytes).catch(() => null),
           ]).then(([lrc, cover]) => {
-            if (get().index !== i) return
+            if (mine !== playSeq || get().index !== i) return
             if (lrc || cover) get().refreshQueueMeta()
             // 封面要等解出来、落盘之后才报给系统媒体面板，否则任务栏那格是空的
             if (cover?.path) {
@@ -562,7 +650,11 @@ export const usePlayer = create<PlayerState>((set, get) => {
            */
           useLibrary.getState().addTracks([track])
           // 在线曲目的歌词与封面来自平台接口，和本地那条路完全不同
-          void fillOnlineMeta(track, () => get().index === i, () => get().refreshQueueMeta())
+          void fillOnlineMeta(
+            track,
+            () => mine === playSeq && get().index === i,
+            () => get().refreshQueueMeta(),
+          )
         }
 
         pushNowPlaying(track, true, 0)
@@ -571,7 +663,18 @@ export const usePlayer = create<PlayerState>((set, get) => {
         // 播放路径已经没人要这份数据了 —— 而算它要把整首歌解码一遍（约 16MB PCM）。
         // 混音面板仍然用得上波形，但它自己会惰性取（audio/peaks.ts 的 loadPeaks
         // 支持传取字节的函数，缓存命中时连文件都不读）。
-      } catch {
+      } catch (error) {
+        // 新的切歌或暂停主动取代了它：不是坏文件，不能标丢失或自动跳下一首。
+        if (mine !== playSeq || isAudioLoadCancelled(error)) return
+        set({
+          qualityStatus: track.origin.kind === "online" ? "error" : "idle",
+          qualityError:
+            track.origin.kind === "online"
+              ? error instanceof Error
+                ? error.message
+                : "音质载入失败"
+              : null,
+        })
         useLibrary.getState().markMissing(track.id)
         // 连续 3 首失败则停止，避免整个列表都坏时无限跳转
         if (++consecutiveErrors >= 3) {
@@ -619,7 +722,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
     },
 
     clearQueue() {
-      engine.pause()
+      get().pause()
       dropPrefetch()
       set({ queue: [], index: -1 })
     },
@@ -644,6 +747,10 @@ export const usePlayer = create<PlayerState>((set, get) => {
       if (queue.length === 0) return
       // 出错后手动暂停，不该在 2 秒后被自动跳转唤醒
       cancelRetry()
+      if (get().status === "loading") {
+        get().pause()
+        return
+      }
       if (index < 0) {
         void get().playAt(0)
         return
@@ -653,7 +760,16 @@ export const usePlayer = create<PlayerState>((set, get) => {
         void get().playAt(index)
         return
       }
-      engine.toggle()
+      if (engine.status === "playing") get().pause()
+      else void engine.play()
+    },
+
+    pause() {
+      playSeq++
+      qualitySeq++
+      cancelRetry()
+      engine.pause()
+      set((s) => (s.qualityStatus === "switching" ? { qualityStatus: "idle" } : s))
     },
 
     async next(auto = false) {
@@ -746,6 +862,89 @@ export const usePlayer = create<PlayerState>((set, get) => {
       if (on && t) void applyTrackGain(t, null, () => get().current()?.id === t.id)
       else if (!on) engine.setTrackGainDb(0)
       save()
+    },
+
+    async setOnlineQuality(quality) {
+      if (!ONLINE_QUALITY_IDS.has(quality)) return
+      set({ onlineQuality: quality, qualityError: null })
+      save()
+      dropPrefetch()
+
+      const track = get().current()
+      if (!track || track.origin.kind !== "online") {
+        set({ qualityStatus: "idle", activeOnlineQuality: null })
+        schedulePrefetch()
+        return
+      }
+
+      const effective = qualityForTrack(track, quality)
+      if (effective === get().activeOnlineQuality && get().status !== "loading") {
+        set({ qualityStatus: "idle" })
+        schedulePrefetch()
+        return
+      }
+
+      // 正在首次载入时没有可保留的进度，直接用新偏好重走当前曲目最干净。
+      if (get().status === "loading") {
+        await get().playAt(get().index)
+        return
+      }
+
+      const mine = ++qualitySeq
+      const trackId = track.id
+      let previousBytes: Uint8Array | null = null
+      let position = 0
+      let shouldResume = false
+      let loop: { a: number | null; b: number | null } = { a: null, b: null }
+      set({ qualityStatus: "switching", qualityError: null })
+
+      try {
+        // 下载阶段不碰引擎，让旧音质继续播放；只有完整字节准备好才原子换入。
+        const bytes = await fetchOnlineBytes(track, effective)
+        if (mine !== qualitySeq || get().current()?.id !== trackId) return
+
+        // 真正换入前留一份临时回滚副本。下载失败时完全不会走到这里，旧音频继续播放；
+        // 新字节万一解码失败，也能把旧音质放回原进度，而不是突然静音。
+        previousBytes = await engine.copyLoadedBytes()
+        if (mine !== qualitySeq || get().current()?.id !== trackId) return
+        position = engine.currentTime
+        shouldResume = engine.status === "playing"
+        loop = engine.loop
+        playSeq++
+        cancelRetry()
+
+        await engine.loadBytes(bytes)
+        if (mine !== qualitySeq || get().current()?.id !== trackId) return
+        engine.seekSeconds(position)
+        engine.setLoop(loop.a, loop.b)
+        if (shouldResume) await engine.play()
+        if (mine !== qualitySeq || get().current()?.id !== trackId) return
+
+        set({
+          activeOnlineQuality: effective,
+          qualityStatus: "idle",
+          qualityError: null,
+        })
+        pushNowPlaying(track, shouldResume, position, "seek")
+        schedulePrefetch()
+      } catch (error) {
+        if (mine !== qualitySeq || isAudioLoadCancelled(error)) return
+        if (previousBytes && get().current()?.id === trackId) {
+          try {
+            await engine.loadBytes(previousBytes)
+            if (mine !== qualitySeq || get().current()?.id !== trackId) return
+            engine.seekSeconds(position)
+            engine.setLoop(loop.a, loop.b)
+            if (shouldResume) await engine.play()
+          } catch {
+            // 回滚也失败时保留原始切换错误；engine 会把真实解码错误同步到播放器状态。
+          }
+        }
+        set({
+          qualityStatus: "error",
+          qualityError: error instanceof Error ? error.message : "音质切换失败",
+        })
+      }
     },
 
     async setOutputDevice(id) {

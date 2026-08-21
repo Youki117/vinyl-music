@@ -30,7 +30,7 @@ const builtinScripts = import.meta.glob("./builtin/*.js", {
 }) as Record<string, string>
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http"
 import { lxLyricToEnhancedLrc } from "./lyric"
-import type { SourceId } from "./catalog"
+import { qqPlaylistIdOfInput, type SourceId } from "./catalog"
 
 export { SOURCES, sourceOfLink, type SourceId } from "./catalog"
 
@@ -109,6 +109,100 @@ interface RawList {
   info?: { name?: string }
 }
 
+const QQ_PLAYLIST_PAGE_SIZE = 30
+
+type QqPlaylistResponse = {
+  code?: number
+  req_0?: {
+    code?: number
+    data?: {
+      dirinfo?: { title?: string; songnum?: number }
+      songlist?: unknown[]
+    }
+  }
+}
+
+function firstUrl(text: string): string | null {
+  const url = /https?:\/\/[^\s<>"']+/i.exec(text)?.[0]
+  return url?.replace(/[),，。；;）]+$/, "") ?? null
+}
+
+async function resolveQqPlaylistId(input: string): Promise<string> {
+  const direct = qqPlaylistIdOfInput(input)
+  if (direct) return direct
+
+  // 短链本身没有 id。让 Tauri HTTP 跟完重定向后，再从最终 URL 里取。
+  const url = firstUrl(input)
+  if (!url) throw new Error("QQ 歌单链接里没有找到歌单 id")
+  const host = new URL(url).hostname.toLowerCase()
+  if (host !== "qq.com" && !host.endsWith(".qq.com")) {
+    throw new Error("这不是 QQ 音乐的歌单链接")
+  }
+  const res = await tauriFetch(url, { method: "GET" })
+  const redirected = qqPlaylistIdOfInput(res.url)
+  if (!redirected) throw new Error("QQ 歌单短链没有解析出歌单 id")
+  return redirected
+}
+
+/**
+ * QQ 的旧 qzone 歌单接口在 Tauri HTTP 客户端下会把请求判成 `invalid referer`，即使显式
+ * 传 Referer 也一样。musicu 的歌单接口没有这个限制，但每次最多回 30 首，因此这里保留
+ * page 契约，让 store/online.ts 继续负责整单分页与去重。
+ */
+async function getQqPlaylist(idOrLink: string, page: number): Promise<OnlinePlaylist> {
+  const id = await resolveQqPlaylistId(idOrLink)
+  const numericId = Number(id)
+  if (!Number.isSafeInteger(numericId)) throw new Error("QQ 歌单 id 无效")
+  const safePage = Math.max(1, Math.trunc(page))
+  const request = {
+    comm: {
+      g_tk: 5381,
+      uin: 0,
+      format: "json",
+      inCharset: "utf-8",
+      outCharset: "utf-8",
+      notice: 0,
+      platform: "h5",
+      needNewCode: 1,
+    },
+    req_0: {
+      module: "music.srfDissInfo.aiDissInfo",
+      method: "uniform_get_Dissinfo",
+      param: {
+        disstid: numericId,
+        enc_host_uin: "",
+        tag: 1,
+        userinfo: 1,
+        song_begin: (safePage - 1) * QQ_PLAYLIST_PAGE_SIZE,
+        song_num: QQ_PLAYLIST_PAGE_SIZE,
+      },
+    },
+  }
+  const url = `https://u.y.qq.com/cgi-bin/musicu.fcg?data=${encodeURIComponent(JSON.stringify(request))}`
+  const res = await tauriFetch(url, {
+    method: "GET",
+    headers: { "User-Agent": "Mozilla/5.0" },
+  })
+  if (!res.ok) throw new Error(`QQ 歌单请求失败（HTTP ${res.status}）`)
+
+  const body = (await res.json()) as QqPlaylistResponse
+  const data = body.req_0?.data
+  if (body.code !== 0 || body.req_0?.code !== 0 || !data?.dirinfo) {
+    throw new Error("QQ 歌单解析失败（可能是私密歌单，或链接已失效）")
+  }
+
+  const api = sdk.tx
+  if (!api?.songList?.filterListDetail) throw new Error("QQ 歌单格式化器不可用")
+  const list = api.songList.filterListDetail(data.songlist ?? []) as RawTrack[]
+  return {
+    source: "tx",
+    name: data.dirinfo.title?.trim() ?? "",
+    list: list.map((r) => normalize("tx", r)),
+    total: data.dirinfo.songnum ?? list.length,
+    page: safePage,
+  }
+}
+
 /**
  * 取一个歌单。**不需要音源脚本** —— 和搜索、歌词一样是 musicSdk 自带的。
  *
@@ -130,6 +224,8 @@ export async function getPlaylist(
   idOrLink: string,
   page = 1,
 ): Promise<OnlinePlaylist> {
+  if (source === "tx") return getQqPlaylist(idOrLink.trim(), page)
+
   const api = sdk[source]
   if (!api?.songList?.getListDetail) throw new Error(`音源 ${source} 不支持歌单`)
   const res = await unwrap<RawList>(api.songList.getListDetail(idOrLink.trim(), page))

@@ -266,7 +266,7 @@ type LibraryState = {
   /** 导入 m3u/m3u8，建一个同名歌单。返回结果说明。 */
   importPlaylist(ref: FileRef): Promise<{ playlistId: string | null; matched: number; missing: number }>
   /** 把当前视图导出为 m3u8。 */
-  exportPlaylist(): Promise<boolean>
+  exportPlaylist(view?: ViewId): Promise<boolean>
 
   /** 当前视图 + 搜索 + 排序 之后的曲目 */
   visible(): Track[]
@@ -791,14 +791,22 @@ export const useLibrary = create<LibraryState>((set, get) => {
       return { playlistId: pid, matched: ids.length, missing }
     },
 
-    async exportPlaylist() {
+    async exportPlaylist(requestedView) {
       // m3u 是一份文件路径清单，在线曲目没有路径，只能略过
-      const rows = get().visible().filter((t) => t.origin.kind === "local")
+      const state = get()
+      const view = requestedView ?? state.activeView
+      const rows = selectTracks({
+        tracks: state.tracks,
+        playlists: state.playlists,
+        view,
+        sort: state.sort,
+        sortDesc: state.sortDesc,
+        filter: requestedView ? "" : state.filter,
+      }).filter((t) => t.origin.kind === "local")
       if (rows.length === 0) return false
-      const view = get().activeView
       const name = isVirtual(view)
         ? VIEW_LABEL[view]
-        : get().playlists.find((p) => p.id === view)?.name ?? "playlist"
+        : state.playlists.find((p) => p.id === view)?.name ?? "playlist"
 
       const text = formatM3u(
         rows.map((t) => {

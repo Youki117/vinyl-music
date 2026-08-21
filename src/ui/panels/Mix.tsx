@@ -82,33 +82,35 @@ export default function Mix({ open, onClose }: { open: boolean; onClose: () => v
   const apply = (next: Clip[]) => layer && setClips(layer.id, next)
 
   return (
-    <div ref={rootRef} className="drawer skin-editor mix-panel" role="dialog" aria-label="混音">
-      <header>
-        <nav className="tabs">
-          <button data-on>混音</button>
-        </nav>
+    <div ref={rootRef} className="drawer mix-panel" role="dialog" aria-label="混音">
+      <header className="panel-header">
+        <h2>实时混音台</h2>
         <button className="drawer-close" onClick={onClose} aria-label="关闭">
           ✕
         </button>
       </header>
 
-      <div className="skin-body">
+      <div className="panel-scroll mix-body">
         {!host ? (
-          <p className="hint">先播放一首歌，叠加轨会挂在它上面。</p>
+          <div className="panel-empty">先播放一首歌，叠加轨会挂在它上面。</div>
         ) : (
           <>
-            <p className="section-title">主音轨</p>
-            <p className="hint host-name">
-              {host.title}
-              <b> · {formatTime(hostDuration)}</b>
-            </p>
+            <section className="panel-section master-track">
+              <div className="panel-title-row">
+                <h3>主声轨（MASTER）</h3>
+                <span>100% GAIN</span>
+              </div>
+              <b>{host.title}</b>
+              <p>{host.artist || "未知艺术家"} · {formatTime(hostDuration)}</p>
+            </section>
 
-            <p className="section-title">
-              叠加轨
+            <section className="panel-section aux-section">
+            <div className="panel-title-row mix-aux-heading">
+              <h3>叠加辅轨（AUX）</h3>
               <button className="mini-add" onClick={() => setPicking((v) => !v)}>
                 {picking ? "收起" : "＋ 添加"}
               </button>
-            </p>
+            </div>
 
             {picking && (
               <div className="track-picker">
@@ -145,7 +147,7 @@ export default function Mix({ open, onClose }: { open: boolean; onClose: () => v
                     onClick={() => patchLayer(l.id, { muted: !l.muted })}
                     title={l.muted ? "取消静音" : "静音"}
                   >
-                    {l.muted ? "🔇" : "🔊"}
+                    {l.muted ? "取消静音" : "静音"}
                   </button>
                   <input
                     type="range"
@@ -186,7 +188,7 @@ export default function Mix({ open, onClose }: { open: boolean; onClose: () => v
                     }}
                     title="在播放头位置把片段切成两段"
                   >
-                    ✂ 在播放头分割
+                    在播放头分割
                   </button>
                   <button
                     className="danger"
@@ -243,9 +245,10 @@ export default function Mix({ open, onClose }: { open: boolean; onClose: () => v
 
             {loading && <p className="hint">正在载入叠加轨…</p>}
             {error && <p className="hint danger-text">{error}</p>}
-            <p className="hint">
+            <p className="hint mix-footnote">
               全程只是实时混音，不会改动也不会生成任何音频文件，原始文件始终原样不动。
             </p>
+            </section>
           </>
         )}
       </div>

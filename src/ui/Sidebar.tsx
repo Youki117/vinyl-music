@@ -1,6 +1,7 @@
 import { useMemo, type ReactElement } from "react"
 
 import { SIDEBAR_TOOLS, sidebarOrderOf, useLayout, type SidebarToolId } from "@/store/layout"
+import { IconList } from "./icons"
 import VolumeControl from "./VolumeControl"
 
 /**
@@ -76,6 +77,7 @@ const ICONS: Record<Exclude<SidebarToolId, "volume">, ReactElement> = {
       />
     </svg>
   ),
+  library: <IconList size={16} />,
 }
 
 export default function Sidebar({
@@ -84,6 +86,7 @@ export default function Sidebar({
   onOpenMix,
   onOpenOnline,
   onOpenLayout,
+  onOpenLibrary,
   layoutEditing,
   active,
 }: {
@@ -92,6 +95,7 @@ export default function Sidebar({
   onOpenMix?: () => void
   onOpenOnline?: () => void
   onOpenLayout?: () => void
+  onOpenLibrary?: () => void
   /** 布局编辑是个模式而不是面板，选中态单独给 */
   layoutEditing?: boolean
   /** 当前打开的面板，用来给对应按钮加选中态 */
@@ -108,6 +112,7 @@ export default function Sidebar({
     online: onOpenOnline,
     layout: onOpenLayout,
     mix: onOpenMix,
+    library: onOpenLibrary,
   }
 
   return (
@@ -117,7 +122,8 @@ export default function Sidebar({
 
         const tool = SIDEBAR_TOOLS.find((t) => t.id === id)
         if (!tool) return null
-        const on = id === "layout" ? !!layoutEditing : active === id
+        const on =
+          id === "layout" ? !!layoutEditing : id === "library" ? active === "playlist" : active === id
 
         return (
           <button

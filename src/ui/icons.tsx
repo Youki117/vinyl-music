@@ -53,6 +53,42 @@ export function IconArrowRight({ size = 22, className }: P) {
   )
 }
 
+/** 歌单工具使用同一套 1.6px 圆角线条，避免再用“导入 / 导”文字冒充图标。 */
+export function IconImport({ size = 18, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} aria-hidden="true">
+      <path {...stroke} d="M12 3.5v11M8 10.5l4 4 4-4" />
+      <path {...stroke} d="M5 15.5v3.5c0 .8.7 1.5 1.5 1.5h11c.8 0 1.5-.7 1.5-1.5v-3.5" />
+    </svg>
+  )
+}
+
+export function IconExport({ size = 18, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} aria-hidden="true">
+      <path {...stroke} d="M12 15V4M8 8l4-4 4 4" />
+      <path {...stroke} d="M5 14.5V19c0 .8.7 1.5 1.5 1.5h11c.8 0 1.5-.7 1.5-1.5v-4.5" />
+    </svg>
+  )
+}
+
+export function IconPlus({ size = 18, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} aria-hidden="true">
+      <path {...stroke} d="M12 4.5v15M4.5 12h15" />
+    </svg>
+  )
+}
+
+export function IconTrash({ size = 18, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} aria-hidden="true">
+      <path {...stroke} d="M5.5 7.5h13M9 4.5h6l1 3H8l1-3Z" />
+      <path {...stroke} d="m7.2 7.5.7 12h8.2l.7-12M10 10.5v6M14 10.5v6" />
+    </svg>
+  )
+}
+
 export function IconPrev({ size = 20, className }: P) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} className={className} aria-hidden="true">

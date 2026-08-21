@@ -1,7 +1,6 @@
 import { REPEAT_LABEL, usePlayer } from "@/store/player"
 import {
   IconArrowRight,
-  IconList,
   IconNext,
   IconPause,
   IconPlay,
@@ -10,20 +9,17 @@ import {
   IconRepeatOne,
   IconShuffle,
 } from "./icons"
+import QualityControl from "./QualityControl"
 
 /** E13：循环模式 / 上一首 / 播放暂停 / 下一首 / 播放列表。 */
 export default function Controls({
   onToggle,
   onPrev,
   onNext,
-  onOpenPlaylist,
-  playlistOpen,
 }: {
   onToggle?: () => void
   onPrev?: () => void
   onNext?: () => void
-  onOpenPlaylist?: () => void
-  playlistOpen?: boolean
 }) {
   const status = usePlayer((s) => s.status)
   const mode = usePlayer((s) => s.mode)
@@ -47,15 +43,7 @@ export default function Controls({
       <button onClick={onNext} aria-label="下一首">
         <IconNext />
       </button>
-      <button
-        onClick={onOpenPlaylist}
-        data-on={playlistOpen}
-        aria-label="播放列表"
-        aria-pressed={playlistOpen ?? false}
-        title="曲库与歌单 (P)"
-      >
-        <IconList />
-      </button>
+      <QualityControl />
     </nav>
   )
 }

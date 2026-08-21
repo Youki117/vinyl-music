@@ -10,9 +10,10 @@ export { SOURCES, type SourceId }
 /** 一页多少条。平台大多支持 30，再大有的会截断 */
 const PAGE_SIZE = 30
 
-/** 歌单最多翻几页、最多取几首。防的是 total 给了个离谱大数，把内存和耐心一起吃掉 */
-const MAX_LIST_PAGES = 10
+/** 歌单最多取几首。防的是 total 给了个离谱大数，把内存和耐心一起吃掉 */
 const MAX_LIST_TRACKS = 1000
+/** QQ 的接口每页最多 30 首；页数上限要能覆盖上面的整单上限 */
+const MAX_LIST_PAGES = Math.ceil(MAX_LIST_TRACKS / 30)
 
 /**
  * 音源模块**用到才拉**（`ensureSource` 负责只拉一次并启用内置音源）。它会带起整个

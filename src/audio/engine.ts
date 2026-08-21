@@ -19,6 +19,18 @@ const MAX_FILE_BYTES = 200 * 1024 * 1024
 
 export type EngineStatus = "empty" | "loading" | "paused" | "playing" | "error"
 
+/** 被新的播放操作取代，不属于音频文件损坏或网络失败。 */
+export class AudioLoadCancelledError extends Error {
+  constructor() {
+    super("音频加载已取消")
+    this.name = "AbortError"
+  }
+}
+
+export function isAudioLoadCancelled(error: unknown): boolean {
+  return error instanceof AudioLoadCancelledError
+}
+
 type Listener = (time: number, duration: number) => void
 type StatusListener = (status: EngineStatus, error: string | null) => void
 
@@ -48,6 +60,13 @@ class Engine {
 
   /** pause() 的延迟停止计时器。play() 必须把它取消掉，见 pause() 里的说明。 */
   private pauseTimer = 0
+
+  /**
+   * 音频加载代际。读盘/下载可以晚回来，但只有最新一代有权改动 `<audio>`。
+   * pendingLoadCancel 让正在等待 loadedmetadata 的那一代立即结束，不留下悬空 Promise。
+   */
+  private loadSeq = 0
+  private pendingLoadCancel: (() => void) | null = null
 
   /**
    * 正在把 `<audio>` 清空以释放上一段媒体（见 attachBytes）。
@@ -391,6 +410,24 @@ class Engine {
     }
   }
 
+  private beginLoad(): number {
+    this.cancelPendingLoad()
+    this.setStatus("loading")
+    return this.loadSeq
+  }
+
+  private assertLoadCurrent(seq: number): void {
+    if (seq !== this.loadSeq) throw new AudioLoadCancelledError()
+  }
+
+  /** 作废在途加载。已经稳定载入的当前曲目不会被清掉。 */
+  cancelPendingLoad(): void {
+    this.loadSeq++
+    const cancel = this.pendingLoadCancel
+    this.pendingLoadCancel = null
+    cancel?.()
+  }
+
   /**
    * 载入曲目，返回文件字节供元数据与波形复用（避免二次读盘）。
    *
@@ -399,14 +436,16 @@ class Engine {
    * 且不报错，蒙版波动会静默失效。
    */
   async load(ref: FileRef): Promise<Uint8Array> {
-    this.setStatus("loading")
+    const seq = this.beginLoad()
     if (ref.size > MAX_FILE_BYTES) {
       this.setStatus("error", `文件超过 ${MAX_FILE_BYTES / 1024 / 1024}MB，已跳过`)
       throw new Error("文件过大")
     }
 
     const bytes = await platform.readFile(ref)
-    await this.attachBytes(bytes)
+    this.assertLoadCurrent(seq)
+    await this.attachBytes(bytes, seq)
+    this.assertLoadCurrent(seq)
     return bytes
   }
 
@@ -425,9 +464,11 @@ class Engine {
    * 直连流式播放，那就要接受上面三条各自的后果 —— 那是另一个决定，不在这里偷偷做。
    */
   async loadUrl(url: string): Promise<Uint8Array> {
-    this.setStatus("loading")
+    const seq = this.beginLoad()
     const bytes = await this.fetchAudio(url)
-    await this.attachBytes(bytes)
+    this.assertLoadCurrent(seq)
+    await this.attachBytes(bytes, seq)
+    this.assertLoadCurrent(seq)
     return bytes
   }
 
@@ -445,20 +486,38 @@ class Engine {
   }
 
   /**
+   * 仅在原地换音质时临时复制当前 Blob 的字节，用作新音质解码失败后的回滚。
+   * 平时不常驻第二份音频，避免每首歌都把内存占用翻倍。
+   */
+  async copyLoadedBytes(): Promise<Uint8Array | null> {
+    const url = this.objectUrl
+    if (!url) return null
+    try {
+      const res = await fetch(url)
+      if (!res.ok) return null
+      return new Uint8Array(await res.arrayBuffer())
+    } catch {
+      return null
+    }
+  }
+
+  /**
    * 用**已经在手上的字节**载入。预取命中时走这条 —— 省掉读盘或下载那一整段，
    * 这正是 F1.6 要求的「切换间隔 < 200ms」里最贵的一块。
    */
   async loadBytes(bytes: Uint8Array): Promise<void> {
-    this.setStatus("loading")
+    const seq = this.beginLoad()
     if (bytes.byteLength > MAX_FILE_BYTES) {
       this.setStatus("error", `音频超过 ${MAX_FILE_BYTES / 1024 / 1024}MB，已跳过`)
       throw new Error("文件过大")
     }
-    await this.attachBytes(bytes)
+    await this.attachBytes(bytes, seq)
+    this.assertLoadCurrent(seq)
   }
 
   /** 字节 → Blob → `<audio>`，等到 loadedmetadata 才算成功。本地与在线共用。 */
-  private async attachBytes(bytes: Uint8Array): Promise<void> {
+  private async attachBytes(bytes: Uint8Array, seq: number): Promise<void> {
+    this.assertLoadCurrent(seq)
     /*
      * 先让 `<audio>` 真正**放掉上一段媒体资源**，再挂新的。
      *
@@ -482,34 +541,59 @@ class Engine {
     // 否则新歌会在上一首的 B 点位置莫名其妙往回跳
     this.setLoop(null, null)
     this.objectUrl = URL.createObjectURL(new Blob([bytes as BlobPart]))
-    this.el.src = this.objectUrl
+    const objectUrl = this.objectUrl
 
     await new Promise<void>((resolve, reject) => {
-      const ok = () => {
+      let settled = false
+      const finish = (fn: () => void) => {
+        if (settled) return
+        settled = true
         cleanup()
-        resolve()
+        if (this.pendingLoadCancel === cancel) this.pendingLoadCancel = null
+        fn()
+      }
+      const ok = () => {
+        finish(resolve)
       }
       const bad = () => {
-        cleanup()
-        reject(new Error("解码失败"))
+        finish(() => reject(new Error("解码失败")))
       }
       const cleanup = () => {
         this.el.removeEventListener("loadedmetadata", ok)
         this.el.removeEventListener("error", bad)
       }
+      const cancel = () => {
+        finish(() => {
+          // 这一代已经把媒体挂上去了就及时释放；稳定载入的上一首不会走到这里。
+          if (this.objectUrl === objectUrl) {
+            this.resetting = true
+            this.el.pause()
+            this.el.removeAttribute("src")
+            this.el.load()
+            this.resetting = false
+            this.revoke()
+          }
+          reject(new AudioLoadCancelledError())
+        })
+      }
       this.el.addEventListener("loadedmetadata", ok, { once: true })
       this.el.addEventListener("error", bad, { once: true })
+      this.pendingLoadCancel = cancel
+      this.el.src = objectUrl
     })
 
+    this.assertLoadCurrent(seq)
     this.setStatus("paused")
     this.emitProgress()
   }
 
   async play(): Promise<void> {
+    const seq = this.loadSeq
     this.ensureGraph()
     // 上一次 pause 的延迟停止还挂着的话先撤掉，否则它会在这次播放之后触发
     window.clearTimeout(this.pauseTimer)
     if (this.ctx?.state === "suspended") await this.ctx.resume()
+    if (seq !== this.loadSeq) return
     if (!this.el.src) return
 
     // 淡入，消除咔哒声（F7.2）
@@ -523,13 +607,17 @@ class Engine {
     }
     try {
       await this.el.play()
+      if (seq !== this.loadSeq) return
       this.setStatus("playing")
     } catch (err) {
+      if (seq !== this.loadSeq) return
       this.setStatus("error", err instanceof Error ? err.message : "播放失败")
     }
   }
 
   pause(): void {
+    // 暂停发生在 loading 阶段时，不能让那个 Promise 晚回来后自行开声。
+    this.cancelPendingLoad()
     if (this.gain && this.ctx) {
       const now = this.ctx.currentTime
       this.gain.gain.cancelScheduledValues(now)
@@ -538,9 +626,10 @@ class Engine {
       // 句柄必须留着：淡出的 80ms 内再按一次播放，这个计时器会在 play() 之后
       // 才触发，把已经在放的元素又暂停掉 —— 界面显示在播放，实际没声音
       window.clearTimeout(this.pauseTimer)
-      this.pauseTimer = window.setTimeout(() => this.el.pause(), FADE_MS)
+      this.pauseTimer = window.setTimeout(() => this._el?.pause(), FADE_MS)
     } else {
-      this.el.pause()
+      // 还没播放过时不要为了“暂停”反而创建并挂载一个空的 <audio>。
+      this._el?.pause()
     }
     this.setStatus("paused")
   }
@@ -611,6 +700,7 @@ class Engine {
   }
 
   dispose(): void {
+    this.cancelPendingLoad()
     this._el?.pause()
     this.revoke()
     void this.ctx?.close()

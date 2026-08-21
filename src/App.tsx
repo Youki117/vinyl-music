@@ -163,10 +163,17 @@ export default function App() {
     return platform.onCommand((cmd) => {
       const p = usePlayer.getState()
       if (cmd === "toggle") p.toggle()
-      else if (cmd === "pause") engine.pause()
+      else if (cmd === "pause") p.pause()
       else if (cmd === "next") void p.next()
       else if (cmd === "prev") void p.prev()
     })
+  }, [])
+
+  // 关闭 WebView 时主动作废在途切歌。下载即使刚好晚到，也不能在后台重新开声。
+  useEffect(() => {
+    const stop = () => usePlayer.getState().pause()
+    window.addEventListener("pagehide", stop)
+    return () => window.removeEventListener("pagehide", stop)
   }, [])
 
   // 应用内快捷键（F8.8）
@@ -210,22 +217,29 @@ export default function App() {
           break
         case "p":
         case "P":
+          e.preventDefault()
           togglePanel("playlist")
           break
         case "s":
         case "S":
+          e.preventDefault()
           togglePanel("skin")
           break
         case "e":
         case "E":
+          e.preventDefault()
           togglePanel("playback")
           break
         case "x":
         case "X":
+          e.preventDefault()
           togglePanel("mix")
           break
         case "f":
         case "F":
+          // 面板在同一次 keydown 里挂载并自动聚焦输入框；不拦默认行为的话，
+          // 用快捷键打开后会把字母本身写进搜索框（F → 搜索词变成 "f"）。
+          e.preventDefault()
           togglePanel("online")
           break
         case "Escape":
@@ -257,6 +271,7 @@ export default function App() {
         onOpenSkin={() => togglePanel("skin")}
         onOpenMix={() => togglePanel("mix")}
         onOpenOnline={() => togglePanel("online")}
+        onOpenLibrary={() => togglePanel("playlist")}
         onOpenLayout={() => {
           // 编辑布局时把抽屉收起来：抽屉压着右边小半个画面，搬部件会看不见落点
           setPanel(null)
@@ -277,8 +292,6 @@ export default function App() {
           onToggle={toggle}
           onPrev={() => void prev()}
           onNext={() => void next()}
-          onOpenPlaylist={() => togglePanel("playlist")}
-          playlistOpen={panel === "playlist"}
         />
       </Progress>
 
@@ -308,29 +321,7 @@ export default function App() {
         onClick={importBackdrop}
         aria-label="更换底图"
         title="更换底图（选图后直接生效）"
-      >
-        <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
-          <rect
-            x="3"
-            y="5"
-            width="18"
-            height="14"
-            rx="2.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-          />
-          <circle cx="8.6" cy="10" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
-          <path
-            d="M4.2 17.4 9.6 12l3.3 3.3L16.3 12l3.5 3.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </button>
+      />
 
       <Playlist open={panel === "playlist"} onClose={() => setPanel(null)} />
       <SkinEditor open={panel === "skin"} onClose={() => setPanel(null)} />

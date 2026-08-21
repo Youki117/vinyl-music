@@ -1,14 +1,15 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { platform } from "@/platform"
 import { BUILTIN_BACKDROPS } from "@/skin/backdrops"
 import { labelBackground } from "@/skin/resolve"
 import { useSkin } from "@/store/skin"
+import { IconPlus } from "../icons"
 import AiTab from "./AiTab"
 import { useDismiss } from "../useDismiss"
 
 /**
- * 皮肤面板：导入底图、调整取景框、调蒙版参数、改文案。
+ * 皮肤面板：导入底图、调整取景框、调蒙版参数、查看固定标题规则。
  *
  * 取景框所见即所得 —— 左边拖底图焦点，右边拖/滚轮调贴纸取景，两边实时反映到
  * 舞台上。默认值（中心偏上、zoom 2.2）对人物照片通常一次就能取到脸，
@@ -24,6 +25,7 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
   const patchSkin = useSkin((s) => s.patchSkin)
   const skins = useSkin((s) => s.skins)
   const tintColors = useSkin((s) => s.tintColors)
+  const customBackdrops = useSkin((s) => s.customBackdrops)
   const saveAs = useSkin((s) => s.saveAs)
   const activate = useSkin((s) => s.activate)
   const removeSkin = useSkin((s) => s.removeSkin)
@@ -32,7 +34,30 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
   const [presetName, setPresetName] = useState("")
 
   const dragRef = useRef<{ mode: "backdrop" | "label"; x: number; y: number } | null>(null)
+  const backdropRailRef = useRef<HTMLDivElement>(null)
   const rootRef = useDismiss<HTMLDivElement>(open, onClose)
+
+  useEffect(() => {
+    const rail = backdropRailRef.current
+    if (!open || tab !== "image" || !rail) return
+
+    /*
+     * React/WebView 会把 wheel 监听器注册成 passive，SyntheticEvent.preventDefault 不能可靠
+     * 阻止外层面板同时纵向滚动。这里显式使用 non-passive 原生监听：轨道还能横移时消费
+     * 滚轮，到达两端后把滚轮还给外层，用户才能继续上下浏览设置。
+     */
+    const onWheel = (event: WheelEvent) => {
+      const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX
+      const max = rail.scrollWidth - rail.clientWidth
+      const canMove = (delta < 0 && rail.scrollLeft > 0) || (delta > 0 && rail.scrollLeft < max - 1)
+      if (!canMove) return
+      event.preventDefault()
+      event.stopPropagation()
+      rail.scrollLeft += delta
+    }
+    rail.addEventListener("wheel", onWheel, { passive: false })
+    return () => rail.removeEventListener("wheel", onWheel)
+  }, [open, tab])
 
   if (!open) return null
 
@@ -83,7 +108,7 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
 
   return (
     <div ref={rootRef} className="drawer skin-editor" role="dialog" aria-label="皮肤设置">
-      <header>
+      <header className="panel-header">
         <nav className="tabs">
           <button data-on={tab === "image"} onClick={() => setTab("image")}>
             底图
@@ -103,23 +128,19 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
         </button>
       </header>
 
-      <div className="skin-body">
+      <div className="panel-scroll skin-body">
         {tab === "image" && (
           <>
-            <button
-              className="wide"
-              onClick={() => void platform.pickImage().then((r) => r && setBackdrop(r))}
-            >
-              选择底图图片…
-            </button>
-
+            <section className="panel-section">
             {/*
-              内置底图。装完不选图就只有一层 CSS 渐变，而整套配色都是从底图现算的，
+              背景图片。装完不选图就只有一层 CSS 渐变，而整套配色都是从底图现算的，
               没有图等于看不出效果。setBackdrop 只用 ref.id，所以这里给个合成的
               FileRef 就够，loadImage 见到 builtin: 前缀会走打包后的资源 URL。
+              用户手动选过的图保留小缩略图和原路径，排在内置图之后；最后一格才是
+              “继续选择”，这样它与其它选项等大，也不用每次从独立大按钮重新进入。
             */}
-            <p className="hint">内置底图</p>
-            <div className="builtin-backdrops">
+            <p className="hint">背景图片</p>
+            <div ref={backdropRailRef} className="builtin-backdrops" aria-label="背景图片选择">
               {BUILTIN_BACKDROPS.map((b) => (
                 <button
                   key={b.id}
@@ -132,10 +153,35 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
                   title={b.name}
                 />
               ))}
+              {customBackdrops.map((item) => (
+                <button
+                  key={item.id}
+                  className="builtin-backdrop"
+                  data-on={skin.backdrop === item.id}
+                  style={{ backgroundImage: `url(${item.thumbnail})` }}
+                  onClick={() =>
+                    void setBackdrop({ id: item.id, name: item.name, size: 0, mtime: 0 })
+                  }
+                  aria-label={`使用自定义底图 ${item.name}`}
+                  aria-pressed={skin.backdrop === item.id}
+                  title={item.name}
+                />
+              ))}
+              <button
+                className="builtin-backdrop backdrop-picker"
+                onClick={() => void platform.pickImage().then((r) => r && setBackdrop(r))}
+                aria-label="添加自定义背景图片"
+                title="添加自定义背景图片"
+              >
+                <IconPlus size={16} />
+                <span>自定义</span>
+              </button>
             </div>
+            </section>
 
             {backdrop ? (
               <>
+                <section className="panel-section">
                 <p className="hint">拖动可调整底图焦点，避免人脸被裁掉</p>
                 <div
                   className="preview backdrop-preview"
@@ -146,7 +192,9 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
                   onPointerDown={startDrag("backdrop")}
                   onPointerMove={onDragMove}
                 />
+                </section>
 
+                <section className="panel-section">
                 <label className="row-field">
                   <span>黑胶中心优先显示</span>
                   <select
@@ -158,7 +206,7 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
                     }
                   >
                     <option value="cover">曲目封面</option>
-                    <option value="skin">这里设的图</option>
+                    <option value="skin">背景图片</option>
                   </select>
                 </label>
                 <p className="hint">
@@ -202,15 +250,17 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
                     </button>
                   </div>
                 </div>
+                </section>
               </>
             ) : (
-              <p className="hint">还没有底图。当前用的是内置底纹。</p>
+              <div className="panel-empty">还没有底图。当前用的是内置底纹。</div>
             )}
           </>
         )}
 
         {tab === "veil" && (
           <>
+            <section className="panel-section veil-sliders">
             <Slider
               label="边缘位置"
               value={skin.veil.edgeX}
@@ -246,13 +296,18 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
               max={1}
               onChange={(ripple) => patchVeil({ ripple })}
             />
-            <label className="row-field">
+            </section>
+            <section className="panel-section">
+            <label className="row-field row-switch">
               <span>自动从底图取色</span>
-              <input
-                type="checkbox"
-                checked={skin.tintAuto}
-                onChange={(e) => patchSkin({ tintAuto: e.target.checked })}
-              />
+              <span className="switch">
+                <input
+                  type="checkbox"
+                  checked={skin.tintAuto}
+                  onChange={(e) => patchSkin({ tintAuto: e.target.checked })}
+                />
+                <span aria-hidden="true" />
+              </span>
             </label>
 
             {skin.tintAuto &&
@@ -283,7 +338,9 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
               自动取色就自动关掉、以你选的为准；想让它接管回去，把开关打开即可。
             </p>
             <p className="hint">不透明度上限 0.92：底图必须能透出来，做成纯白就失去层次了。</p>
+            </section>
 
+            <section className="panel-section">
             <p className="section-title">预设</p>
             <div className="preset-save">
               <input
@@ -304,13 +361,13 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
                   <span title={p.name}>{p.name}</span>
                   <button
                     onClick={() => void applyVeilFrom(p.id)}
-                    title="只把这个预设的蒙版参数搬过来，保留当前底图与文案"
+                    title="只把这个预设的蒙版参数搬过来，保留当前底图与标题显示规则"
                   >
                     只套蒙版
                   </button>
                   <button
                     onClick={() => void activate(p.id)}
-                    title="套用整张皮肤，底图与文案也会一起换"
+                    title="套用整张皮肤，底图与配色也会一起换"
                     disabled={p.id === skin.id}
                   >
                     全部套用
@@ -328,23 +385,27 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
               ))}
             </ul>
             <p className="hint">
-              预设存的是<b>整张皮肤</b>（底图、取景、蒙版、文案、配色）。只想换雾的感觉就点
+              预设存的是<b>整张皮肤</b>（底图、取景、蒙版、配色）。只想换雾的感觉就点
               「只套蒙版」—— 它会保留你当前的底图，并按新的蒙版参数重推一次文字配色。
             </p>
+            </section>
           </>
         )}
 
         {tab === "text" && (
-          <>
-            {(["title", "subtitle", "year", "byline"] as const).map((k) => (
-              <label key={k} className="row-field">
-                <span>{{ title: "主标题", subtitle: "副标题", year: "年份", byline: "署名" }[k]}</span>
-                <input
-                  value={skin.text[k]}
-                  onChange={(e) => patchSkin({ text: { ...skin.text, [k]: e.target.value } })}
-                />
-              </label>
-            ))}
+          <section className="panel-section text-fields">
+            <div className="row-field fixed-copy-row">
+              <span>主标题</span>
+              <output>当前歌曲名</output>
+            </div>
+            <div className="row-field fixed-copy-row">
+              <span>品牌行</span>
+              <output>MYRIAD AUDIO</output>
+            </div>
+            <div className="row-field fixed-copy-row">
+              <span>署名条</span>
+              <output>当前歌手名</output>
+            </div>
             <label className="row-field">
               <span>自动配色</span>
               <input
@@ -354,9 +415,9 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
               />
             </label>
             <p className="hint">
-              SELP-PORTRAIT 是效果图原样保留的拼写（还原优先），这里可以随时改掉。
+              标题区按参考图固定位置和字号显示；超长歌名会省略，成对标签符号会完整保留。
             </p>
-          </>
+          </section>
         )}
 
         {tab === "ai" && <AiTab />}
