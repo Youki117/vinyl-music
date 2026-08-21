@@ -669,10 +669,7 @@
   height: 30px;
   display: grid;
   place-items: center;
-  border-radius: 8px;
-  background: rgba(20, 20, 20, 0.42);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.82);
   backdrop-filter: blur(6px);
   transition:
     background 160ms ease,
@@ -711,8 +708,6 @@
   display: flex;
   align-items: center;
   padding: 5px 10px;
-  border-radius: 13px;
-  background: rgba(20, 20, 20, 0.62);
   border: 1px solid rgba(255, 255, 255, 0.12);
   backdrop-filter: blur(6px);
   opacity: 0;
@@ -739,16 +734,12 @@
 /* ── 曲库抽屉：左歌单右曲目 ────────────────────────────── */
 .library-drawer {
   width: calc(560px + var(--rail-w));
-  flex-direction: row;
 }
 
 .lib-side {
-  width: 150px;
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px 6px;
   border-right: 1px solid rgba(255, 255, 255, 0.08);
   overflow-y: auto;
 }
@@ -766,9 +757,6 @@
   justify-content: space-between;
   gap: 6px;
   width: 100%;
-  padding: 5px 9px;
-  border-radius: 4px;
-  color: #a9a59e;
   font-size: 11.5px;
   text-align: left;
 }
@@ -805,16 +793,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 8px;
-  padding: 0 9px;
   font-size: 10px;
-  color: #75716b;
 }
 
 .lib-side-title button {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
   color: #a9a59e;
   font-size: 13px;
 }
@@ -888,8 +870,6 @@
 .online-bar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 10px 12px 8px;
 }
 
 .online-bar input {
@@ -937,7 +917,6 @@
 }
 
 .online-tip {
-  margin: 0 12px 8px;
   color: #6f6b65;
   font-size: 10px;
   line-height: 1.55;
@@ -947,10 +926,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 12px 6px;
-  padding: 8px 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 5px;
 }
 
 .online-preview b {
@@ -993,26 +969,17 @@
 
 .online-sources {
   display: flex;
-  gap: 4px;
-  padding: 0 12px 8px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .online-sources button {
   flex: 1;
   padding: 4px 0;
-  border-radius: 4px;
-  color: #a9a59e;
   font-size: 11px;
 }
 
 .online-sources button:hover {
   background: rgba(255, 255, 255, 0.07);
-  color: #fff;
-}
-
-.online-sources button[data-on="true"] {
-  background: rgba(255, 255, 255, 0.13);
   color: #fff;
 }
 
@@ -1127,7 +1094,6 @@ header button.danger,
 .chip-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
 }
 
 .chip-row button {
@@ -1152,7 +1118,6 @@ header button.danger,
   display: flex;
   justify-content: space-between;
   gap: 2px;
-  padding: 8px 0 2px;
   transition: opacity 200ms ease;
 }
 
@@ -1171,7 +1136,6 @@ header button.danger,
   writing-mode: vertical-lr;
   direction: rtl;
   width: 16px;
-  height: 74px;
   accent-color: var(--ink-accent);
 }
 
@@ -1222,9 +1186,7 @@ header button.danger,
 }
 
 .scene-text {
-  padding: 7px 9px;
   border-left: 2px solid var(--ink-accent);
-  background: rgba(255, 255, 255, 0.05);
   color: #c6c2bb !important;
 }
 
@@ -1299,11 +1261,6 @@ header button.danger,
   display: flex;
   flex-direction: column;
   gap: 5px;
-}
-
-.layer-row[data-on="true"] {
-  border-color: var(--ink-accent);
-  background: rgba(178, 132, 95, 0.08);
 }
 
 .layer-name {
@@ -1473,14 +1430,12 @@ header button.danger,
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 8px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.09);
 }
 
 .lib-actions button {
   padding: 5px 9px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.07);
   color: #b6b2ab;
   font-size: 11px;
   white-space: nowrap;
@@ -1586,7 +1541,6 @@ header button.danger,
 .drawer ol {
   flex: 1;
   margin: 0;
-  padding: 6px 0;
   list-style: none;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -1595,10 +1549,6 @@ header button.danger,
 .drawer li {
   display: flex;
   align-items: center;
-}
-
-.drawer li[data-active="true"] .row b {
-  color: var(--ink-accent);
 }
 
 .drawer li[data-missing="true"] {
@@ -1623,15 +1573,9 @@ header button.danger,
   grid-template-areas:
     "title badge dur"
     "meta  meta  meta";
-  column-gap: 10px;
   row-gap: 1px;
   align-items: center;
-  padding: 6px 6px 7px 14px;
   text-align: left;
-}
-
-.drawer .row:hover {
-  background: rgba(255, 255, 255, 0.06);
 }
 
 .drawer .row b {
@@ -1740,13 +1684,6 @@ header button.danger,
   align-items: center;
   gap: 4px;
   padding: 4px 6px;
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.04);
-}
-
-/* 当前正在用的那个高亮，否则列表长了分不清自己在哪 */
-.preset-list li[data-on="true"] {
-  background: rgba(255, 255, 255, 0.12);
 }
 
 .preset-list li > span {
@@ -1805,23 +1742,15 @@ header button.danger,
 .skin-body {
   flex: 1;
   overflow-y: auto;
-  padding: 12px 14px 20px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
 }
 
 .skin-body .wide {
   padding: 7px;
   border: 1px dashed rgba(255, 255, 255, 0.22);
   border-radius: 4px;
-  color: #c9c5be;
   font-size: 11px;
-}
-
-.skin-body .wide:hover {
-  border-color: var(--ink-accent);
-  color: #fff;
 }
 
 .skin-body .hint {
@@ -1844,10 +1773,6 @@ header button.danger,
   cursor: grabbing;
 }
 
-.backdrop-preview {
-  height: 120px;
-}
-
 .label-row {
   display: flex;
   gap: 12px;
@@ -1855,11 +1780,8 @@ header button.danger,
 }
 
 .label-preview {
-  width: 104px;
-  height: 104px;
   flex: none;
   border-radius: 50%;
-  box-shadow: 0 0 0 7px #0b0b0b;
 }
 
 .label-actions {
@@ -1910,11 +1832,9 @@ header button.danger,
 
 .row-field {
   display: grid;
-  grid-template-columns: 66px 1fr;
   gap: 8px;
   align-items: center;
   font-size: 10.5px;
-  color: #a9a59e;
 }
 
 .row-field input[type="text"],
@@ -2173,6 +2093,11 @@ header button.danger,
 /* ── 统一功能面板设计系统 ─────────────────────────────────
  * 目标稿只负责定下暖黑金语言；所有真实面板共用下面这些令牌、间距和控件状态，
  * 避免在线页、设置页、皮肤页各自长成一套 UI。
+ *
+ * **这一段是覆盖层：往下的规则会盖住文件上半部分同名选择器的同名属性。**
+ * 所以改样式时认准最后一次出现的那条 —— 改上面那条不会有任何效果。
+ * 上半部分里被这里盖死的声明已经全部删掉了（同选择器同属性、后者恒胜，
+ * 删掉不改变任何一个 (选择器,属性) 的最终值），别再往回加。
  */
 .drawer,
 .online-drawer,
@@ -2870,6 +2795,7 @@ header button.danger,
   background: var(--panel-bg-soft);
 }
 
+/* 当前正在用的那个高亮，否则列表长了分不清自己在哪 */
 .preset-list li[data-on="true"] {
   border-color: var(--panel-border-strong);
   background: var(--panel-bg-active);
