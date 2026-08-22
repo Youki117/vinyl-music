@@ -361,6 +361,58 @@ describe("播放失败后的自动跳转", () => {
   })
 })
 
+/*
+ * 音源挂掉时的现场故障：只播得出第一首。
+ *
+ * 双击切歌 → 新歌载入失败 → 按播放键，放回来的却是上一首，而歌名显示的是新那首。
+ * 根因是 toggle() 拿 `engine.duration` 是否为 0 判断"这首载入过没有" —— 那只说明
+ * 引擎里有音频，不说明那是 index 指向的那首。载入失败时 index 已经指向新歌，
+ * 引擎里还是上一首稳定载入的音频，duration 非 0，于是直接 play() 放了旧的。
+ */
+describe("载入失败后不能放回上一首", () => {
+  it("新歌载入失败后按播放，重新载入新歌而不是播旧歌", async () => {
+    // 第一首正常播上
+    await usePlayer.getState().playAt(0)
+    expect(engine.play).toHaveBeenCalledTimes(1)
+    engine.duration = 123 // 引擎里挂着第一首，duration 非 0
+
+    // 切到第二首，载入失败
+    engine.load.mockRejectedValueOnce(new Error("解析播放地址失败"))
+    await usePlayer.getState().playAt(1)
+    expect(usePlayer.getState().index, "界面已经指向第二首").toBe(1)
+
+    engine.play.mockClear()
+    engine.load.mockClear()
+    engine.load.mockResolvedValue(new Uint8Array([1]))
+
+    // 用户按播放
+    usePlayer.getState().toggle()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(engine.load, "没有重新载入第二首，直接拿引擎里的旧音频开声了").toHaveBeenCalled()
+    expect(usePlayer.getState().index, "播放位置漂回了上一首").toBe(1)
+    engine.duration = 0
+  })
+
+  it("同一首歌暂停再播放，不该重新载入", async () => {
+    await usePlayer.getState().playAt(0)
+    engine.duration = 123
+    engine.status = "playing"
+
+    usePlayer.getState().toggle() // 暂停
+    engine.status = "paused"
+    engine.load.mockClear()
+
+    usePlayer.getState().toggle() // 继续
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(engine.load, "暂停再播放不该重新读一遍文件").not.toHaveBeenCalled()
+    expect(engine.play).toHaveBeenCalled()
+    engine.duration = 0
+    engine.status = "paused"
+  })
+})
+
 describe("快速切歌的异步竞态", () => {
   it("旧请求晚完成也不能抢回播放权", async () => {
     let finishFirst!: (bytes: Uint8Array<ArrayBuffer>) => void

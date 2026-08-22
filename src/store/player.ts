@@ -373,6 +373,34 @@ let trackSeq = 0
 /** 音质切换代际：连续点多个档位时只允许最后一次换入音频。 */
 let qualitySeq = 0
 
+/**
+ * 引擎里**当前真正挂着**的是哪一首。载入失败时为 null。
+ *
+ * 早先 toggle() 拿 `engine.duration` 是否为 0 来判断"这一首载入过没有"，那是把
+ * "引擎里有音频"当成了"引擎里有 index 指向的那首"。两者在载入失败时会脱钩：
+ * playAt 先把 index 改成新歌（界面随即显示新歌名），载入失败后引擎里仍是上一首
+ * 稳定载入的音频，duration 非 0 —— 于是按播放键放回的是上一首，而歌名显示的是
+ * 新那首。音源挂掉时每首都失败，这个 bug 就变成了"永远只播第一首"。
+ */
+let loadedTrackId: string | null = null
+
+/**
+ * 连播三首都失败时给用户看的那句话。
+ *
+ * 早先统一是"连续多首无法播放，已停止" —— 说了等于没说：用户分不清是音源服务端
+ * 不给地址、还是本地文件被挪走了，这两件事的处理方式完全不同（前者改代码没用，
+ * 等服务端或换音源；后者去找文件）。在线曲目失败时 resolvePlayUrl 抛的错里已经
+ * 带着每个平台的失败原因，截一段带出来，至少能看出是哪一类。
+ */
+function stopReason(track: Track, error: unknown): string {
+  if (track.origin.kind !== "online") {
+    return "连续多首本地文件无法播放，已停止。文件可能被移动或删除了"
+  }
+  const detail = error instanceof Error ? error.message : ""
+  const head = "连续多首在线歌曲拿不到播放地址，已停止。多为音源服务端的问题，与本机设置无关"
+  return detail ? `${head}（${detail.slice(0, 120)}）` : head
+}
+
 /** 取消待触发的失败重试。用户自己动了播放，就不该再自动跳。 */
 function cancelRetry(): void {
   window.clearTimeout(retryTimer)
@@ -592,6 +620,8 @@ export const usePlayer = create<PlayerState>((set, get) => {
       cancelRetry()
       // 先停旧声音，再更新界面；加载期间绝不能还放着上一首。
       engine.pause()
+      // 从这一刻起引擎里那首就不作数了：界面已经指向新歌，旧音频不该再被当成"已载入"
+      loadedTrackId = null
       const onlineQuality = qualityForTrack(track, get().onlineQuality)
       set({
         index: i,
@@ -624,6 +654,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
         }
         if (mine !== playSeq) return
         consecutiveErrors = 0
+        loadedTrackId = track.id
         await engine.play()
         if (mine !== playSeq) return
         set({
@@ -694,7 +725,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
         // 连续 3 首失败则停止，避免整个列表都坏时无限跳转
         if (++consecutiveErrors >= 3) {
           consecutiveErrors = 0
-          set({ status: "error", error: "连续多首无法播放，已停止" })
+          set({ status: "error", error: stopReason(track, error) })
           return
         }
         retryTimer = window.setTimeout(() => {
@@ -739,6 +770,8 @@ export const usePlayer = create<PlayerState>((set, get) => {
     clearQueue() {
       get().pause()
       dropPrefetch()
+      // 队列空了，引擎里那首也不再属于任何一行
+      loadedTrackId = null
       set({ queue: [], index: -1 })
     },
 
@@ -770,8 +803,14 @@ export const usePlayer = create<PlayerState>((set, get) => {
         void get().playAt(0)
         return
       }
-      // 队列里选中了曲目但还没真正载入过
-      if (!engine.duration) {
+      /*
+       * 引擎里挂着的**不是**当前选中这一首，就重新载入而不是直接开声。
+       *
+       * 判据必须是"引擎里是哪一首"，不能是 `engine.duration` 是否为 0：后者只说明
+       * 引擎里有音频，不说明那是 index 指向的那首。载入失败时两者会脱钩，于是
+       * 按播放键放回上一首、歌名却显示新那首（音源挂掉时表现为"永远只播第一首"）。
+       */
+      if (loadedTrackId !== queue[index]?.id) {
         void get().playAt(index)
         return
       }

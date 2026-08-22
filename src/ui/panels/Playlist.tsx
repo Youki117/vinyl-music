@@ -205,6 +205,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
             renaming === p.id ? (
               <input
                 key={p.id}
+                autoComplete="off"
                 autoFocus
                 defaultValue={p.name}
                 onBlur={(e) => {
@@ -259,6 +260,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
           <>
         <header>
           <input
+            autoComplete="off"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder={`在 ${VIRTUAL_VIEWS.includes(activeView as never) ? VIEW_LABEL[activeView as never] : playlists.find((p) => p.id === activeView)?.name ?? ""} 中搜索`}

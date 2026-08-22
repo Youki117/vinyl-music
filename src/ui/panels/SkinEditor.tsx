@@ -327,6 +327,7 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
             <label className="row-field">
               <span>蒙版色{skin.tintAuto && "（手动）"}</span>
               <input
+                autoComplete="off"
                 type="color"
                 value={skin.veil.tint}
                 onChange={(e) => patchVeil({ tint: e.target.value })}
@@ -344,6 +345,7 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
             <p className="section-title">预设</p>
             <div className="preset-save">
               <input
+                autoComplete="off"
                 value={presetName}
                 onChange={(e) => setPresetName(e.target.value)}
                 placeholder={`预设 ${skins.length + 1}`}

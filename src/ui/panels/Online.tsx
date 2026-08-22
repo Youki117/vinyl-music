@@ -171,6 +171,7 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
           <section className="panel-section online-query">
             <div className="online-bar">
               <input
+                autoComplete="off"
                 value={keyword}
                 autoFocus
                 onChange={(e) => setKeyword(e.target.value)}

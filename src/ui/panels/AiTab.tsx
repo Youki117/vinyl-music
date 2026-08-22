@@ -286,6 +286,7 @@ export default function AiTab() {
             <label className="row-field">
               <span>接口地址</span>
               <input
+                autoComplete="off"
                 value={ai.config.textBaseUrl}
                 onChange={(e) => ai.patch({ textBaseUrl: e.target.value })}
                 placeholder="https://api.deepseek.com/v1"
@@ -294,6 +295,7 @@ export default function AiTab() {
             <label className="row-field">
               <span>密钥</span>
               <input
+                autoComplete="off"
                 type="password"
                 value={ai.config.textApiKey}
                 onChange={(e) => ai.patch({ textApiKey: e.target.value })}
@@ -303,6 +305,7 @@ export default function AiTab() {
             <label className="row-field">
               <span>模型名</span>
               <input
+                autoComplete="off"
                 value={ai.config.textModel}
                 onChange={(e) => ai.patch({ textModel: e.target.value })}
                 placeholder="deepseek-chat"
@@ -313,6 +316,7 @@ export default function AiTab() {
             <label className="row-field">
               <span>接口地址</span>
               <input
+                autoComplete="off"
                 value={ai.config.imageBaseUrl}
                 onChange={(e) => ai.patch({ imageBaseUrl: e.target.value })}
                 placeholder="留空则复用文本模型地址"
@@ -321,6 +325,7 @@ export default function AiTab() {
             <label className="row-field">
               <span>密钥</span>
               <input
+                autoComplete="off"
                 type="password"
                 value={ai.config.imageApiKey}
                 onChange={(e) => ai.patch({ imageApiKey: e.target.value })}
@@ -330,6 +335,7 @@ export default function AiTab() {
             <label className="row-field">
               <span>模型名</span>
               <input
+                autoComplete="off"
                 value={ai.config.imageModel}
                 onChange={(e) => ai.patch({ imageModel: e.target.value })}
                 placeholder="例如 cogview-3 / dall-e-3"
@@ -338,6 +344,7 @@ export default function AiTab() {
             <label className="row-field">
               <span>尺寸</span>
               <input
+                autoComplete="off"
                 value={ai.config.imageSize}
                 onChange={(e) => ai.patch({ imageSize: e.target.value })}
                 placeholder="1792x1024"

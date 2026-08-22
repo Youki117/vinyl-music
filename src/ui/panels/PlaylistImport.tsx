@@ -49,6 +49,7 @@ export default function PlaylistImport({ onImported }: { onImported: (result: Im
       <section className="panel-section playlist-import-form">
         <div className="online-bar">
           <input
+            autoComplete="off"
             value={listInput}
             autoFocus
             onChange={(event) => setListInput(event.target.value)}
