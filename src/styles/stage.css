@@ -135,4 +135,19 @@
   transform-origin: top left;
   /* 变量在 .stage 上用 CSS 算，见那里。和舞台宽度同源同帧，不会掉队。 */
   transform: scale(var(--stage-scale, 1));
+
+  /*
+   * 换片动效要让唱片从斜上方落下来（useDiscCue），rotateX 和 translateZ 只有在
+   * 祖先给了透视时才有效果，而唱片自己的 transform 被 spin 占着、写不进 perspective()。
+   * 所以挂在这里。
+   *
+   * 挂在 .content 上不影响别的部件：**整个舞台没有第二处 3D 变换**，
+   * 而纯 2D 变换（没有 z 分量）在透视投影下和原来一模一样。
+   *
+   * 透视原点必须对准唱片圆心，不能用默认的 50% 50%（那是 1243×688 的中心，
+   * 在唱片右边 260px 处）—— 灭点偏在一侧的话，同一个倾角会投影成歪的。
+   */
+  perspective: 820px;
+  perspective-origin: calc(var(--disc-left) + var(--disc-size) / 2)
+    calc(var(--disc-top) + var(--disc-size) / 2);
 }
