@@ -14,6 +14,7 @@
 import sdk from "@/vendor/lx-music/musicSdk/index.js"
 import { hasUserApi, registerUserApi, clearUserApi, type SourceApi } from "@/vendor/lx-music/store"
 import { platform } from "@/platform"
+import { cleanTitle } from "@/lib/text"
 import { loadUserApi, unloadUserApi, parseScriptInfo, type LoadedScript } from "./userApi/host"
 /*
  * 内置音源脚本。**开源仓库里不带**，见 builtin/README.md ——
@@ -65,7 +66,7 @@ function normalize(source: SourceId, raw: RawTrack): OnlineTrack {
   return {
     source,
     id: String(raw.songmid ?? raw.hash ?? raw.copyrightId ?? ""),
-    title: raw.name ?? "",
+    title: cleanTitle(raw.name ?? ""),
     artist: raw.singer ?? "",
     album: raw.albumName ?? "",
     duration: raw.interval ?? "",

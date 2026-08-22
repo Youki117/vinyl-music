@@ -3,7 +3,7 @@ import { create } from "zustand"
 import { isLyricFile, platform, type FileRef } from "@/platform"
 import { readCover, readMetadataLazy } from "@/audio/metadata"
 import { formatM3u, matchByName, parseM3u } from "@/lib/m3u"
-import { baseName, stripExt } from "@/lib/text"
+import { baseName, cleanTitle, stripExt } from "@/lib/text"
 
 /**
  * 曲目从哪来。**判别联合而不是可空字段**，是为了让类型逼着每个调用点表态 ——
@@ -346,6 +346,9 @@ export const useLibrary = create<LibraryState>((set, get) => {
         const legacy = t as typeof t & { ref?: FileRef }
         return {
           ...t,
+          // 老曲库里的歌名也洗一遍：只在入库那一侧洗的话，加规则之前存进来的曲目
+          // 会永远保留旧写法，同一个库里两种写法并存
+          title: cleanTitle(t.title),
           origin: t.origin ?? (legacy.ref ? { kind: "local", ref: legacy.ref } : t.origin),
           addedAt: t.addedAt ?? i,
           lastPlayed: t.lastPlayed ?? 0,
