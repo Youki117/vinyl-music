@@ -13,9 +13,12 @@ import { useLibrary } from "@/store/library"
 export default function Disc({
   onToggle,
   onContextMenu,
+  ref,
 }: {
   onToggle?: () => void
   onContextMenu?: () => void
+  /** 换片动效要够到这个节点。React 19 起 ref 就是普通 prop，不用 forwardRef */
+  ref?: React.Ref<HTMLButtonElement>
 }) {
   const label = useSkin((s) => s.label)
   const focus = useSkin((s) => s.skin.label.focus)
@@ -45,6 +48,7 @@ export default function Disc({
 
   return (
     <button
+      ref={ref}
       className="disc"
       data-part="disc"
       data-playing={playing}

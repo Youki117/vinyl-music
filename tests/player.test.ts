@@ -561,3 +561,82 @@ describe("快速切歌的异步竞态", () => {
     expect(markMissing).not.toHaveBeenCalled()
   })
 })
+
+/*
+ * 换片动效的节流。**这里测的是"放几次"，不是"动画长什么样"** ——
+ * 动画本身是 useDiscCue 里的 element.animate()，jsdom 跑不了也不值得跑；
+ * 真正会出错的是"什么时候算换了一首"，那全在 store 里，是纯逻辑。
+ *
+ * 之所以不用定时器去抖：用户连点五首歌时，前四次 playAt 都会在代际关卡上原地返回，
+ * 压根走不到记 cue 的那一行。所以节流是免费的，也不需要猜"多快算快"。
+ */
+describe("换片动效只在真的换了一首时放", () => {
+  it("换一首歌就放一次", async () => {
+    const before = usePlayer.getState().cue
+    await usePlayer.getState().playAt(0)
+    expect(usePlayer.getState().cue).toBe(before + 1)
+    await usePlayer.getState().playAt(1)
+    expect(usePlayer.getState().cue).toBe(before + 2)
+  })
+
+  it("连点多首，只放最后活下来的那一次", async () => {
+    const finishers: Array<(bytes: Uint8Array<ArrayBuffer>) => void> = []
+    engine.load.mockImplementation(
+      () =>
+        new Promise<Uint8Array<ArrayBuffer>>((resolve) => {
+          finishers.push(resolve)
+        }),
+    )
+    const before = usePlayer.getState().cue
+
+    const pending = [0, 1, 2].map((i) => {
+      const p = usePlayer.getState().playAt(i)
+      return p
+    })
+    // 三次都发出去了，字节都还没到
+    for (let i = 0; i < 10 && finishers.length < 3; i++) await Promise.resolve()
+    expect(finishers).toHaveLength(3)
+
+    for (const finish of finishers) finish(new Uint8Array(new ArrayBuffer(1)))
+    await Promise.all(pending)
+
+    expect(usePlayer.getState().cue, "被顶掉的那几次也放了动效").toBe(before + 1)
+    expect(usePlayer.getState().index).toBe(2)
+  })
+
+  it("暂停再播放不放", async () => {
+    await usePlayer.getState().playAt(0)
+    const after = usePlayer.getState().cue
+    engine.duration = 123
+    engine.status = "playing"
+
+    usePlayer.getState().toggle() // 暂停
+    engine.status = "paused"
+    usePlayer.getState().toggle() // 继续
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(usePlayer.getState().cue, "唱片没离开过唱盘，不该重放一次落片").toBe(after)
+    engine.duration = 0
+    engine.status = "paused"
+  })
+
+  it("同一首重跑一遍（切音质走的就是这条路）不放", async () => {
+    await usePlayer.getState().playAt(0)
+    const after = usePlayer.getState().cue
+    await usePlayer.getState().playAt(0)
+    expect(usePlayer.getState().cue).toBe(after)
+  })
+
+  it("载入失败不放 —— 没出声就没有换片这回事", async () => {
+    await usePlayer.getState().playAt(0)
+    const after = usePlayer.getState().cue
+
+    engine.load.mockRejectedValueOnce(new Error("解析播放地址失败"))
+    await usePlayer.getState().playAt(1)
+
+    expect(usePlayer.getState().cue).toBe(after)
+    // 失败会排一个 2 秒后跳下一首的重试，别让它漏进下一个用例
+    usePlayer.getState().pause()
+    await vi.advanceTimersByTimeAsync(5000)
+  })
+})

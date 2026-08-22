@@ -14,6 +14,7 @@ import SkinEditor from "@/ui/panels/SkinEditor"
 import Playback from "@/ui/panels/Playback"
 import Online from "@/ui/panels/Online"
 import LayoutEdit from "@/ui/LayoutEdit"
+import { useDiscCue } from "@/ui/useDiscCue"
 import { useLibrary } from "@/store/library"
 import { noteCurrentTrack, useAi } from "@/store/ai"
 import { useMix } from "@/store/mix"
@@ -67,6 +68,7 @@ export default function App() {
   // 关掉上面那个它就自己冒出来了 —— 换成单一状态，互斥是结构自带的。
   const [panel, setPanel] = useState<PanelId>(null)
   const layoutEditing = useLayout((s) => s.editing)
+  const discCue = useDiscCue()
   const [notice, setNotice] = useState<string | null>(null)
 
   const togglePanel = (id: Exclude<PanelId, null>) =>
@@ -290,9 +292,10 @@ export default function App() {
       <Masthead />
       <Lyrics />
       {/* 圆环与光照跟着黑胶一起搬，所以标同一个 data-part（三者共用一组 CSS 偏移变量） */}
-      <div className="disc-ring" data-part="disc" />
-      <Disc onToggle={toggle} onContextMenu={() => setPanel("skin")} />
-      <div className="disc-lighting" data-part="disc" />
+      {/* discCue：换歌时这三个部件一起淡入，节流在 player store 那边 */}
+      <div className="disc-ring" data-part="disc" ref={discCue} />
+      <Disc onToggle={toggle} onContextMenu={() => setPanel("skin")} ref={discCue} />
+      <div className="disc-lighting" data-part="disc" ref={discCue} />
       <Actions />
       <Progress>
         <Controls

@@ -93,6 +93,11 @@ type PlayerState = {
   activeOnlineQuality: OnlineQuality | null
   qualityStatus: "idle" | "switching" | "error"
   qualityError: string | null
+  /**
+   * 换片动效的信号。每换一首**并且真的开始出声**时 +1，界面据此放一次唱片淡入。
+   * 是个计数器而不是布尔量，因为界面要的是"又发生了一次"，而不是"现在正在放"。
+   */
+  cue: number
 
   current(): Track | null
   init(): Promise<void>
@@ -385,6 +390,19 @@ let qualitySeq = 0
 let loadedTrackId: string | null = null
 
 /**
+ * 上一次放过换片动效的是哪一首。**动效的节流全靠它 + playSeq，没有别的定时器。**
+ *
+ * 用户短时间内连点五首歌，会发起五次 playAt，但前四次都在 `mine !== playSeq` 那道
+ * 关卡上原地返回（旧的载入还被 AbortController 掐掉了），根本走不到下面记 cue 的
+ * 那一行 —— 所以连点多少次，动效都只放最后活下来的那一次。这比"两秒内不重复播"
+ * 那类去抖好，因为它不需要猜多快算快：**动效跟着"哪一首真的出声了"走**。
+ *
+ * 记 id 而不是只记次数，是为了把这几件事挡在外面：切音质（playAt 同一首重跑一遍）、
+ * 单曲循环、暂停后继续。它们都不是换片，唱片没离开过唱盘。
+ */
+let cuedTrackId: string | null = null
+
+/**
  * 连播三首都失败时给用户看的那句话。
  *
  * 早先统一是"连续多首无法播放，已停止" —— 说了等于没说：用户分不清是音源服务端
@@ -514,6 +532,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
     activeOnlineQuality: null,
     qualityStatus: "idle",
     qualityError: null,
+    cue: 0,
 
     current() {
       const { queue, index } = get()
@@ -657,10 +676,15 @@ export const usePlayer = create<PlayerState>((set, get) => {
         loadedTrackId = track.id
         await engine.play()
         if (mine !== playSeq) return
+        // 走到这里意味着：这次 playAt 没被后面的操作顶掉，且声音已经出来了。
+        // 换片动效只认这一刻 —— 理由见 cuedTrackId 上面那段
+        const changedTrack = cuedTrackId !== track.id
+        cuedTrackId = track.id
         set({
           activeOnlineQuality: ref ? null : onlineQuality,
           qualityStatus: "idle",
           qualityError: null,
+          cue: changedTrack ? get().cue + 1 : get().cue,
         })
         save()
 
@@ -772,6 +796,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
       dropPrefetch()
       // 队列空了，引擎里那首也不再属于任何一行
       loadedTrackId = null
+      cuedTrackId = null
       set({ queue: [], index: -1 })
     },
 
