@@ -113,6 +113,7 @@ export const platform = {
     close: () => impl().then((p) => p.window.close()),
     setFullscreen: (on: boolean) => impl().then((p) => p.window.setFullscreen(on)),
     isFullscreen: () => impl().then((p) => p.window.isFullscreen()),
+    setMini: (on: boolean) => impl().then((p) => p.window.setMini(on)),
   },
 }
 

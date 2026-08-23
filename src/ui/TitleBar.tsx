@@ -13,7 +13,7 @@ import { usePlayer } from "@/store/player"
  * 整条标记 data-keep-panel：点它是"调音量"或"控制窗口"，不是"点到面板外面去了"，
  * 不该触发关闭。
  */
-export default function TitleBar() {
+export default function TitleBar({ onMini }: { onMini?: () => void }) {
   /*
    * 全屏与最大化是**两件事**，这里两个按钮都要有。
    *
@@ -50,6 +50,13 @@ export default function TitleBar() {
   return (
     <div className="titlebar" data-tauri-drag-region data-keep-panel>
       <span className="titlebar-spacer" data-tauri-drag-region />
+      <button onClick={onMini} data-tooltip="迷你模式 Ctrl+M">
+        <span className="titlebar-label">迷你模式</span>
+        <svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true">
+          <rect x="1.5" y="3.5" width="9" height="5" rx="1" fill="none" stroke="currentColor" strokeWidth="1" />
+          <path fill="currentColor" d="m5 5 2.2 1L5 7z" />
+        </svg>
+      </button>
       <button
         onClick={() => void platform.window.setFullscreen(!full).then(() => setFull(!full))}
         data-tooltip={full ? "退出全屏 F11" : "全屏 F11"}

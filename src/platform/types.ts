@@ -163,6 +163,16 @@ export interface WindowControls {
   close(): Promise<void>
   setFullscreen(on: boolean): Promise<void>
   isFullscreen(): Promise<boolean>
+  /**
+   * 迷你模式的**全部**窗口动作，一次做完：尺寸、可否缩放、置顶、最小尺寸下限。
+   *
+   * 刻意做成一个方法而不是暴露四个原语 —— 这四件事必须一起变，顺序也讲究
+   * （先放开最小尺寸下限才缩得下去）。拆开给上层，上层迟早会漏掉一个。
+   *
+   * `setMini(false)` 是**幂等**的，可以在启动时无条件调一次：窗口状态插件会把
+   * 上次退出时的尺寸恢复回来，万一上次是在迷你模式里退的，这一下就把它救回来。
+   */
+  setMini(on: boolean): Promise<void>
 }
 
 /** 受支持的音频扩展名，不含点号，全小写。 */

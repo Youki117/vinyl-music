@@ -15,6 +15,7 @@ import SkinEditor from "@/ui/panels/SkinEditor"
 import Playback from "@/ui/panels/Playback"
 import Online from "@/ui/panels/Online"
 import LayoutEdit from "@/ui/LayoutEdit"
+import MiniPlayer from "@/ui/MiniPlayer"
 import { useDiscCue } from "@/ui/useDiscCue"
 import { useLibrary } from "@/store/library"
 import { noteCurrentTrack, useAi } from "@/store/ai"
@@ -76,6 +77,30 @@ export default function App() {
    */
   const panelRef = useRef(panel)
   panelRef.current = panel
+
+  /*
+   * 迷你模式。窗口那一侧（缩尺寸、置顶、禁缩放、放开最小尺寸下限）整套在
+   * platform.window.setMini 里，这里只管切版式。
+   */
+  const [mini, setMini] = useState(false)
+  const miniRef = useRef(mini)
+  miniRef.current = mini
+  const goMini = (on: boolean) => {
+    // 面板挂在主舞台上，迷你版式里没有它们的位置，进去之前先收掉
+    if (on) setPanel(null)
+    void platform.window.setMini(on).then(() => setMini(on))
+  }
+
+  /*
+   * 启动时无条件退一次迷你模式。
+   *
+   * 窗口状态插件会把上次退出时的窗口尺寸恢复回来 —— 万一上次是在迷你模式里退的，
+   * 应用就会以一个 380×104 的窗口启动，而界面是主舞台版式，等于开起来就是坏的。
+   * setMini(false) 是幂等的：窗口没缩着的时候它只把可缩放/置顶/下限归位，不动尺寸。
+   */
+  useEffect(() => {
+    void platform.window.setMini(false)
+  }, [])
   const [notice, setNotice] = useState<string | null>(null)
 
   const togglePanel = (id: Exclude<PanelId, null>) =>
@@ -224,6 +249,13 @@ export default function App() {
           break
         case "m":
         case "M":
+          // Ctrl+M 迷你模式，单独按 M 是静音 —— 两个都是最顺手的键位，分不出高下，
+          // 用得多的那个（静音）留给单键
+          if (e.ctrlKey) {
+            e.preventDefault()
+            goMini(!miniRef.current)
+            break
+          }
           p.toggleMute()
           break
         case "l":
@@ -280,6 +312,10 @@ export default function App() {
             setPanel(null)
             break
           }
+          if (miniRef.current) {
+            goMini(false)
+            break
+          }
           void platform.window.isFullscreen().then((on) => {
             if (on) void platform.window.setFullscreen(false)
           })
@@ -302,9 +338,13 @@ export default function App() {
     if (ref) await setBackdrop(ref)
   }
 
+  // 迷你模式是**另一套版式**，不是把主舞台缩小 —— 舞台是 1243×688 的固定坐标系，
+  // 缩到 380px 宽字号会掉到 4px。所以整棵树换掉，底图、蒙版、唱片都不渲染。
+  if (mini) return <MiniPlayer onExit={() => goMini(false)} />
+
   return (
     <Stage>
-      <TitleBar />
+      <TitleBar onMini={() => goMini(true)} />
       <Sidebar
         onOpenPlayback={() => togglePanel("playback")}
         onOpenSkin={() => togglePanel("skin")}

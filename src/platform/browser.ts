@@ -73,6 +73,8 @@ const windowControls: WindowControls = {
   async isFullscreen() {
     return document.fullscreenElement !== null
   },
+  // 浏览器里没有窗口可以缩，界面照样会切成迷你版式
+  async setMini() {},
 }
 
 export function create(): Platform {
