@@ -640,3 +640,91 @@ describe("换片动效只在真的换了一首时放", () => {
     await vi.advanceTimersByTimeAsync(5000)
   })
 })
+
+/*
+ * 队列的增删改。**这几个动作在界面上一直没有入口**（store 里躺着，零调用方），
+ * 队列面板是第一个用它们的地方，所以在接线之前先把语义钉死。
+ *
+ * 两条不变式：
+ *   1. index 盯的是**同一首歌**，不是同一个下标 —— 拖动排序之后正在放的还得是它。
+ *   2. 引擎里挂着的那首必须还在队列里 —— 删到正在放的那首头上时，不能只挪下标就完事，
+ *      否则声音继续放一首已经被删掉的歌，而界面指着另一首（和 loadedTrackId 是同一类 bug）。
+ */
+describe("队列的增删改", () => {
+  it("拖动排序：正在放的那首被拖走，index 跟着它到新位置", () => {
+    usePlayer.setState({ index: 0 })
+    usePlayer.getState().moveInQueue(0, 2)
+    const s = usePlayer.getState()
+    expect(s.index, "index 没跟着歌走").toBe(2)
+    expect(s.queue[2].id, "挪过去的不是原来那首").toBe(`a${round}`)
+  })
+
+  it("拖动排序：别人从当前之前挪到之后，当前那首被挤前一格", () => {
+    usePlayer.setState({ index: 1 })
+    // a b c，把 a 挪到最后 → b c a，正在放的 b 从 1 变 0
+    usePlayer.getState().moveInQueue(0, 2)
+    const s = usePlayer.getState()
+    expect(s.index).toBe(0)
+    expect(s.queue[0].id).toBe(`b${round}`)
+  })
+
+  it("拖动排序：别人从当前之后挪到之前，当前那首被挤后一格", () => {
+    usePlayer.setState({ index: 1 })
+    // a b c，把 c 挪到最前 → c a b，正在放的 b 从 1 变 2
+    usePlayer.getState().moveInQueue(2, 0)
+    const s = usePlayer.getState()
+    expect(s.index).toBe(2)
+    expect(s.queue[2].id).toBe(`b${round}`)
+  })
+
+  it("删掉当前之前的一首，index 前移一格，声音不动", async () => {
+    await usePlayer.getState().playAt(1)
+    engine.play.mockClear()
+    usePlayer.getState().removeFromQueue(0)
+    await vi.advanceTimersByTimeAsync(0)
+    const s = usePlayer.getState()
+    expect(s.index).toBe(0)
+    expect(s.queue[0].id, "指着的不再是原来那首").toBe(`b${round}`)
+    expect(engine.play, "没换歌却重新开了一次声").not.toHaveBeenCalled()
+  })
+
+  it("删掉正在放的那首：接着放顶上来的那一首，而不是继续放已经删掉的", async () => {
+    await usePlayer.getState().playAt(1)
+    engine.status = "playing"
+    engine.play.mockClear()
+    engine.load.mockClear()
+
+    usePlayer.getState().removeFromQueue(1)
+    await vi.advanceTimersByTimeAsync(0)
+
+    const s = usePlayer.getState()
+    expect(s.queue.map((t) => t.id), "被删的那首还在队列里").toEqual([`a${round}`, `c${round}`])
+    expect(s.index).toBe(1)
+    expect(engine.load, "没有去载入顶上来的那首").toHaveBeenCalled()
+    expect(engine.play, "引擎里还挂着被删掉的那首在放").toHaveBeenCalled()
+    engine.status = "paused"
+  })
+
+  it("暂停时删掉正在放的那首：不擅自开声，但引擎里那首必须放下", async () => {
+    await usePlayer.getState().playAt(1)
+    engine.status = "paused"
+    engine.play.mockClear()
+    engine.pause.mockClear()
+
+    usePlayer.getState().removeFromQueue(1)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(engine.pause, "引擎里还挂着被删掉的那首").toHaveBeenCalled()
+    expect(engine.play, "用户没按播放，不该自己响").not.toHaveBeenCalled()
+  })
+
+  it("删到最后一首，队列清空并停下", async () => {
+    usePlayer.setState({ queue: [track(`solo${round}`)], index: 0 })
+    await usePlayer.getState().playAt(0)
+    usePlayer.getState().removeFromQueue(0)
+    await vi.advanceTimersByTimeAsync(0)
+    const s = usePlayer.getState()
+    expect(s.queue).toHaveLength(0)
+    expect(s.index).toBe(-1)
+  })
+})

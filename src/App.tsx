@@ -10,6 +10,7 @@ import Actions from "@/ui/Actions"
 import TitleBar from "@/ui/TitleBar"
 import Sidebar from "@/ui/Sidebar"
 import Playlist from "@/ui/panels/Playlist"
+import Queue from "@/ui/panels/Queue"
 import SkinEditor from "@/ui/panels/SkinEditor"
 import Playback from "@/ui/panels/Playback"
 import Online from "@/ui/panels/Online"
@@ -51,7 +52,7 @@ window.__online = useOnline
 window.__initSource = ensureSource
 
 /** 右侧抽屉同一时刻只能开一个 */
-type PanelId = "playlist" | "skin" | "playback" | "mix" | "online" | null
+type PanelId = "playlist" | "queue" | "skin" | "playback" | "mix" | "online" | null
 
 export default function App() {
   const loadSkin = useSkin((s) => s.load)
@@ -235,6 +236,11 @@ export default function App() {
           e.preventDefault()
           togglePanel("playlist")
           break
+        case "q":
+        case "Q":
+          e.preventDefault()
+          togglePanel("queue")
+          break
         case "s":
         case "S":
           e.preventDefault()
@@ -305,6 +311,7 @@ export default function App() {
         onOpenMix={() => togglePanel("mix")}
         onOpenOnline={() => togglePanel("online")}
         onOpenLibrary={() => togglePanel("playlist")}
+        onOpenQueue={() => togglePanel("queue")}
         onOpenLayout={() => {
           // 编辑布局时把抽屉收起来：抽屉压着右边小半个画面，搬部件会看不见落点
           setPanel(null)
@@ -358,6 +365,7 @@ export default function App() {
       />
 
       <Playlist open={panel === "playlist"} onClose={() => setPanel(null)} />
+      <Queue open={panel === "queue"} onClose={() => setPanel(null)} />
       <SkinEditor open={panel === "skin"} onClose={() => setPanel(null)} />
       <Playback open={panel === "playback"} onClose={() => setPanel(null)} />
       <MixPanel open={panel === "mix"} onClose={() => setPanel(null)} />

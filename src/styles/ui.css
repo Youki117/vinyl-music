@@ -1638,6 +1638,46 @@ header button.danger,
   color: #8d8981;
 }
 
+/* ── 播放队列抽屉 ────────────────────────────────────── */
+.queue-count {
+  color: var(--panel-text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.queue-clear {
+  padding: 3px 10px;
+  color: var(--panel-text-muted);
+  font-size: 11px;
+}
+
+.queue-clear:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.queue-clear:not(:disabled):hover {
+  color: var(--panel-danger);
+}
+
+/*
+ * 拖拽落点。曲库那边用的是 ::before / ::after 画线，这里不能照抄 ——
+ * .drawer li[data-active] 已经拿 ::before 画"正在播放"的标记了，
+ * 拖到当前这一行上会互相盖掉。inset 阴影不占伪元素，两件事互不干扰。
+ */
+.queue-panel li[data-dragging="true"] {
+  opacity: 0.35;
+}
+
+.queue-panel li[data-drop-before="true"] {
+  box-shadow: inset 0 2px 0 #b2845f;
+}
+
+.queue-panel li[data-drop-after="true"] {
+  box-shadow: inset 0 -2px 0 #b2845f;
+}
+
 /* ── 自动取色的三个色块 ─────────────────────────────────── */
 .tint-swatches {
   display: flex;

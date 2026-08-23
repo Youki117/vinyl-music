@@ -107,6 +107,8 @@ type PlayerState = {
   playNext(track: Track): void
   appendToQueue(tracks: Track[]): void
   removeFromQueue(i: number): void
+  /** 队列内挪位置。`index` 会跟着走，**盯的是同一首歌**而不是同一个下标。 */
+  moveInQueue(from: number, to: number): void
   clearQueue(): void
   /**
    * 从曲库重新取一遍队列里的可变字段（歌词、收藏）。
@@ -781,14 +783,60 @@ export const usePlayer = create<PlayerState>((set, get) => {
       })
     },
 
+    /**
+     * 从队列里删一条。
+     *
+     * 删到**正在放的那一首**头上时不能只挪下标 —— 引擎里挂着的还是它，
+     * 声音会继续放一首已经不在队列里的歌，而界面已经指向别人了（和 loadedTrackId
+     * 那个 bug 是同一类）。所以这里分三种情况收尾：删空了就停，本来在放就接着放
+     * 顶上来的那首，本来暂停就停在新的一首上等用户按播放。
+     */
     removeFromQueue(i) {
+      const before = get()
+      if (i < 0 || i >= before.queue.length) return
+      const removingCurrent = i === before.index
+      const wasPlaying = engine.status === "playing"
+
+      const q = before.queue.filter((_, k) => k !== i)
+      let index = before.index
+      if (i < before.index) index--
+      else if (removingCurrent) index = Math.min(index, q.length - 1)
+
+      if (q.length === 0) {
+        get().clearQueue()
+        return
+      }
+      set({ queue: q, index })
+      // 预取的那首可能正是被删掉的，或者"下一首"换人了
+      dropPrefetch()
+      if (!removingCurrent) {
+        schedulePrefetch()
+        return
+      }
+      // 引擎里那首已经不属于任何一行了
+      engine.pause()
+      loadedTrackId = null
+      if (wasPlaying) void get().playAt(index)
+      else set({ status: engine.status })
+    },
+
+    moveInQueue(from, to) {
       set((s) => {
-        const q = s.queue.filter((_, k) => k !== i)
+        const n = s.queue.length
+        if (from === to || from < 0 || from >= n || to < 0 || to >= n) return s
+        const q = [...s.queue]
+        const [moved] = q.splice(from, 1)
+        q.splice(to, 0, moved)
+        // 下标跟着**歌**走，不是跟着位置走：拖的正好是在放的那首时，index 要跟到新位置；
+        // 拖的是别人时，只有跨过 index 才会把它挤开一格
         let index = s.index
-        if (i < s.index) index--
-        else if (i === s.index) index = Math.min(index, q.length - 1)
+        if (from === s.index) index = to
+        else if (from < s.index && to >= s.index) index--
+        else if (from > s.index && to <= s.index) index++
         return { queue: q, index }
       })
+      dropPrefetch()
+      schedulePrefetch()
     },
 
     clearQueue() {

@@ -36,6 +36,7 @@ export const SIDEBAR_TOOLS = [
   { id: "layout", label: "自定义组件位置", hint: "自定义组件位置与侧栏顺序" },
   { id: "volume", label: "音量", hint: "音量（M 静音）" },
   { id: "library", label: "曲库与歌单", hint: "曲库与歌单 (P)" },
+  { id: "queue", label: "播放队列", hint: "接下来放什么 (Q)" },
 ] as const
 
 export type SidebarToolId = (typeof SIDEBAR_TOOLS)[number]["id"]
