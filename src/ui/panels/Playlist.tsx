@@ -54,6 +54,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
 
   const playFrom = usePlayer((s) => s.playFrom)
   const playNext = usePlayer((s) => s.playNext)
+  const appendToQueue = usePlayer((s) => s.appendToQueue)
   const currentId = usePlayer((s) => s.current()?.id ?? null)
   const [menu, setMenu] = useState<{ track: Track; x: number; y: number } | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -439,6 +440,8 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
         >
           <button onClick={() => void playFrom(rows, rows.indexOf(menu.track))}>播放</button>
           <button onClick={() => playNext(menu.track)}>下一首播放</button>
+          {/* 与「下一首播放」成对：那个插到当前之后，这个排到队尾 */}
+          <button onClick={() => appendToQueue([menu.track])}>加入队列</button>
           <button onClick={() => toggleLike(menu.track.id)}>
             {menu.track.liked ? "取消收藏" : "收藏"}
           </button>

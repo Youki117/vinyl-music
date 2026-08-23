@@ -16,6 +16,7 @@ import Playback from "@/ui/panels/Playback"
 import Online from "@/ui/panels/Online"
 import LayoutEdit from "@/ui/LayoutEdit"
 import MiniPlayer from "@/ui/MiniPlayer"
+import Shortcuts from "@/ui/Shortcuts"
 import { useDiscCue } from "@/ui/useDiscCue"
 import { useLibrary } from "@/store/library"
 import { noteCurrentTrack, useAi } from "@/store/ai"
@@ -82,6 +83,9 @@ export default function App() {
    * 迷你模式。窗口那一侧（缩尺寸、置顶、禁缩放、放开最小尺寸下限）整套在
    * platform.window.setMini 里，这里只管切版式。
    */
+  const [keysOpen, setKeysOpen] = useState(false)
+  const keysRef = useRef(keysOpen)
+  keysRef.current = keysOpen
   const [mini, setMini] = useState(false)
   const miniRef = useRef(mini)
   miniRef.current = mini
@@ -217,7 +221,7 @@ export default function App() {
     return () => window.removeEventListener("pagehide", stop)
   }, [])
 
-  // 应用内快捷键（F8.8）
+  // 应用内快捷键（F8.8）。**改这里要同时改 ui/Shortcuts.tsx 那张说明表。**
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null
@@ -295,6 +299,11 @@ export default function App() {
           e.preventDefault()
           togglePanel("online")
           break
+        case "?":
+          // Shift+/ 在多数布局上就是 ?，直接认字符不认键位，省得逐布局特判
+          e.preventDefault()
+          setKeysOpen((v) => !v)
+          break
         case "F11":
           /*
            * 全屏。**最大化不等于全屏** —— 最大化只占满"工作区"，Windows 会给任务栏
@@ -308,6 +317,10 @@ export default function App() {
            * 一次只退一层：面板开着就先关面板，没有面板才退出全屏。
            * 反过来的话，全屏下想关个面板会连全屏一起掉，很难受。
            */
+          if (keysRef.current) {
+            setKeysOpen(false)
+            break
+          }
           if (panelRef.current) {
             setPanel(null)
             break
@@ -406,6 +419,7 @@ export default function App() {
 
       <Playlist open={panel === "playlist"} onClose={() => setPanel(null)} />
       <Queue open={panel === "queue"} onClose={() => setPanel(null)} />
+      <Shortcuts open={keysOpen} onClose={() => setKeysOpen(false)} />
       <SkinEditor open={panel === "skin"} onClose={() => setPanel(null)} />
       <Playback open={panel === "playback"} onClose={() => setPanel(null)} />
       <MixPanel open={panel === "mix"} onClose={() => setPanel(null)} />

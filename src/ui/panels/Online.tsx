@@ -139,6 +139,7 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
   const playlists = useLibrary((s) => s.playlists)
   const libTracks = useLibrary((s) => s.tracks)
   const playNext = usePlayer((s) => s.playNext)
+  const appendToQueue = usePlayer((s) => s.appendToQueue)
   const currentId = usePlayer((s) => s.current()?.id ?? null)
 
   const [tab, setTab] = useState<Tab>("search")
@@ -278,6 +279,7 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
         >
           <button onClick={() => void play(results.indexOf(menu.track))}>播放</button>
           <button onClick={() => playNext(menu.track)}>下一首播放</button>
+          <button onClick={() => appendToQueue([menu.track])}>加入队列</button>
           <button onClick={() => collect(menu.track)}>收进曲库</button>
           {playlists.length > 0 && <hr />}
           {playlists.map((p) => (
