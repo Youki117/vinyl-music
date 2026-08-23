@@ -36,6 +36,15 @@ export default function Queue({ open, onClose }: { open: boolean; onClose: () =>
     row?.scrollIntoView({ block: "center" })
   }, [open, index])
 
+  /*
+   * 抽屉自己负责收起来。**每个面板组件都得有这一句** —— 少了它，抽屉会一直挂在
+   * DOM 里（z-index 7，盖住右半屏），而 open 只是个没人读的入参：按 Q、点叉号都会
+   * 把 panel 置空，界面却纹丝不动。tests/panel-open.test.ts 盯着这一条。
+   *
+   * 位置必须在所有 hook 之后 —— 提前返回会打乱 hook 顺序。
+   */
+  if (!open) return null
+
   const dropIndexAt = (clientY: number): number => {
     const items = Array.from(listRef.current?.querySelectorAll("li[data-row]") ?? [])
     for (let i = 0; i < items.length; i++) {
