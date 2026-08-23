@@ -33,3 +33,13 @@ export const clearUserApi = (): void => {
 
 /** 有没有可用的音源脚本 —— 界面据此提示「导入音源后才能播放」 */
 export const hasUserApi = (): boolean => Object.keys(userApi.apis).length > 0
+
+/**
+ * 当前脚本**能解析出播放地址**的平台。
+ *
+ * 换源之前要先看这个：脚本没注册的平台，去搜一遍同名曲目纯属白跑一趟网络 ——
+ * 搜到了也解析不出地址。音源脚本各家支持的平台差别很大（有的只剩一个），
+ * 挨个试的代价不是常数。
+ */
+export const playableSources = (): string[] =>
+  Object.keys(userApi.apis).filter((k) => userApi.apis[k] != null)

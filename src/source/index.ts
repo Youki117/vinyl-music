@@ -12,7 +12,13 @@
  */
 // @ts-expect-error vendored 的上游代码没有类型声明，且原则是不改它
 import sdk from "@/vendor/lx-music/musicSdk/index.js"
-import { hasUserApi, registerUserApi, clearUserApi, type SourceApi } from "@/vendor/lx-music/store"
+import {
+  hasUserApi,
+  playableSources,
+  registerUserApi,
+  clearUserApi,
+  type SourceApi,
+} from "@/vendor/lx-music/store"
 import { platform } from "@/platform"
 import { cleanTitle } from "@/lib/text"
 import { loadUserApi, unloadUserApi, parseScriptInfo, type LoadedScript } from "./userApi/host"
@@ -31,7 +37,7 @@ const builtinScripts = import.meta.glob("./builtin/*.js", {
 }) as Record<string, string>
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http"
 import { lxLyricToEnhancedLrc } from "./lyric"
-import { qqPlaylistIdOfInput, type SourceId } from "./catalog"
+import { SOURCES, qqPlaylistIdOfInput, type SourceId } from "./catalog"
 
 export { SOURCES, sourceOfLink, type SourceId } from "./catalog"
 
@@ -376,6 +382,17 @@ export async function getMusicUrl(track: OnlineTrack, quality?: string): Promise
   if (!hasUserApi()) {
     throw new Error("尚未导入音源，无法解析播放地址。搜索和歌词不受影响。")
   }
+  /*
+   * 先问脚本注册过这个平台没有，再进 musicSdk。
+   *
+   * 不拦的话，musicSdk 内部会拿一个 undefined 去取 getMusicUrl，抛的是
+   * `Cannot read properties of undefined (reading 'getMusicUrl')` —— 这句会一路
+   * 冒到界面上。而它其实是一件很好解释的事：这份音源不解析这个平台，去换源就是了。
+   */
+  if (!playableSources().includes(track.source)) {
+    const name = SOURCES.find((s) => s.id === track.source)?.name ?? track.source
+    throw new Error(`当前音源不解析${name}`)
+  }
   const api = sdk[track.source]
   if (!api?.getMusicUrl) throw new Error(`音源 ${track.source} 不支持播放`)
   const q = quality ?? track.qualities[0] ?? "128k"
@@ -493,8 +510,12 @@ export async function resolvePlayUrl(
   if (first) return { url: first, source: track.source }
 
   // 本平台不行就拿歌名+歌手去别的平台找同一首，找到了再解析
+  const playable = new Set(playableSources())
   for (const source of FALLBACK_ORDER) {
     if (source === track.source) continue
+    // 脚本压根解析不了的平台就别去搜了：搜到也放不出来，白花一次网络往返。
+    // 有的音源只剩一个平台能用，挨个试的代价不是常数。
+    if (!playable.has(source)) continue
     const alt = await findSameTrack(source, track)
     if (!alt) continue
     const url = await attempt(alt)
@@ -544,5 +565,5 @@ async function isAudio(url: string): Promise<boolean> {
 }
 
 export { lxLyricToEnhancedLrc } from "./lyric"
-export { hasUserApi, registerUserApi, clearUserApi, type SourceApi }
+export { hasUserApi, playableSources, registerUserApi, clearUserApi, type SourceApi }
 export { loadUserApi, unloadUserApi, parseScriptInfo, setSourceDebug, type LoadedScript } from "./userApi/host"
