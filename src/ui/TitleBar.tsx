@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react"
+
 import { platform } from "@/platform"
 import { usePlayer } from "@/store/player"
 
@@ -12,6 +14,34 @@ import { usePlayer } from "@/store/player"
  * 不该触发关闭。
  */
 export default function TitleBar() {
+  /*
+   * 全屏与最大化是**两件事**，这里两个按钮都要有。
+   *
+   * 最大化受"工作区"约束 —— Windows 会给任务栏留出那一条，所以最大化之后任务栏
+   * 依然压在上面。真全屏（Tauri 的 setFullscreen）才会占满整块屏幕、盖住任务栏。
+   * 早先只有最大化按钮，于是"全屏"这件事在界面上根本没有入口。
+   */
+  const [full, setFull] = useState(false)
+
+  // 全屏也可能由 F11 或 Esc 触发（见 App.tsx），所以图标不能只跟着自己这个按钮走
+  useEffect(() => {
+    let alive = true
+    const sync = () => {
+      void platform.window
+        .isFullscreen()
+        .then((on) => {
+          if (alive) setFull(on)
+        })
+        .catch(() => {})
+    }
+    sync()
+    window.addEventListener("resize", sync)
+    return () => {
+      alive = false
+      window.removeEventListener("resize", sync)
+    }
+  }, [])
+
   const close = () => {
     usePlayer.getState().pause()
     void platform.window.close()
@@ -20,6 +50,31 @@ export default function TitleBar() {
   return (
     <div className="titlebar" data-tauri-drag-region data-keep-panel>
       <span className="titlebar-spacer" data-tauri-drag-region />
+      <button
+        onClick={() => void platform.window.setFullscreen(!full).then(() => setFull(!full))}
+        data-tooltip={full ? "退出全屏 F11" : "全屏 F11"}
+      >
+        <span className="titlebar-label">{full ? "退出全屏" : "全屏"}</span>
+        <svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true">
+          {full ? (
+            // 四角向内：退出全屏
+            <path
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1"
+              d="M4.5 1.5v3h-3m9 0h-3v-3m0 9v-3h3m-9 0h3v3"
+            />
+          ) : (
+            // 四角向外：进入全屏
+            <path
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1"
+              d="M1.5 4.5v-3h3m3 0h3v3m0 3v3h-3m-3 0h-3v-3"
+            />
+          )}
+        </svg>
+      </button>
       <button onClick={() => void platform.window.minimize()} data-tooltip="最小化">
         <span className="titlebar-label">最小化</span>
         <svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true">

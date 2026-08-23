@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import Stage from "@/stage/Stage"
 import Masthead from "@/ui/Masthead"
@@ -69,6 +69,12 @@ export default function App() {
   const [panel, setPanel] = useState<PanelId>(null)
   const layoutEditing = useLayout((s) => s.editing)
   const discCue = useDiscCue()
+  /*
+   * 快捷键那个 effect 是空依赖数组、整个生命周期只挂一次，闭包里的 panel 永远是
+   * 初始值。Esc 要分辨"有没有面板开着"，就得从 ref 上读当前值。
+   */
+  const panelRef = useRef(panel)
+  panelRef.current = panel
   const [notice, setNotice] = useState<string | null>(null)
 
   const togglePanel = (id: Exclude<PanelId, null>) =>
@@ -251,8 +257,26 @@ export default function App() {
           e.preventDefault()
           togglePanel("online")
           break
+        case "F11":
+          /*
+           * 全屏。**最大化不等于全屏** —— 最大化只占满"工作区"，Windows 会给任务栏
+           * 留出那一条，所以任务栏依然压在上面。真全屏才盖得住。
+           */
+          e.preventDefault()
+          void platform.window.isFullscreen().then((on) => platform.window.setFullscreen(!on))
+          break
         case "Escape":
-          setPanel(null)
+          /*
+           * 一次只退一层：面板开着就先关面板，没有面板才退出全屏。
+           * 反过来的话，全屏下想关个面板会连全屏一起掉，很难受。
+           */
+          if (panelRef.current) {
+            setPanel(null)
+            break
+          }
+          void platform.window.isFullscreen().then((on) => {
+            if (on) void platform.window.setFullscreen(false)
+          })
           break
       }
     }
