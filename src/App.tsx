@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import Stage from "@/stage/Stage"
 import Masthead from "@/ui/Masthead"
@@ -10,12 +10,16 @@ import Actions from "@/ui/Actions"
 import TitleBar from "@/ui/TitleBar"
 import Sidebar from "@/ui/Sidebar"
 import Playlist from "@/ui/panels/Playlist"
+import Queue from "@/ui/panels/Queue"
 import SkinEditor from "@/ui/panels/SkinEditor"
 import Playback from "@/ui/panels/Playback"
 import Online from "@/ui/panels/Online"
 import LayoutEdit from "@/ui/LayoutEdit"
+import MiniPlayer from "@/ui/MiniPlayer"
+import Shortcuts from "@/ui/Shortcuts"
+import { useDiscCue } from "@/ui/useDiscCue"
 import { useLibrary } from "@/store/library"
-import { useAi } from "@/store/ai"
+import { noteCurrentTrack, useAi } from "@/store/ai"
 import { useMix } from "@/store/mix"
 import MixPanel from "@/ui/panels/Mix"
 import { engine } from "@/audio/engine"
@@ -50,7 +54,7 @@ window.__online = useOnline
 window.__initSource = ensureSource
 
 /** 右侧抽屉同一时刻只能开一个 */
-type PanelId = "playlist" | "skin" | "playback" | "mix" | "online" | null
+type PanelId = "playlist" | "queue" | "skin" | "playback" | "mix" | "online" | null
 
 export default function App() {
   const loadSkin = useSkin((s) => s.load)
@@ -67,6 +71,40 @@ export default function App() {
   // 关掉上面那个它就自己冒出来了 —— 换成单一状态，互斥是结构自带的。
   const [panel, setPanel] = useState<PanelId>(null)
   const layoutEditing = useLayout((s) => s.editing)
+  const discCue = useDiscCue()
+  /*
+   * 快捷键那个 effect 是空依赖数组、整个生命周期只挂一次，闭包里的 panel 永远是
+   * 初始值。Esc 要分辨"有没有面板开着"，就得从 ref 上读当前值。
+   */
+  const panelRef = useRef(panel)
+  panelRef.current = panel
+
+  /*
+   * 迷你模式。窗口那一侧（缩尺寸、置顶、禁缩放、放开最小尺寸下限）整套在
+   * platform.window.setMini 里，这里只管切版式。
+   */
+  const [keysOpen, setKeysOpen] = useState(false)
+  const keysRef = useRef(keysOpen)
+  keysRef.current = keysOpen
+  const [mini, setMini] = useState(false)
+  const miniRef = useRef(mini)
+  miniRef.current = mini
+  const goMini = (on: boolean) => {
+    // 面板挂在主舞台上，迷你版式里没有它们的位置，进去之前先收掉
+    if (on) setPanel(null)
+    void platform.window.setMini(on).then(() => setMini(on))
+  }
+
+  /*
+   * 启动时无条件退一次迷你模式。
+   *
+   * 窗口状态插件会把上次退出时的窗口尺寸恢复回来 —— 万一上次是在迷你模式里退的，
+   * 应用就会以一个 380×104 的窗口启动，而界面是主舞台版式，等于开起来就是坏的。
+   * setMini(false) 是幂等的：窗口没缩着的时候它只把可缩放/置顶/下限归位，不动尺寸。
+   */
+  useEffect(() => {
+    void platform.window.setMini(false)
+  }, [])
   const [notice, setNotice] = useState<string | null>(null)
 
   const togglePanel = (id: Exclude<PanelId, null>) =>
@@ -87,9 +125,14 @@ export default function App() {
 
   useEffect(() => {
     void loadSkin()
-    void init()
     void useAi.getState().load()
     void useLayout.getState().load()
+    // init() 里会把曲库读进来，读完才知道哪些曲目还在，才能清理掉已删曲目的 AI 配图。
+    // 必须等它 resolve —— 曲库还没加载完时曲目集合是空的，那时清理等于全删。
+    void init().then(() => {
+      const live = new Set(useLibrary.getState().tracks.map((t) => t.id))
+      void useAi.getState().sweepLibrary(live)
+    })
   }, [loadSkin, init])
 
   // 切歌时：套用该曲已有的 AI 配图，并把混音编排切到这首歌上
@@ -100,7 +143,9 @@ export default function App() {
       const t = s.current()
       if (!t || t.id === last) return
       last = t.id
-      void useAi.getState().maybeAuto(t)
+      noteCurrentTrack(t.id)
+      // 有专属图就临时盖上，没有就回到基础底图
+      void useAi.getState().applyForTrack(t)
       void useMix.getState().setHost(t.id)
     })
   }, [])
@@ -176,7 +221,7 @@ export default function App() {
     return () => window.removeEventListener("pagehide", stop)
   }, [])
 
-  // 应用内快捷键（F8.8）
+  // 应用内快捷键（F8.8）。**改这里要同时改 ui/Shortcuts.tsx 那张说明表。**
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null
@@ -208,6 +253,13 @@ export default function App() {
           break
         case "m":
         case "M":
+          // Ctrl+M 迷你模式，单独按 M 是静音 —— 两个都是最顺手的键位，分不出高下，
+          // 用得多的那个（静音）留给单键
+          if (e.ctrlKey) {
+            e.preventDefault()
+            goMini(!miniRef.current)
+            break
+          }
           p.toggleMute()
           break
         case "l":
@@ -219,6 +271,11 @@ export default function App() {
         case "P":
           e.preventDefault()
           togglePanel("playlist")
+          break
+        case "q":
+        case "Q":
+          e.preventDefault()
+          togglePanel("queue")
           break
         case "s":
         case "S":
@@ -242,8 +299,39 @@ export default function App() {
           e.preventDefault()
           togglePanel("online")
           break
+        case "?":
+          // Shift+/ 在多数布局上就是 ?，直接认字符不认键位，省得逐布局特判
+          e.preventDefault()
+          setKeysOpen((v) => !v)
+          break
+        case "F11":
+          /*
+           * 全屏。**最大化不等于全屏** —— 最大化只占满"工作区"，Windows 会给任务栏
+           * 留出那一条，所以任务栏依然压在上面。真全屏才盖得住。
+           */
+          e.preventDefault()
+          void platform.window.isFullscreen().then((on) => platform.window.setFullscreen(!on))
+          break
         case "Escape":
-          setPanel(null)
+          /*
+           * 一次只退一层：面板开着就先关面板，没有面板才退出全屏。
+           * 反过来的话，全屏下想关个面板会连全屏一起掉，很难受。
+           */
+          if (keysRef.current) {
+            setKeysOpen(false)
+            break
+          }
+          if (panelRef.current) {
+            setPanel(null)
+            break
+          }
+          if (miniRef.current) {
+            goMini(false)
+            break
+          }
+          void platform.window.isFullscreen().then((on) => {
+            if (on) void platform.window.setFullscreen(false)
+          })
           break
       }
     }
@@ -263,15 +351,20 @@ export default function App() {
     if (ref) await setBackdrop(ref)
   }
 
+  // 迷你模式是**另一套版式**，不是把主舞台缩小 —— 舞台是 1243×688 的固定坐标系，
+  // 缩到 380px 宽字号会掉到 4px。所以整棵树换掉，底图、蒙版、唱片都不渲染。
+  if (mini) return <MiniPlayer onExit={() => goMini(false)} />
+
   return (
     <Stage>
-      <TitleBar />
+      <TitleBar onMini={() => goMini(true)} />
       <Sidebar
         onOpenPlayback={() => togglePanel("playback")}
         onOpenSkin={() => togglePanel("skin")}
         onOpenMix={() => togglePanel("mix")}
         onOpenOnline={() => togglePanel("online")}
         onOpenLibrary={() => togglePanel("playlist")}
+        onOpenQueue={() => togglePanel("queue")}
         onOpenLayout={() => {
           // 编辑布局时把抽屉收起来：抽屉压着右边小半个画面，搬部件会看不见落点
           setPanel(null)
@@ -283,9 +376,10 @@ export default function App() {
       <Masthead />
       <Lyrics />
       {/* 圆环与光照跟着黑胶一起搬，所以标同一个 data-part（三者共用一组 CSS 偏移变量） */}
-      <div className="disc-ring" data-part="disc" />
-      <Disc onToggle={toggle} onContextMenu={() => setPanel("skin")} />
-      <div className="disc-lighting" data-part="disc" />
+      {/* discCue：换歌时这三个部件一起淡入，节流在 player store 那边 */}
+      <div className="disc-ring" data-part="disc" ref={discCue} />
+      <Disc onToggle={toggle} onContextMenu={() => setPanel("skin")} ref={discCue} />
+      <div className="disc-lighting" data-part="disc" ref={discCue} />
       <Actions />
       <Progress>
         <Controls
@@ -324,6 +418,8 @@ export default function App() {
       />
 
       <Playlist open={panel === "playlist"} onClose={() => setPanel(null)} />
+      <Queue open={panel === "queue"} onClose={() => setPanel(null)} />
+      <Shortcuts open={keysOpen} onClose={() => setKeysOpen(false)} />
       <SkinEditor open={panel === "skin"} onClose={() => setPanel(null)} />
       <Playback open={panel === "playback"} onClose={() => setPanel(null)} />
       <MixPanel open={panel === "mix"} onClose={() => setPanel(null)} />

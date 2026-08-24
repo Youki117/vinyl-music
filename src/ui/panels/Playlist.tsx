@@ -15,6 +15,7 @@ import {
 } from "@/store/library"
 import { usePlayer } from "@/store/player"
 import { IconArrowRight, IconImport, IconPlus, IconTrash } from "../icons"
+import ContextMenu from "../ContextMenu"
 import { useDismiss } from "../useDismiss"
 import PlaylistImport from "./PlaylistImport"
 
@@ -49,10 +50,12 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
     setSort,
     setView,
     toggleLike,
+    toggleSortDesc,
   } = useLibrary.getState()
 
   const playFrom = usePlayer((s) => s.playFrom)
   const playNext = usePlayer((s) => s.playNext)
+  const appendToQueue = usePlayer((s) => s.appendToQueue)
   const currentId = usePlayer((s) => s.current()?.id ?? null)
   const [menu, setMenu] = useState<{ track: Track; x: number; y: number } | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -65,7 +68,6 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
   const sortTriggerRef = useRef<HTMLButtonElement>(null)
   const rootRef = useDismiss<HTMLDivElement>(open, onClose)
   // 右键菜单点哪儿都该收起来，包括抽屉内部，所以不豁免常驻区
-  const menuRef = useDismiss<HTMLDivElement>(menu !== null, () => setMenu(null), false)
   const sortMenuRef = useDismiss<HTMLDivElement>(sortMenuOpen, () => setSortMenuOpen(false), false)
 
   // 筛选+排序是纯函数，按输入缓存即可。导入期间 tracks 直到最后才整体替换，
@@ -204,6 +206,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
             renaming === p.id ? (
               <input
                 key={p.id}
+                autoComplete="off"
                 autoFocus
                 defaultValue={p.name}
                 onBlur={(e) => {
@@ -258,6 +261,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
           <>
         <header>
           <input
+            autoComplete="off"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder={`在 ${VIRTUAL_VIEWS.includes(activeView as never) ? VIEW_LABEL[activeView as never] : playlists.find((p) => p.id === activeView)?.name ?? ""} 中搜索`}
@@ -286,6 +290,16 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
               title={`排序：${SORT_LABEL[sort]}${sortDesc ? "（降序）" : ""}`}
             />
             {sortMenuOpen && (
+              /*
+               * 用 role="group" + 一排原生 button，而**不是** role="menu"。
+               *
+               * role="menu" 是一份完整的交互契约：上下键在项之间移动、焦点由菜单
+               * 自己管、Home/End 跳首尾、字母键快速定位。只贴标签不兑现这些，读屏
+               * 用户会按预期去按方向键，然后什么都不发生 —— 比不加标签更糟。
+               * 这里要的其实就是"一组可选项"，原生 button + aria-pressed 表达得
+               * 更准，键盘行为也天然正确（Tab 遍历、回车选中）。
+               * Escape 关闭与焦点回到触发器在上面的 onKeyDown 里补齐。
+               */
               <div
                 id="playlist-sort-options"
                 className="lib-sort-popover"
@@ -313,7 +327,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
           </div>
           <button
             className="lib-sort-direction"
-            onClick={() => setSort(sort)}
+            onClick={toggleSortDesc}
             aria-label={`切换为${sortDesc ? "升序" : "降序"}`}
             title={`当前${sortDesc ? "降序" : "升序"}，点击切换`}
           >
@@ -352,12 +366,20 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
               <button
                 className="row"
                 onDoubleClick={() => void playFrom(rows, i)}
+                // 这一行是 <button>，会进 Tab 焦点序列、被读屏念作按钮 —— 只绑双击的话
+                // 焦点走到这儿按回车什么都不发生，比不可聚焦还糟。鼠标仍是双击才播，
+                // 单击要留给选中与拖动排序
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return
+                  e.preventDefault()
+                  void playFrom(rows, i)
+                }}
                 onPointerDown={(e) => beginDrag(e, i)}
                 onContextMenu={(e) => {
                   e.preventDefault()
                   setMenu({ track: t, x: e.clientX, y: e.clientY })
                 }}
-                title={canReorder ? "双击播放，按住拖动可排序" : "双击播放"}
+                title={canReorder ? "双击或回车播放，按住拖动可排序" : "双击或回车播放"}
               >
                 <span className="song-index">{String(i + 1).padStart(2, "0")}</span>
                 <b>{t.title}</b>
@@ -410,14 +432,11 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
       )}
 
       {menu && (
-        <div
-          ref={menuRef}
-          className="ctx-menu"
-          style={{ left: menu.x, top: menu.y }}
-          onClick={() => setMenu(null)}
-        >
+        <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
           <button onClick={() => void playFrom(rows, rows.indexOf(menu.track))}>播放</button>
           <button onClick={() => playNext(menu.track)}>下一首播放</button>
+          {/* 与「下一首播放」成对：那个插到当前之后，这个排到队尾 */}
+          <button onClick={() => appendToQueue([menu.track])}>加入队列</button>
           <button onClick={() => toggleLike(menu.track.id)}>
             {menu.track.liked ? "取消收藏" : "收藏"}
           </button>
@@ -436,7 +455,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
           <button className="danger" onClick={() => removeTracks([menu.track.id])}>
             从曲库移除（不删文件）
           </button>
-        </div>
+        </ContextMenu>
       )}
     </div>
   )

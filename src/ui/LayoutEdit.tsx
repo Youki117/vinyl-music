@@ -5,6 +5,7 @@ import {
   LAYOUT_PARTS,
   SIDEBAR_TOOLS,
   clampOffset,
+  offsetAfterNudge,
   sidebarOrderOf,
   useLayout,
   type Offset,
@@ -13,6 +14,55 @@ import {
 } from "@/store/layout"
 
 const PART_LABEL = new Map<string, string>(LAYOUT_PARTS.map((p) => [p.id, p.label]))
+
+/** 部件在设计坐标系里的默认位置与大小，外加舞台的缩放比 */
+type PartMetrics = { rect: { x: number; y: number; w: number; h: number }; scale: number }
+
+/**
+ * DOM **此刻真正应用着**的偏移（而不是 store 里最新的那个）。
+ *
+ * 偏移是通过 `translate: var(--off-<id>-x/y)` 落到元素上的，所以计算样式里的
+ * translate 就是当前这一帧被量进 getBoundingClientRect 的那份位移。
+ *
+ * 为什么不能直接用 store 里的值：连续微调时 React 可能把好几次 set 批到一起，
+ * 一帧都没重排，此时 store 已经加到 +50 而 DOM 还停在 +20 —— 拿 store 的值去减，
+ * 算出来的"默认位置"就会往负方向漂，夹取边界跟着一起漂，等于没夹。
+ */
+function appliedTranslate(host: HTMLElement): Offset {
+  const raw = getComputedStyle(host).translate
+  if (!raw || raw === "none") return { x: 0, y: 0 }
+  const [x = 0, y = 0] = raw.split(/\s+/).map((v) => Number.parseFloat(v) || 0)
+  return { x, y }
+}
+
+/**
+ * 量一个部件。**拖动与方向键共用这一处** —— 两条路的夹取边界必须一模一样，
+ * 各量各的迟早会漂。
+ *
+ * 返回的是部件的**默认**位置（当前实际位置减掉正应用着的偏移）：边界按默认位置算，
+ * 否则每挪一次边界都会跟着跑。量不到（舞台还没排版）就返回 null，调用方原地不动。
+ */
+function measurePart(host: HTMLElement): PartMetrics | null {
+  const content = document.querySelector(".content") as HTMLElement | null
+  if (!content) return null
+
+  // 设计坐标 → 屏幕像素的比例。舞台整体是缩放的，指针位移必须先除回去
+  const contentRect = content.getBoundingClientRect()
+  const scale = contentRect.width / DESIGN_W
+  if (scale <= 0) return null
+
+  const applied = appliedTranslate(host)
+  const r = host.getBoundingClientRect()
+  return {
+    rect: {
+      x: (r.left - contentRect.left) / scale - applied.x,
+      y: (r.top - contentRect.top) / scale - applied.y,
+      w: r.width / scale,
+      h: r.height / scale,
+    },
+    scale,
+  }
+}
 
 /**
  * 布局编辑层（需求 §4.3）。开着的时候整个画面覆一层，用来搬动部件。
@@ -27,7 +77,7 @@ export default function LayoutEdit() {
   const offsets = useLayout((s) => s.offsets)
   const selected = useLayout((s) => s.selected)
   const sidebarOrder = useLayout((s) => s.sidebarOrder)
-  const { setEditing, setOffset, nudge, reset, persist, select, moveSidebarTool, resetSidebarOrder } =
+  const { setEditing, setOffset, reset, persist, select, moveSidebarTool, resetSidebarOrder } =
     useLayout.getState()
   const overlayRef = useRef<HTMLDivElement>(null)
 
@@ -46,11 +96,19 @@ export default function LayoutEdit() {
       if (!d) return
       e.preventDefault()
       e.stopPropagation()
-      nudge(selected, d[0], d[1])
+
+      // 和拖动一样要夹回可见范围，否则按住方向键能把部件推到画面外再也点不中
+      const host = document.querySelector<HTMLElement>(`[data-part="${selected}"]`)
+      if (!host) return
+      const m = measurePart(host)
+      if (!m) return
+      const cur = useLayout.getState().offsets[selected] ?? { x: 0, y: 0 }
+      setOffset(selected, offsetAfterNudge(m.rect, cur, d[0], d[1]))
+      persist()
     }
     window.addEventListener("keydown", onKey, true)
     return () => window.removeEventListener("keydown", onKey, true)
-  }, [editing, selected, nudge])
+  }, [editing, selected, setOffset, persist])
 
   if (!editing) return null
 
@@ -70,24 +128,10 @@ export default function LayoutEdit() {
       select(null)
       return
     }
-    const content = document.querySelector(".content") as HTMLElement | null
-    if (!content) return
-
-    // 设计坐标 → 屏幕像素的比例。舞台整体是缩放的，指针位移必须先除回去
-    const contentRect = content.getBoundingClientRect()
-    const scale = contentRect.width / DESIGN_W
-    if (scale <= 0) return
-
+    const m = measurePart(hit.el)
+    if (!m) return
+    const { rect: base, scale } = m
     const start = offsets[hit.id] ?? { x: 0, y: 0 }
-    // 部件的**默认**位置：当前实际位置减掉已有偏移。夹取边界要按默认位置算，
-    // 否则每拖一次边界都跟着漂
-    const r = hit.el.getBoundingClientRect()
-    const base = {
-      x: (r.left - contentRect.left) / scale - start.x,
-      y: (r.top - contentRect.top) / scale - start.y,
-      w: r.width / scale,
-      h: r.height / scale,
-    }
 
     select(hit.id)
     const x0 = e.clientX

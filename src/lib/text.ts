@@ -34,3 +34,25 @@ export function stripExt(name: string): string {
 export function baseName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path
 }
+
+/**
+ * 歌名里的【】降级成连字符：`【Free】Lucky` → `Free-Lucky`。
+ *
+ * 平台上带【】的歌名很多（【Free】、【伴奏】、【高音质】），那对括号在中文排版里是
+ * 用来抢注意力的，进了播放器的标题行只剩噪音，还会把本来就窄的一行挤掉小半。
+ *
+ * **只动【】这一对。** 其它括号在歌名里是有信息的 ——「晴天 (Live)」「夜曲 (伴奏版)」
+ * 「海阔天空 (粤语)」—— 一起洗掉就分不清版本了。
+ *
+ * 原始歌名不会丢：在线曲目留在 `origin.raw` 里（音源脚本拿的是那一份），
+ * 本地文件留在标签里，重新扫一遍就能拿回来。
+ */
+export function cleanTitle(title: string): string {
+  if (!title.includes("【") && !title.includes("】")) return title
+  const parts = title
+    .split(/[【】]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  // 整个歌名就是一对空括号这种，洗完什么都不剩 —— 那就别洗，空标题比难看的标题糟得多
+  return parts.length > 0 ? parts.join("-") : title
+}

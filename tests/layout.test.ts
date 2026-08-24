@@ -5,6 +5,7 @@ import {
   DESIGN_W,
   SIDEBAR_TOOLS,
   clampOffset,
+  offsetAfterNudge,
   offsetsToVars,
   sidebarOrderOf,
 } from "@/store/layout"
@@ -46,6 +47,39 @@ describe("偏移夹取", () => {
   })
 })
 
+/*
+ * 方向键微调早先是绕过夹取的（直接 cur.x + dx），拖动却夹了 —— 同一个约束两条路
+ * 两种行为。按住 Shift+方向键几秒就能把部件推出画面，退出编辑后点不中它，
+ * 只剩"全部复位"，而那会把其它部件的自定义位置一起清掉。
+ */
+describe("方向键微调", () => {
+  it("画面之内的微调照常叠加", () => {
+    expect(offsetAfterNudge(lyrics, { x: 10, y: 10 }, -1, 10)).toEqual({ x: 9, y: 20 })
+  })
+
+  it("一直按也推不出画面", () => {
+    let off = { x: 0, y: 0 }
+    // Shift 一次 10px，按住不放两百下
+    for (let i = 0; i < 200; i++) off = offsetAfterNudge(lyrics, off, 10, 10)
+
+    expect(lyrics.x + off.x).toBeLessThan(DESIGN_W)
+    expect(lyrics.y + off.y).toBeLessThan(DESIGN_H)
+  })
+
+  it("反方向一直按也推不出画面", () => {
+    let off = { x: 0, y: 0 }
+    for (let i = 0; i < 200; i++) off = offsetAfterNudge(lyrics, off, -10, -10)
+
+    expect(lyrics.x + off.x + lyrics.w).toBeGreaterThan(0)
+    expect(lyrics.y + off.y + lyrics.h).toBeGreaterThan(0)
+  })
+
+  it("与拖动落在完全相同的边界上", () => {
+    const nudged = offsetAfterNudge(lyrics, { x: 99990, y: 99990 }, 10, 10)
+    expect(nudged).toEqual(clampOffset(lyrics, { x: 100000, y: 100000 }))
+  })
+})
+
 describe("偏移 → CSS 变量", () => {
   it("只给动过的部件写变量，没动过的走 CSS 默认版式", () => {
     const vars = offsetsToVars({ lyrics: { x: 12, y: -4 }, disc: { x: 0, y: 0 } })
@@ -60,7 +94,7 @@ describe("偏移 → CSS 变量", () => {
 describe("右侧栏顺序：存下来的那份可能过期", () => {
   const DEFAULT = SIDEBAR_TOOLS.map((t) => t.id)
 
-  it("新默认顺序与已确认的七个入口一致", () => {
+  it("新默认顺序与已确认的八个入口一致", () => {
     expect(DEFAULT).toEqual([
       "online",
       "playback",
@@ -69,6 +103,7 @@ describe("右侧栏顺序：存下来的那份可能过期", () => {
       "layout",
       "volume",
       "library",
+      "queue",
     ])
   })
 

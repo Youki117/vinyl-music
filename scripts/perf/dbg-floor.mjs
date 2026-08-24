@@ -49,8 +49,16 @@ function mem(tag) {
   }
 }
 
-// data: URL 里的 `#version 300 es` 会被当成 URL 片段截断，必须走真实文件
-const HERE = "file:///C:/Users/mstanjw/AppData/Local/Temp/claude/C--Users-mstanjw/486c2642-e0bf-400d-8bc1-e5da29ade85d/scratchpad/floor"
+/*
+ * 三个测量页在 scripts/perf/floor/ 下。
+ *
+ * 必须走真实文件而不是 data: URL：gl.html 的着色器以 `#version 300 es` 开头，
+ * data: URL 会把 `#` 之后的部分当成片段标识符截掉，着色器直接编译失败。
+ *
+ * 路径从 import.meta.url 现算，不写死 —— 早先这里是一串指向某台机器临时目录的
+ * 绝对路径，那个目录被系统清掉之后，这个脚本就再也跑不起来了。
+ */
+const HERE = new URL("./floor", import.meta.url).href
 const BLANK = `${HERE}/blank.html`
 const CSS_LAYER = `${HERE}/css.html`
 const GL_LAYER = `${HERE}/gl.html`

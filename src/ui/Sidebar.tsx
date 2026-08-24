@@ -78,6 +78,19 @@ const ICONS: Record<Exclude<SidebarToolId, "volume">, ReactElement> = {
     </svg>
   ),
   library: <IconList size={16} />,
+  // 三条线 + 一个播放三角：列表，但是"接下来要放的那种列表"
+  queue: (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        d="M4 6h13M4 11h13M4 16h7"
+      />
+      <path fill="currentColor" d="m13.5 13.5 5.5 3-5.5 3z" />
+    </svg>
+  ),
 }
 
 export default function Sidebar({
@@ -87,6 +100,7 @@ export default function Sidebar({
   onOpenOnline,
   onOpenLayout,
   onOpenLibrary,
+  onOpenQueue,
   layoutEditing,
   active,
 }: {
@@ -96,6 +110,7 @@ export default function Sidebar({
   onOpenOnline?: () => void
   onOpenLayout?: () => void
   onOpenLibrary?: () => void
+  onOpenQueue?: () => void
   /** 布局编辑是个模式而不是面板，选中态单独给 */
   layoutEditing?: boolean
   /** 当前打开的面板，用来给对应按钮加选中态 */
@@ -113,6 +128,7 @@ export default function Sidebar({
     layout: onOpenLayout,
     mix: onOpenMix,
     library: onOpenLibrary,
+    queue: onOpenQueue,
   }
 
   return (

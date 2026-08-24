@@ -93,6 +93,11 @@ type PlayerState = {
   activeOnlineQuality: OnlineQuality | null
   qualityStatus: "idle" | "switching" | "error"
   qualityError: string | null
+  /**
+   * 换片动效的信号。每换一首**并且真的开始出声**时 +1，界面据此放一次唱片淡入。
+   * 是个计数器而不是布尔量，因为界面要的是"又发生了一次"，而不是"现在正在放"。
+   */
+  cue: number
 
   current(): Track | null
   init(): Promise<void>
@@ -102,6 +107,8 @@ type PlayerState = {
   playNext(track: Track): void
   appendToQueue(tracks: Track[]): void
   removeFromQueue(i: number): void
+  /** 队列内挪位置。`index` 会跟着走，**盯的是同一首歌**而不是同一个下标。 */
+  moveInQueue(from: number, to: number): void
   clearQueue(): void
   /**
    * 从曲库重新取一遍队列里的可变字段（歌词、收藏）。
@@ -355,10 +362,64 @@ let consecutiveErrors = 0
  * 把人家刚选的歌跳掉。连续失败还能叠出好几个，一次跳好几首。
  */
 let retryTimer = 0
-/** 播放请求代际：只有最后一次用户选择有权开声、写元数据或安排失败重试。 */
+/**
+ * **发声权**代际：只有最后一次用户操作有权开声、报错或安排失败重试。
+ *
+ * 暂停也会推进它 —— 加载中按暂停，晚回来的那份字节绝不能自己开声（这正是
+ * "连点几首再暂停，软件自己响起来并一首几秒地乱跳" 那个 bug 的根）。
+ */
 let playSeq = 0
+/**
+ * **当前曲目**代际：只在真的换歌时推进，暂停不推进。
+ *
+ * 歌词、封面、响度这三样补齐是慢的（在线的要等平台接口），而它们的有效性只取决于
+ * "还是不是这首歌"，跟"现在是放着还是停着"无关。早先这三样也挂在 playSeq 上，
+ * 于是起播后一两秒内按一下暂停，它们就被永久作废、恢复播放也不会重取。
+ */
+let trackSeq = 0
 /** 音质切换代际：连续点多个档位时只允许最后一次换入音频。 */
 let qualitySeq = 0
+
+/**
+ * 引擎里**当前真正挂着**的是哪一首。载入失败时为 null。
+ *
+ * 早先 toggle() 拿 `engine.duration` 是否为 0 来判断"这一首载入过没有"，那是把
+ * "引擎里有音频"当成了"引擎里有 index 指向的那首"。两者在载入失败时会脱钩：
+ * playAt 先把 index 改成新歌（界面随即显示新歌名），载入失败后引擎里仍是上一首
+ * 稳定载入的音频，duration 非 0 —— 于是按播放键放回的是上一首，而歌名显示的是
+ * 新那首。音源挂掉时每首都失败，这个 bug 就变成了"永远只播第一首"。
+ */
+let loadedTrackId: string | null = null
+
+/**
+ * 上一次放过换片动效的是哪一首。**动效的节流全靠它 + playSeq，没有别的定时器。**
+ *
+ * 用户短时间内连点五首歌，会发起五次 playAt，但前四次都在 `mine !== playSeq` 那道
+ * 关卡上原地返回（旧的载入还被 AbortController 掐掉了），根本走不到下面记 cue 的
+ * 那一行 —— 所以连点多少次，动效都只放最后活下来的那一次。这比"两秒内不重复播"
+ * 那类去抖好，因为它不需要猜多快算快：**动效跟着"哪一首真的出声了"走**。
+ *
+ * 记 id 而不是只记次数，是为了把这几件事挡在外面：切音质（playAt 同一首重跑一遍）、
+ * 单曲循环、暂停后继续。它们都不是换片，唱片没离开过唱盘。
+ */
+let cuedTrackId: string | null = null
+
+/**
+ * 连播三首都失败时给用户看的那句话。
+ *
+ * 早先统一是"连续多首无法播放，已停止" —— 说了等于没说：用户分不清是音源服务端
+ * 不给地址、还是本地文件被挪走了，这两件事的处理方式完全不同（前者改代码没用，
+ * 等服务端或换音源；后者去找文件）。在线曲目失败时 resolvePlayUrl 抛的错里已经
+ * 带着每个平台的失败原因，截一段带出来，至少能看出是哪一类。
+ */
+function stopReason(track: Track, error: unknown): string {
+  if (track.origin.kind !== "online") {
+    return "连续多首本地文件无法播放，已停止。文件可能被移动或删除了"
+  }
+  const detail = error instanceof Error ? error.message : ""
+  const head = "连续多首在线歌曲拿不到播放地址，已停止。多为音源服务端的问题，与本机设置无关"
+  return detail ? `${head}（${detail.slice(0, 120)}）` : head
+}
 
 /** 取消待触发的失败重试。用户自己动了播放，就不该再自动跳。 */
 function cancelRetry(): void {
@@ -473,6 +534,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
     activeOnlineQuality: null,
     qualityStatus: "idle",
     qualityError: null,
+    cue: 0,
 
     current() {
       const { queue, index } = get()
@@ -573,10 +635,14 @@ export const usePlayer = create<PlayerState>((set, get) => {
       if (i < 0 || i >= queue.length) return
       const track = queue[i]
       const mine = ++playSeq
+      // 换歌才作废元数据补齐；同一首歌上的暂停/继续不该把在途的歌词封面丢掉
+      const mineTrack = ++trackSeq
       qualitySeq++
       cancelRetry()
       // 先停旧声音，再更新界面；加载期间绝不能还放着上一首。
       engine.pause()
+      // 从这一刻起引擎里那首就不作数了：界面已经指向新歌，旧音频不该再被当成"已载入"
+      loadedTrackId = null
       const onlineQuality = qualityForTrack(track, get().onlineQuality)
       set({
         index: i,
@@ -609,18 +675,24 @@ export const usePlayer = create<PlayerState>((set, get) => {
         }
         if (mine !== playSeq) return
         consecutiveErrors = 0
+        loadedTrackId = track.id
         await engine.play()
         if (mine !== playSeq) return
+        // 走到这里意味着：这次 playAt 没被后面的操作顶掉，且声音已经出来了。
+        // 换片动效只认这一刻 —— 理由见 cuedTrackId 上面那段
+        const changedTrack = cuedTrackId !== track.id
+        cuedTrackId = track.id
         set({
           activeOnlineQuality: ref ? null : onlineQuality,
           qualityStatus: "idle",
           qualityError: null,
+          cue: changedTrack ? get().cue + 1 : get().cue,
         })
         save()
 
         // 响度对齐。标签命中是同步的，测量那条要解码整首歌，所以不 await ——
         // 声音先出来，量完再用斜坡滑过去
-        void applyTrackGain(track, bytes, () => mine === playSeq && get().index === i)
+        void applyTrackGain(track, bytes, () => mineTrack === trackSeq && get().index === i)
 
         // 把下一首提前拿到手上（F1.6）。延后一点点开始，别和刚起播时的封面歌词抢
         schedulePrefetch()
@@ -633,7 +705,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
             lib.ensureLyrics(track.id).catch(() => null),
             lib.ensureCover(track.id, bytes).catch(() => null),
           ]).then(([lrc, cover]) => {
-            if (mine !== playSeq || get().index !== i) return
+            if (mineTrack !== trackSeq || get().index !== i) return
             if (lrc || cover) get().refreshQueueMeta()
             // 封面要等解出来、落盘之后才报给系统媒体面板，否则任务栏那格是空的
             if (cover?.path) {
@@ -652,7 +724,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
           // 在线曲目的歌词与封面来自平台接口，和本地那条路完全不同
           void fillOnlineMeta(
             track,
-            () => mine === playSeq && get().index === i,
+            () => mineTrack === trackSeq && get().index === i,
             () => get().refreshQueueMeta(),
           )
         }
@@ -679,7 +751,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
         // 连续 3 首失败则停止，避免整个列表都坏时无限跳转
         if (++consecutiveErrors >= 3) {
           consecutiveErrors = 0
-          set({ status: "error", error: "连续多首无法播放，已停止" })
+          set({ status: "error", error: stopReason(track, error) })
           return
         }
         retryTimer = window.setTimeout(() => {
@@ -711,19 +783,68 @@ export const usePlayer = create<PlayerState>((set, get) => {
       })
     },
 
+    /**
+     * 从队列里删一条。
+     *
+     * 删到**正在放的那一首**头上时不能只挪下标 —— 引擎里挂着的还是它，
+     * 声音会继续放一首已经不在队列里的歌，而界面已经指向别人了（和 loadedTrackId
+     * 那个 bug 是同一类）。所以这里分三种情况收尾：删空了就停，本来在放就接着放
+     * 顶上来的那首，本来暂停就停在新的一首上等用户按播放。
+     */
     removeFromQueue(i) {
+      const before = get()
+      if (i < 0 || i >= before.queue.length) return
+      const removingCurrent = i === before.index
+      const wasPlaying = engine.status === "playing"
+
+      const q = before.queue.filter((_, k) => k !== i)
+      let index = before.index
+      if (i < before.index) index--
+      else if (removingCurrent) index = Math.min(index, q.length - 1)
+
+      if (q.length === 0) {
+        get().clearQueue()
+        return
+      }
+      set({ queue: q, index })
+      // 预取的那首可能正是被删掉的，或者"下一首"换人了
+      dropPrefetch()
+      if (!removingCurrent) {
+        schedulePrefetch()
+        return
+      }
+      // 引擎里那首已经不属于任何一行了
+      engine.pause()
+      loadedTrackId = null
+      if (wasPlaying) void get().playAt(index)
+      else set({ status: engine.status })
+    },
+
+    moveInQueue(from, to) {
       set((s) => {
-        const q = s.queue.filter((_, k) => k !== i)
+        const n = s.queue.length
+        if (from === to || from < 0 || from >= n || to < 0 || to >= n) return s
+        const q = [...s.queue]
+        const [moved] = q.splice(from, 1)
+        q.splice(to, 0, moved)
+        // 下标跟着**歌**走，不是跟着位置走：拖的正好是在放的那首时，index 要跟到新位置；
+        // 拖的是别人时，只有跨过 index 才会把它挤开一格
         let index = s.index
-        if (i < s.index) index--
-        else if (i === s.index) index = Math.min(index, q.length - 1)
+        if (from === s.index) index = to
+        else if (from < s.index && to >= s.index) index--
+        else if (from > s.index && to <= s.index) index++
         return { queue: q, index }
       })
+      dropPrefetch()
+      schedulePrefetch()
     },
 
     clearQueue() {
       get().pause()
       dropPrefetch()
+      // 队列空了，引擎里那首也不再属于任何一行
+      loadedTrackId = null
+      cuedTrackId = null
       set({ queue: [], index: -1 })
     },
 
@@ -755,8 +876,14 @@ export const usePlayer = create<PlayerState>((set, get) => {
         void get().playAt(0)
         return
       }
-      // 队列里选中了曲目但还没真正载入过
-      if (!engine.duration) {
+      /*
+       * 引擎里挂着的**不是**当前选中这一首，就重新载入而不是直接开声。
+       *
+       * 判据必须是"引擎里是哪一首"，不能是 `engine.duration` 是否为 0：后者只说明
+       * 引擎里有音频，不说明那是 index 指向的那首。载入失败时两者会脱钩，于是
+       * 按播放键放回上一首、歌名却显示新那首（音源挂掉时表现为"永远只播第一首"）。
+       */
+      if (loadedTrackId !== queue[index]?.id) {
         void get().playAt(index)
         return
       }
@@ -903,8 +1030,14 @@ export const usePlayer = create<PlayerState>((set, get) => {
         const bytes = await fetchOnlineBytes(track, effective)
         if (mine !== qualitySeq || get().current()?.id !== trackId) return
 
-        // 真正换入前留一份临时回滚副本。下载失败时完全不会走到这里，旧音频继续播放；
-        // 新字节万一解码失败，也能把旧音质放回原进度，而不是突然静音。
+        /*
+         * 真正换入前留一份临时回滚副本。下载失败时完全不会走到这里，旧音频继续播放；
+         * 新字节万一解码失败，也能把旧音质放回原进度，而不是突然静音。
+         *
+         * **代价：这一小段里内存同时压着新旧两份完整音频**，Hi-Res 切换时峰值约为
+         * 单曲体积的两倍（PRD 的播放峰值指标按 524MB 记）。所以副本只在"下载已成功、
+         * 马上要换入"这一刻才取，换入成功后立刻撒手，不让它活到 pushNowPlaying 之后。
+         */
         previousBytes = await engine.copyLoadedBytes()
         if (mine !== qualitySeq || get().current()?.id !== trackId) return
         position = engine.currentTime
@@ -919,6 +1052,9 @@ export const usePlayer = create<PlayerState>((set, get) => {
         engine.setLoop(loop.a, loop.b)
         if (shouldResume) await engine.play()
         if (mine !== qualitySeq || get().current()?.id !== trackId) return
+
+        // 新音质已经稳定发声，回滚副本再无用处：立刻撒手，别让它多活一次事件循环
+        previousBytes = null
 
         set({
           activeOnlineQuality: effective,

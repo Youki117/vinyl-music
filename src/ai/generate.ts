@@ -14,9 +14,13 @@ import { buildLyricDigest, composeImagePrompt, SYSTEM_PROMPT, type PromptSource 
  */
 
 export type GenerateResult = {
-  scene: string
+  /** 文本模型给出的画面描述；直接用用户提示词时为 null */
+  scene: string | null
+  /** 真正送给生图模型的完整提示词（含风格后缀） */
   prompt: string
   ref: FileRef
+  /** 图片字节。调用方拿它现做缩略图，省一次回头读盘 */
+  bytes: Uint8Array
 }
 
 export type Progress = (stage: "text" | "image" | "saving") => void
@@ -48,6 +52,40 @@ async function postJson(
   }
 }
 
+/**
+ * 给文本模型的输出预算。
+ *
+ * 系统提示里要的是 80 字以内，本来 300 绰绰有余。给到 1000 是为了推理模型：
+ * 它们的思考过程也从这个额度里扣，300 常常在推理阶段就被吃光，`content` 返回
+ * 空串、finish_reason 是 length —— 那正是"文本模型没有返回内容"的最常见来源。
+ */
+const TEXT_MAX_TOKENS = 1000
+
+/**
+ * 空回复到底是哪一种。
+ *
+ * 早先这三种情况被压成同一句"文本模型没有返回内容"，用户看不出该去改模型名、
+ * 改额度还是改歌 —— 而这三条的处理方式完全不同。
+ */
+function explainEmptyScene(choice: TextChoice | undefined): string {
+  const reason = choice?.finish_reason
+  if (choice?.message?.reasoning_content?.trim()) {
+    return `模型只输出了推理过程、没有给出正文（finish_reason=${reason ?? "未知"}）。这类推理模型的思考也占输出额度，请换成对话模型（如 deepseek-chat）再试`
+  }
+  if (reason === "length") {
+    return `输出在写完之前就被截断了（finish_reason=length）。若填的是推理模型，请换成对话模型（如 deepseek-chat）`
+  }
+  if (reason === "content_filter") {
+    return "这首歌的歌词被服务端内容审核拦下了，换一首或关掉自动生成"
+  }
+  return `文本模型返回了空内容（finish_reason=${reason ?? "未知"}），请检查模型名是否填对`
+}
+
+type TextChoice = {
+  finish_reason?: string
+  message?: { content?: string; reasoning_content?: string }
+}
+
 /** 第一步：让文本模型把歌词总结成一句画面描述。 */
 export async function describeScene(
   cfg: AiConfig,
@@ -65,13 +103,14 @@ export async function describeScene(
         { role: "user", content: buildLyricDigest(src) },
       ],
       temperature: 0.9,
-      max_tokens: 300,
+      max_tokens: TEXT_MAX_TOKENS,
     },
     signal,
-  )) as { choices?: Array<{ message?: { content?: string } }> }
+  )) as { choices?: TextChoice[] }
 
-  const scene = data.choices?.[0]?.message?.content?.trim()
-  if (!scene) throw new Error("文本模型没有返回内容")
+  const choice = data.choices?.[0]
+  const scene = choice?.message?.content?.trim()
+  if (!scene) throw new Error(explainEmptyScene(choice))
   return scene
 }
 
@@ -109,11 +148,11 @@ export async function renderImage(
   throw new Error("返回里既没有 b64_json 也没有 url")
 }
 
-/** 完整流程。调用方负责判断配置是否齐全。 */
+/** 完整流程：歌词 → 画面描述 → 出图。调用方负责判断配置是否齐全。 */
 export async function generateArtwork(
   cfg: AiConfig,
   src: PromptSource,
-  trackId: string,
+  key: string,
   onProgress?: Progress,
   signal?: AbortSignal,
 ): Promise<GenerateResult> {
@@ -122,11 +161,39 @@ export async function generateArtwork(
 
   onProgress?.("image")
   const prompt = composeImagePrompt(scene, cfg.styleSuffix)
-  const bytes = await renderImage(cfg, prompt, signal)
+  return { scene, ...(await renderAndSave(cfg, prompt, key, onProgress, signal)) }
+}
 
+/**
+ * 跳过文本模型，直接拿用户写的提示词出图。
+ *
+ * 少一次调用就少一笔钱，而且用户自己写的话本来就不需要"把歌词转成画面"这一步。
+ * 风格后缀照样拼上 —— 左侧留白那条是硬要求（画面左侧要压蒙版），不是审美偏好。
+ */
+export async function generateFromPrompt(
+  cfg: AiConfig,
+  userPrompt: string,
+  key: string,
+  onProgress?: Progress,
+  signal?: AbortSignal,
+): Promise<GenerateResult> {
+  onProgress?.("image")
+  const prompt = composeImagePrompt(userPrompt, cfg.styleSuffix)
+  return { scene: null, ...(await renderAndSave(cfg, prompt, key, onProgress, signal)) }
+}
+
+async function renderAndSave(
+  cfg: AiConfig,
+  prompt: string,
+  key: string,
+  onProgress?: Progress,
+  signal?: AbortSignal,
+): Promise<{ prompt: string; ref: FileRef; bytes: Uint8Array }> {
+  const bytes = await renderImage(cfg, prompt, signal)
   onProgress?.("saving")
-  const ref = await platform.saveImage(`ai-${hash(trackId)}.png`, bytes)
-  return { scene, prompt, ref }
+  // 文件名带 key 的哈希：同一首歌可以生成多张，名字不能互相覆盖
+  const ref = await platform.saveImage(`ai-${hash(key)}.png`, bytes)
+  return { prompt, ref, bytes }
 }
 
 function base64ToBytes(b64: string): Uint8Array {

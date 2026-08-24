@@ -1,3 +1,5 @@
+import { useMemo } from "react"
+
 import { formatTime } from "@/lib/format"
 import { useLibrary } from "@/store/library"
 import { SOURCES, useOnline, type SourceId } from "@/store/online"
@@ -27,7 +29,8 @@ export default function PlaylistImport({ onImported }: { onImported: (result: Im
   const currentId = usePlayer((s) => s.current()?.id ?? null)
   const playFrom = usePlayer((s) => s.playFrom)
 
-  const inLibrary = new Set(libTracks.map((track) => track.id))
+  // 曲库上千首时，这个 Set 每次重渲染都重建一遍就是每次按键都扫一遍全库
+  const inLibrary = useMemo(() => new Set(libTracks.map((track) => track.id)), [libTracks])
 
   const playPreview = (index = 0) => {
     if (!preview || preview.tracks.length === 0) return
@@ -46,6 +49,7 @@ export default function PlaylistImport({ onImported }: { onImported: (result: Im
       <section className="panel-section playlist-import-form">
         <div className="online-bar">
           <input
+            autoComplete="off"
             value={listInput}
             autoFocus
             onChange={(event) => setListInput(event.target.value)}
@@ -102,7 +106,15 @@ export default function PlaylistImport({ onImported }: { onImported: (result: Im
             <button
               className="row"
               onDoubleClick={() => playPreview(index)}
-              data-tooltip="双击从这里播放整张歌单"
+              // 焦点能走到这一行，回车就得能播 —— 详见 Playlist.tsx 同一处的说明
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return
+                event.preventDefault()
+                playPreview(index)
+              }}
+              // 用 title 而不是 data-tooltip：后者只有 .titlebar button 和 .source-status-dot
+              // 写了 ::after 承接，挂在曲目行上是个不显示任何东西的死属性
+              title="双击或回车从这里播放整张歌单"
             >
               <span className="song-index">{String(index + 1).padStart(2, "0")}</span>
               <b>{track.title}</b>

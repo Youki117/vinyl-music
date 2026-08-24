@@ -228,16 +228,37 @@ class Engine {
   }
 
   // ── 均衡器 ────────────────────────────────────────────────
+  private eqListeners = new Set<(eq: { enabled: boolean; gains: number[] }) => void>()
+
+  private emitEq(): void {
+    for (const fn of this.eqListeners) fn({ enabled: this._eqEnabled, gains: [...this._eqGains] })
+  }
+
+  /**
+   * 订阅均衡器状态，**订阅时立刻回调一次当前值**（与 onLoopChange 同一套写法）。
+   *
+   * 面板是常驻挂载的，而存盘的 EQ 要等 player.init() 读完盘才写回引擎 —— 面板挂载
+   * 那一刻取的快照必然是全 0。只订阅"变化"不够，必须连当前值一起给：否则面板显示
+   * 全 0，用户一拖滑块就用这份全 0 覆盖掉存盘的整条曲线。
+   */
+  onEqChange(fn: (eq: { enabled: boolean; gains: number[] }) => void): () => void {
+    this.eqListeners.add(fn)
+    fn({ enabled: this._eqEnabled, gains: [...this._eqGains] })
+    return () => this.eqListeners.delete(fn)
+  }
+
   setEqEnabled(on: boolean): void {
     this._eqEnabled = on
     this.ensureGraph()
     this.eq?.setEnabled(on)
+    this.emitEq()
   }
 
   setEqGains(gains: number[]): void {
     this._eqGains = [...gains]
     this.ensureGraph()
     this.eq?.setGains(gains)
+    this.emitEq()
   }
 
   get eqEnabled(): boolean {
@@ -285,6 +306,17 @@ class Engine {
       }
     }, minutes * 60_000)
     this.emitSleep()
+  }
+
+  /**
+   * 只改"到点后等当前曲目播完"这个开关，**不动倒计时**。
+   *
+   * 上面那个定时器回调是在触发那一刻才读 sleepAfterTrack 的，所以在这里改就够了。
+   * 不能拿 setSleepTimer 重设一遍来实现：那会把已经跑掉的时间一起抹掉 ——
+   * 剩 12 分钟的定时器会当场跳回 30 分钟。
+   */
+  setSleepAfterTrack(on: boolean): void {
+    this.sleepAfterTrack = on
   }
 
   /** 曲目结束时由 store 询问：是否该停在这里。 */

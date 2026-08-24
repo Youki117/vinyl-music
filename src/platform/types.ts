@@ -126,6 +126,15 @@ export interface Platform {
   saveImage(name: string, bytes: Uint8Array): Promise<FileRef>
 
   /**
+   * 列出 saveImage 写出去的文件，按文件名前缀筛。
+   *
+   * 存在的理由只有一个：账本与磁盘会对不上。图片先落盘、账本走防抖，中间崩一次
+   * 就留下一个谁也不认识的文件。没有这个方法，面板上那句"已用 320MB"就只是
+   * 账本的自述，不是磁盘的实情。
+   */
+  listImages(prefix: string): Promise<FileRef[]>
+
+  /**
    * 删除应用自己写出去的文件（封面副本、AI 生成图）。
    * **只用于应用数据目录内的文件**，不碰用户的音乐库。
    */
@@ -154,6 +163,16 @@ export interface WindowControls {
   close(): Promise<void>
   setFullscreen(on: boolean): Promise<void>
   isFullscreen(): Promise<boolean>
+  /**
+   * 迷你模式的**全部**窗口动作，一次做完：尺寸、可否缩放、置顶、最小尺寸下限。
+   *
+   * 刻意做成一个方法而不是暴露四个原语 —— 这四件事必须一起变，顺序也讲究
+   * （先放开最小尺寸下限才缩得下去）。拆开给上层，上层迟早会漏掉一个。
+   *
+   * `setMini(false)` 是**幂等**的，可以在启动时无条件调一次：窗口状态插件会把
+   * 上次退出时的尺寸恢复回来，万一上次是在迷你模式里退的，这一下就把它救回来。
+   */
+  setMini(on: boolean): Promise<void>
 }
 
 /** 受支持的音频扩展名，不含点号，全小写。 */

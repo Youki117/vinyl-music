@@ -3,7 +3,7 @@ import { create } from "zustand"
 import { isLyricFile, platform, type FileRef } from "@/platform"
 import { readCover, readMetadataLazy } from "@/audio/metadata"
 import { formatM3u, matchByName, parseM3u } from "@/lib/m3u"
-import { baseName, stripExt } from "@/lib/text"
+import { baseName, cleanTitle, stripExt } from "@/lib/text"
 
 /**
  * 曲目从哪来。**判别联合而不是可空字段**，是为了让类型逼着每个调用点表态 ——
@@ -233,7 +233,10 @@ type LibraryState = {
   markMissing(id: string): void
 
   setView(v: ViewId): void
+  /** 换排序字段。方向不变，切方向走 toggleSortDesc */
   setSort(k: SortKey): void
+  /** 升序 ⇄ 降序，排序字段不变 */
+  toggleSortDesc(): void
   setFilter(q: string): void
 
   createPlaylist(name: string): string
@@ -343,6 +346,9 @@ export const useLibrary = create<LibraryState>((set, get) => {
         const legacy = t as typeof t & { ref?: FileRef }
         return {
           ...t,
+          // 老曲库里的歌名也洗一遍：只在入库那一侧洗的话，加规则之前存进来的曲目
+          // 会永远保留旧写法，同一个库里两种写法并存
+          title: cleanTitle(t.title),
           origin: t.origin ?? (legacy.ref ? { kind: "local", ref: legacy.ref } : t.origin),
           addedAt: t.addedAt ?? i,
           lastPlayed: t.lastPlayed ?? 0,
@@ -512,9 +518,22 @@ export const useLibrary = create<LibraryState>((set, get) => {
       save()
     },
 
+    /**
+     * 只负责换排序字段，不碰方向。
+     *
+     * 早先这里兼着"再点同一列切换升降序"——那是**表头**的惯例，而现在的界面是
+     * 一个下拉菜单加一个独立的方向按钮。在下拉里点中已经选中的那一项，用户预期
+     * 是"确认"，实际却把列表整个倒过来。方向归 toggleSortDesc 管。
+     */
     setSort(k) {
-      // 再点同一列切换升降序，与主流列表一致
-      set((s) => (s.sort === k ? { sortDesc: !s.sortDesc } : { sort: k, sortDesc: false }))
+      if (get().sort === k) return
+      set({ sort: k, sortDesc: false })
+      save()
+    },
+
+    /** 升序 ⇄ 降序。排序字段不变 */
+    toggleSortDesc() {
+      set((s) => ({ sortDesc: !s.sortDesc }))
       save()
     },
 

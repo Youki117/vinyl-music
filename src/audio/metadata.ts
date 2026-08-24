@@ -1,6 +1,7 @@
 import { parseBlob, parseFromTokenizer, type IAudioMetadata } from "music-metadata"
 
 import type { FileRef } from "@/platform"
+import { cleanTitle } from "@/lib/text"
 import { parseGainTag } from "./loudness"
 import { SliceTokenizer, type SliceReader } from "./sliceTokenizer"
 
@@ -199,7 +200,7 @@ export async function readCover(
  */
 function fallbackMeta(ref: FileRef): TrackMeta {
   return {
-    title: stripExt(ref.name),
+    title: cleanTitle(stripExt(ref.name)),
     artist: "未知艺术家",
     album: "",
     duration: 0,
@@ -240,7 +241,7 @@ function buildMeta(ref: FileRef, meta: IAudioMetadata, wav: WavInfo): TrackMeta 
   const gainPeak = typeof peakRatio === "number" && peakRatio > 0 ? peakRatio : null
 
   return {
-    title: pick(wav.title, common.title, fallback.title),
+    title: cleanTitle(pick(wav.title, common.title, fallback.title)),
     artist: pick(wav.artist, common.artist, fallback.artist),
     album: pick(wav.album, common.album, ""),
     duration: meta.format.duration ?? 0,

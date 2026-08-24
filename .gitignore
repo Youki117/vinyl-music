@@ -30,3 +30,12 @@ src/source/builtin/UPSTREAM.md
 # 设计参考（录屏裁切、Figma 导出包）只在本地做视觉对拍用，不随仓库分发。
 # 缺了它只影响 npm run visual，构建与运行都不受影响。
 design-ref/
+
+# 以下几项在 docs/UI-REFINEMENT-BASELINE-2026-08-21.md §4 已约定不入库，
+# 之前只靠人记着不要 git add -A，这里补上强制。
+# target-* 覆盖用 CARGO_TARGET_DIR 指出去的隔离构建目录（如 target-final-ui）。
+src-tauri/target-*/
+artifacts/
+release-test/
+assets/
+目标效果.html

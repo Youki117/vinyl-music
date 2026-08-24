@@ -10,13 +10,14 @@ import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 import { appDataDir } from "@tauri-apps/api/path"
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http"
-import { getCurrentWindow } from "@tauri-apps/api/window"
+import { LogicalSize, getCurrentWindow } from "@tauri-apps/api/window"
 import { getCurrentWebview } from "@tauri-apps/api/webview"
 import { open, save } from "@tauri-apps/plugin-dialog"
 import {
   BaseDirectory,
   exists,
   mkdir,
+  readDir,
   readFile as fsReadFile,
   readTextFile,
   remove,
@@ -74,14 +75,69 @@ async function ensureCacheDir(): Promise<void> {
   }
 }
 
+/*
+ * 迷你模式的窗口尺寸，以及正常模式的下限。
+ *
+ * 下限那两个数要和 tauri.conf.json 的 minWidth/minHeight、src-tauri/src/aspect.rs 的
+ * MIN_W/MIN_H 对得上 —— 三处是同一件事，改一处要一起改。
+ */
+const MINI_W = 380
+const MINI_H = 104
+const NORMAL_MIN_W = 780
+const NORMAL_MIN_H = 432
+/** 没有保存过尺寸时退回这个，与 tauri.conf.json 的 width/height 一致 */
+const DEFAULT_W = 1280
+const DEFAULT_H = 708
+
 function makeWindowControls(): WindowControls {
   const w = getCurrentWindow()
+  /** 缩进迷你模式之前的正常尺寸。只在本次运行内有效，退出不留。 */
+  let normal: { width: number; height: number } | null = null
+
   return {
     minimize: () => w.minimize(),
     toggleMaximize: () => w.toggleMaximize(),
     close: () => w.close(),
     setFullscreen: (on) => w.setFullscreen(on),
     isFullscreen: () => w.isFullscreen(),
+
+    async setMini(on) {
+      if (on) {
+        /*
+         * 顺序有讲究：**先放开最小尺寸下限，再缩**。反过来的话 setSize 会被
+         * 下限挡住，窗口纹丝不动，而且不报错 —— 排查起来很费劲。
+         *
+         * 缩完设 resizable(false)，顺带把 aspect.rs 那把比例锁绕开了：它挂在
+         * WM_SIZING 上，而不可缩放的窗口根本不会收到这条消息。所以迷你模式
+         * 不需要动 Rust 那一侧。
+         */
+        if (await w.isFullscreen()) await w.setFullscreen(false)
+        const size = await w.outerSize()
+        const scale = await w.scaleFactor()
+        const logical = size.toLogical(scale)
+        // 已经是迷你尺寸了（多半是上次在迷你模式里退出、窗口状态插件又恢复了它），
+        // 那这份就不能当"正常尺寸"记下来
+        if (logical.width >= NORMAL_MIN_W) normal = { width: logical.width, height: logical.height }
+        await w.setMinSize(new LogicalSize(MINI_W, MINI_H))
+        await w.setSize(new LogicalSize(MINI_W, MINI_H))
+        await w.setResizable(false)
+        await w.setAlwaysOnTop(true)
+        return
+      }
+
+      await w.setAlwaysOnTop(false)
+      await w.setResizable(true)
+      await w.setMinSize(new LogicalSize(NORMAL_MIN_W, NORMAL_MIN_H))
+      // 只有窗口确实还缩着才动它的尺寸 —— 启动时无条件调一次 setMini(false)，
+      // 不能顺手把用户上次调好的正常尺寸抹掉
+      const size = (await w.outerSize()).toLogical(await w.scaleFactor())
+      if (size.width < NORMAL_MIN_W || size.height < NORMAL_MIN_H) {
+        const back = normal ?? { width: DEFAULT_W, height: DEFAULT_H }
+        await w.setSize(new LogicalSize(back.width, back.height))
+        await w.center()
+      }
+      normal = null
+    },
   }
 }
 
@@ -202,6 +258,25 @@ export function create(): Platform {
 
     async ensureReadable(paths) {
       await grantPaths(paths)
+    },
+
+    async listImages(prefix) {
+      if (!(await exists(SKIN_DIR, { baseDir: BaseDirectory.AppData }))) return []
+      const root = await appDataDir()
+      const entries = await readDir(SKIN_DIR, { baseDir: BaseDirectory.AppData })
+      const out: FileRef[] = []
+      for (const entry of entries) {
+        if (!entry.isFile || !entry.name.startsWith(prefix)) continue
+        // 和 saveImage 拼绝对路径的方式保持一致，否则账本里的 path 对不上
+        const abs = `${root}\\${SKIN_DIR}/${entry.name}`.replace(/\//g, "\\")
+        try {
+          const info = await stat(abs)
+          out.push({ id: abs, name: entry.name, size: info.size, mtime: info.mtime?.getTime() ?? 0 })
+        } catch {
+          // 刚被别处删掉了，跳过就是
+        }
+      }
+      return out
     },
 
     async removeFile(path) {

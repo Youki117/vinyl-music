@@ -21,9 +21,11 @@ export type AiConfig = {
   imageModel: string
   imageSize: string
 
-  /** 切歌后自动为没有配图的曲目生成 */
-  auto: boolean
-  /** 追加到提示词末尾的固定风格描述 */
+  /**
+   * 追加到提示词末尾的固定风格描述。
+   *
+   * 自定义提示词那条路也会拼上它 —— 「主体偏右、左侧留白」是硬要求，不是审美偏好。
+   */
   styleSuffix: string
 }
 
@@ -45,7 +47,6 @@ export const DEFAULT_AI: AiConfig = {
   imageApiKey: "",
   imageModel: "",
   imageSize: "1792x1024",
-  auto: false,
   styleSuffix: DEFAULT_STYLE_SUFFIX,
 }
 
@@ -66,4 +67,33 @@ export function isConfigured(cfg: AiConfig): boolean {
   const t = resolveTextEndpoint(cfg)
   const i = resolveImageEndpoint(cfg)
   return Boolean(cfg.enabled && t.baseUrl && t.apiKey && cfg.textModel && i.baseUrl && cfg.imageModel)
+}
+
+/** 只提供对话接口、没有 /images/generations 的服务商 */
+const TEXT_ONLY_HOSTS = [/(^|\.)deepseek\.com$/i, /(^|\.)moonshot\.cn$/i, /(^|\.)anthropic\.com$/i]
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return ""
+  }
+}
+
+/**
+ * 配置填得通、但注定跑不完的组合。
+ *
+ * 最常撞的一种：只填了文本接口，而图像接口留空会回落到文本那套
+ * （见 resolveImageEndpoint）—— 于是把 /images/generations 发给一个根本没有
+ * 生图能力的服务商，必然 404。这事等生成到第二步才报错太晚了：第一步的文本
+ * 调用已经花掉了钱。
+ */
+export function configWarning(cfg: AiConfig): string | null {
+  if (!cfg.enabled) return null
+
+  const imageHost = hostOf(resolveImageEndpoint(cfg).baseUrl)
+  if (imageHost && TEXT_ONLY_HOSTS.some((re) => re.test(imageHost))) {
+    return `${imageHost} 只提供对话接口，没有生图接口。请在下面单独填一个支持 /images/generations 的图像接口地址，否则生成会在第二步失败`
+  }
+  return null
 }

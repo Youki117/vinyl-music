@@ -73,6 +73,8 @@ const windowControls: WindowControls = {
   async isFullscreen() {
     return document.fullscreenElement !== null
   },
+  // 浏览器里没有窗口可以缩，界面照样会切成迷你版式
+  async setMini() {},
 }
 
 export function create(): Platform {
@@ -150,6 +152,11 @@ export function create(): Platform {
 
     async ensureReadable() {
       // 浏览器没有能力域这回事
+    },
+
+    async listImages() {
+      // 浏览器下 saveImage 只造了个内存里的 File，磁盘上没有可列的东西
+      return []
     },
 
     async removeFile() {

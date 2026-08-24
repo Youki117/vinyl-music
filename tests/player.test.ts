@@ -62,13 +62,14 @@ vi.mock("@/audio/engine", () => ({
   isAudioLoadCancelled: (error: unknown) =>
     error instanceof Error && error.name === "AbortError",
 }))
+const updateNowPlaying = vi.fn(async (_info: unknown, _reason?: string) => {})
 vi.mock("@/platform", () => ({
   platform: {
     writeConfig,
     readConfig: vi.fn(async () => null),
     readFile: vi.fn(async () => new Uint8Array([1])),
     readSlice: vi.fn(async () => new Uint8Array([1])),
-    updateNowPlaying: vi.fn(async () => {}),
+    updateNowPlaying,
     ensureReadable: vi.fn(async () => {}),
   },
 }))
@@ -82,6 +83,9 @@ vi.mock("@/source/boot", () => ({
 }))
 
 const markMissing = vi.fn()
+// 提到模块级而不是每次 getState() 现造：用例要跨调用观察它们有没有被调用过
+const ensureLyrics = vi.fn(async (_id: string): Promise<string | null> => null)
+const ensureCover = vi.fn(async (_id: string, _bytes?: unknown): Promise<{ path: string } | null> => null)
 vi.mock("@/store/library", () => ({
   localRef: (t: Track) =>
     t.origin.kind === "local" ? { id: t.id, name: t.id, size: 1, mtime: 0 } : null,
@@ -89,8 +93,10 @@ vi.mock("@/store/library", () => ({
     getState: () => ({
       markMissing,
       addTracks: vi.fn(),
-      ensureLyrics: vi.fn(async () => null),
-      ensureCover: vi.fn(async () => null),
+      ensureLyrics,
+      ensureCover,
+      // refreshQueueMeta 会走 byId；补齐歌词封面的用例要跑到它，缺了会 TypeError
+      byId: () => null,
     }),
   },
 }))
@@ -158,6 +164,11 @@ beforeEach(() => {
   resolvePlayUrl.mockClear()
   resolvePlayUrl.mockImplementation(async () => ({ url: "https://example.test/audio" }))
   markMissing.mockClear()
+  updateNowPlaying.mockClear()
+  ensureLyrics.mockClear()
+  ensureLyrics.mockImplementation(async () => null)
+  ensureCover.mockClear()
+  ensureCover.mockImplementation(async () => null)
   engine.eqEnabled = false
   engine.eqGains = [0, 0, 0]
   engine.status = "paused"
@@ -350,6 +361,58 @@ describe("播放失败后的自动跳转", () => {
   })
 })
 
+/*
+ * 音源挂掉时的现场故障：只播得出第一首。
+ *
+ * 双击切歌 → 新歌载入失败 → 按播放键，放回来的却是上一首，而歌名显示的是新那首。
+ * 根因是 toggle() 拿 `engine.duration` 是否为 0 判断"这首载入过没有" —— 那只说明
+ * 引擎里有音频，不说明那是 index 指向的那首。载入失败时 index 已经指向新歌，
+ * 引擎里还是上一首稳定载入的音频，duration 非 0，于是直接 play() 放了旧的。
+ */
+describe("载入失败后不能放回上一首", () => {
+  it("新歌载入失败后按播放，重新载入新歌而不是播旧歌", async () => {
+    // 第一首正常播上
+    await usePlayer.getState().playAt(0)
+    expect(engine.play).toHaveBeenCalledTimes(1)
+    engine.duration = 123 // 引擎里挂着第一首，duration 非 0
+
+    // 切到第二首，载入失败
+    engine.load.mockRejectedValueOnce(new Error("解析播放地址失败"))
+    await usePlayer.getState().playAt(1)
+    expect(usePlayer.getState().index, "界面已经指向第二首").toBe(1)
+
+    engine.play.mockClear()
+    engine.load.mockClear()
+    engine.load.mockResolvedValue(new Uint8Array([1]))
+
+    // 用户按播放
+    usePlayer.getState().toggle()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(engine.load, "没有重新载入第二首，直接拿引擎里的旧音频开声了").toHaveBeenCalled()
+    expect(usePlayer.getState().index, "播放位置漂回了上一首").toBe(1)
+    engine.duration = 0
+  })
+
+  it("同一首歌暂停再播放，不该重新载入", async () => {
+    await usePlayer.getState().playAt(0)
+    engine.duration = 123
+    engine.status = "playing"
+
+    usePlayer.getState().toggle() // 暂停
+    engine.status = "paused"
+    engine.load.mockClear()
+
+    usePlayer.getState().toggle() // 继续
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(engine.load, "暂停再播放不该重新读一遍文件").not.toHaveBeenCalled()
+    expect(engine.play).toHaveBeenCalled()
+    engine.duration = 0
+    engine.status = "paused"
+  })
+})
+
 describe("快速切歌的异步竞态", () => {
   it("旧请求晚完成也不能抢回播放权", async () => {
     let finishFirst!: (bytes: Uint8Array<ArrayBuffer>) => void
@@ -397,6 +460,84 @@ describe("快速切歌的异步竞态", () => {
     expect(markMissing).not.toHaveBeenCalled()
   })
 
+  /*
+   * v0.1.0 的现场故障，原样复刻：短时间内连点好几首，然后按暂停 —— 软件自己响起来，
+   * 而且一首刚放几秒就跳下一首。根因是那几次点击各自留了一个在途加载，暂停并不作废
+   * 它们，晚回来的挨个调 engine.play()，其中失败的那些还各排了一个 2 秒自动跳转。
+   *
+   * 这条盯死三件事：暂停之后**一次都不准开声**、index 不准漂、不准有孤儿跳转。
+   */
+  it("连点多首后暂停：晚到的加载全部作废，不自动开声也不连环跳歌", async () => {
+    const finishers: Array<(bytes: Uint8Array<ArrayBuffer>) => void> = []
+    engine.load.mockImplementation(
+      () =>
+        new Promise<Uint8Array<ArrayBuffer>>((resolve) => {
+          finishers.push(resolve)
+        }),
+    )
+
+    // 连点三首，每首都还卡在读盘里
+    const first = usePlayer.getState().playAt(0)
+    await Promise.resolve()
+    const second = usePlayer.getState().playAt(1)
+    await Promise.resolve()
+    const third = usePlayer.getState().playAt(2)
+    await Promise.resolve()
+    expect(finishers).toHaveLength(3)
+
+    usePlayer.getState().pause()
+    const parked = usePlayer.getState().index
+
+    // 三份字节这才陆续到齐
+    for (const finish of finishers) finish(new Uint8Array(new ArrayBuffer(1)))
+    await Promise.all([first, second, third])
+
+    expect(engine.play, "暂停之后仍然有人把声音打开了").not.toHaveBeenCalled()
+    expect(markMissing, "被取代的加载被误判成坏文件").not.toHaveBeenCalled()
+
+    // 孤儿重试定时器要是还在，就是在这 2 秒后开始连环跳歌
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(usePlayer.getState().index, "暂停后播放位置仍然自己漂走了").toBe(parked)
+    expect(engine.play).not.toHaveBeenCalled()
+  })
+
+  /*
+   * 与上一条相反的方向：暂停必须掐掉发声，但**不该**把这首歌在途的歌词封面一起作废。
+   * 早先两件事共用一个代际计数，起播后一两秒内按暂停，封面就永远不来了。
+   */
+  it("暂停不影响当前这首在途的封面补齐", async () => {
+    let finishCover!: (v: { path: string }) => void
+    ensureCover.mockImplementationOnce(
+      () => new Promise<{ path: string }>((resolve) => (finishCover = resolve)),
+    )
+
+    await usePlayer.getState().playAt(0)
+    updateNowPlaying.mockClear()
+
+    // 声音刚出来就按了暂停，此时封面还在解
+    usePlayer.getState().pause()
+    finishCover({ path: "C:/cover.jpg" })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(updateNowPlaying, "暂停把在途的封面补齐一起作废了").toHaveBeenCalled()
+  })
+
+  it("换成别的歌之后，上一首在途的封面不准再写回来", async () => {
+    let finishCover!: (v: { path: string }) => void
+    ensureCover.mockImplementationOnce(
+      () => new Promise<{ path: string }>((resolve) => (finishCover = resolve)),
+    )
+
+    await usePlayer.getState().playAt(0)
+    await usePlayer.getState().playAt(1)
+    updateNowPlaying.mockClear()
+
+    finishCover({ path: "C:/stale-cover.jpg" })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(updateNowPlaying, "上一首的封面盖到了新歌头上").not.toHaveBeenCalled()
+  })
+
   it("旧的在线地址解析晚返回时不能取消已经切到的新歌", async () => {
     let finishResolve!: (value: { url: string }) => void
     resolvePlayUrl.mockImplementationOnce(
@@ -418,5 +559,172 @@ describe("快速切歌的异步竞态", () => {
     expect(engine.loadUrl, "旧地址解析结果闯进了音频引擎").not.toHaveBeenCalled()
     expect(engine.play).toHaveBeenCalledTimes(1)
     expect(markMissing).not.toHaveBeenCalled()
+  })
+})
+
+/*
+ * 换片动效的节流。**这里测的是"放几次"，不是"动画长什么样"** ——
+ * 动画本身是 useDiscCue 里的 element.animate()，jsdom 跑不了也不值得跑；
+ * 真正会出错的是"什么时候算换了一首"，那全在 store 里，是纯逻辑。
+ *
+ * 之所以不用定时器去抖：用户连点五首歌时，前四次 playAt 都会在代际关卡上原地返回，
+ * 压根走不到记 cue 的那一行。所以节流是免费的，也不需要猜"多快算快"。
+ */
+describe("换片动效只在真的换了一首时放", () => {
+  it("换一首歌就放一次", async () => {
+    const before = usePlayer.getState().cue
+    await usePlayer.getState().playAt(0)
+    expect(usePlayer.getState().cue).toBe(before + 1)
+    await usePlayer.getState().playAt(1)
+    expect(usePlayer.getState().cue).toBe(before + 2)
+  })
+
+  it("连点多首，只放最后活下来的那一次", async () => {
+    const finishers: Array<(bytes: Uint8Array<ArrayBuffer>) => void> = []
+    engine.load.mockImplementation(
+      () =>
+        new Promise<Uint8Array<ArrayBuffer>>((resolve) => {
+          finishers.push(resolve)
+        }),
+    )
+    const before = usePlayer.getState().cue
+
+    const pending = [0, 1, 2].map((i) => {
+      const p = usePlayer.getState().playAt(i)
+      return p
+    })
+    // 三次都发出去了，字节都还没到
+    for (let i = 0; i < 10 && finishers.length < 3; i++) await Promise.resolve()
+    expect(finishers).toHaveLength(3)
+
+    for (const finish of finishers) finish(new Uint8Array(new ArrayBuffer(1)))
+    await Promise.all(pending)
+
+    expect(usePlayer.getState().cue, "被顶掉的那几次也放了动效").toBe(before + 1)
+    expect(usePlayer.getState().index).toBe(2)
+  })
+
+  it("暂停再播放不放", async () => {
+    await usePlayer.getState().playAt(0)
+    const after = usePlayer.getState().cue
+    engine.duration = 123
+    engine.status = "playing"
+
+    usePlayer.getState().toggle() // 暂停
+    engine.status = "paused"
+    usePlayer.getState().toggle() // 继续
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(usePlayer.getState().cue, "唱片没离开过唱盘，不该重放一次落片").toBe(after)
+    engine.duration = 0
+    engine.status = "paused"
+  })
+
+  it("同一首重跑一遍（切音质走的就是这条路）不放", async () => {
+    await usePlayer.getState().playAt(0)
+    const after = usePlayer.getState().cue
+    await usePlayer.getState().playAt(0)
+    expect(usePlayer.getState().cue).toBe(after)
+  })
+
+  it("载入失败不放 —— 没出声就没有换片这回事", async () => {
+    await usePlayer.getState().playAt(0)
+    const after = usePlayer.getState().cue
+
+    engine.load.mockRejectedValueOnce(new Error("解析播放地址失败"))
+    await usePlayer.getState().playAt(1)
+
+    expect(usePlayer.getState().cue).toBe(after)
+    // 失败会排一个 2 秒后跳下一首的重试，别让它漏进下一个用例
+    usePlayer.getState().pause()
+    await vi.advanceTimersByTimeAsync(5000)
+  })
+})
+
+/*
+ * 队列的增删改。**这几个动作在界面上一直没有入口**（store 里躺着，零调用方），
+ * 队列面板是第一个用它们的地方，所以在接线之前先把语义钉死。
+ *
+ * 两条不变式：
+ *   1. index 盯的是**同一首歌**，不是同一个下标 —— 拖动排序之后正在放的还得是它。
+ *   2. 引擎里挂着的那首必须还在队列里 —— 删到正在放的那首头上时，不能只挪下标就完事，
+ *      否则声音继续放一首已经被删掉的歌，而界面指着另一首（和 loadedTrackId 是同一类 bug）。
+ */
+describe("队列的增删改", () => {
+  it("拖动排序：正在放的那首被拖走，index 跟着它到新位置", () => {
+    usePlayer.setState({ index: 0 })
+    usePlayer.getState().moveInQueue(0, 2)
+    const s = usePlayer.getState()
+    expect(s.index, "index 没跟着歌走").toBe(2)
+    expect(s.queue[2].id, "挪过去的不是原来那首").toBe(`a${round}`)
+  })
+
+  it("拖动排序：别人从当前之前挪到之后，当前那首被挤前一格", () => {
+    usePlayer.setState({ index: 1 })
+    // a b c，把 a 挪到最后 → b c a，正在放的 b 从 1 变 0
+    usePlayer.getState().moveInQueue(0, 2)
+    const s = usePlayer.getState()
+    expect(s.index).toBe(0)
+    expect(s.queue[0].id).toBe(`b${round}`)
+  })
+
+  it("拖动排序：别人从当前之后挪到之前，当前那首被挤后一格", () => {
+    usePlayer.setState({ index: 1 })
+    // a b c，把 c 挪到最前 → c a b，正在放的 b 从 1 变 2
+    usePlayer.getState().moveInQueue(2, 0)
+    const s = usePlayer.getState()
+    expect(s.index).toBe(2)
+    expect(s.queue[2].id).toBe(`b${round}`)
+  })
+
+  it("删掉当前之前的一首，index 前移一格，声音不动", async () => {
+    await usePlayer.getState().playAt(1)
+    engine.play.mockClear()
+    usePlayer.getState().removeFromQueue(0)
+    await vi.advanceTimersByTimeAsync(0)
+    const s = usePlayer.getState()
+    expect(s.index).toBe(0)
+    expect(s.queue[0].id, "指着的不再是原来那首").toBe(`b${round}`)
+    expect(engine.play, "没换歌却重新开了一次声").not.toHaveBeenCalled()
+  })
+
+  it("删掉正在放的那首：接着放顶上来的那一首，而不是继续放已经删掉的", async () => {
+    await usePlayer.getState().playAt(1)
+    engine.status = "playing"
+    engine.play.mockClear()
+    engine.load.mockClear()
+
+    usePlayer.getState().removeFromQueue(1)
+    await vi.advanceTimersByTimeAsync(0)
+
+    const s = usePlayer.getState()
+    expect(s.queue.map((t) => t.id), "被删的那首还在队列里").toEqual([`a${round}`, `c${round}`])
+    expect(s.index).toBe(1)
+    expect(engine.load, "没有去载入顶上来的那首").toHaveBeenCalled()
+    expect(engine.play, "引擎里还挂着被删掉的那首在放").toHaveBeenCalled()
+    engine.status = "paused"
+  })
+
+  it("暂停时删掉正在放的那首：不擅自开声，但引擎里那首必须放下", async () => {
+    await usePlayer.getState().playAt(1)
+    engine.status = "paused"
+    engine.play.mockClear()
+    engine.pause.mockClear()
+
+    usePlayer.getState().removeFromQueue(1)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(engine.pause, "引擎里还挂着被删掉的那首").toHaveBeenCalled()
+    expect(engine.play, "用户没按播放，不该自己响").not.toHaveBeenCalled()
+  })
+
+  it("删到最后一首，队列清空并停下", async () => {
+    usePlayer.setState({ queue: [track(`solo${round}`)], index: 0 })
+    await usePlayer.getState().playAt(0)
+    usePlayer.getState().removeFromQueue(0)
+    await vi.advanceTimersByTimeAsync(0)
+    const s = usePlayer.getState()
+    expect(s.queue).toHaveLength(0)
+    expect(s.index).toBe(-1)
   })
 })
