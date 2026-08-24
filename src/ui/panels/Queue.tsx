@@ -105,8 +105,14 @@ export default function Queue({ open, onClose }: { open: boolean; onClose: () =>
         </button>
       </header>
 
-      <div className="panel-scroll">
-        <ol ref={listRef}>
+      {/*
+        * ol 直接做 .drawer 的 flex 子项，**不能再套一层 .panel-scroll**。
+        * 套了就是两个嵌套的滚动容器：外层 .panel-scroll 有内容可滚，而内层 ol
+        * 被撑到内容全高、自己无处可滚，偏偏 .drawer ol 带着 overscroll-behavior: contain，
+        * 于是滚轮落在 ol 上既滚不动它、又不允许把滚动传给外层 —— 整个列表纹丝不动。
+        * 其余几个面板的 ol 都是直接挂在 flex 列上的，照它们来。
+        */}
+      <ol ref={listRef}>
           {queue.map((t, i) => (
             <li
               key={`${t.id}-${i}`}
@@ -149,8 +155,7 @@ export default function Queue({ open, onClose }: { open: boolean; onClose: () =>
               或者右键选「下一首播放」往这里排队。
             </li>
           )}
-        </ol>
-      </div>
+      </ol>
     </div>
   )
 }

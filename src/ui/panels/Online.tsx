@@ -6,6 +6,7 @@ import { ensureSource } from "@/source/boot"
 import { useLibrary, type Track } from "@/store/library"
 import { SOURCES, useOnline } from "@/store/online"
 import { usePlayer } from "@/store/player"
+import ContextMenu from "../ContextMenu"
 import { useDismiss } from "../useDismiss"
 
 type Tab = "search" | "source"
@@ -145,7 +146,6 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
   const [tab, setTab] = useState<Tab>("search")
   const [menu, setMenu] = useState<{ track: Track; x: number; y: number } | null>(null)
   const rootRef = useDismiss<HTMLDivElement>(open, onClose)
-  const menuRef = useDismiss<HTMLDivElement>(menu !== null, () => setMenu(null), false)
   // 曲库上千首时，这个 Set 每次重渲染都重建一遍就是每次按键都扫一遍全库
   const inLibrary = useMemo(() => new Set(libTracks.map((t) => t.id)), [libTracks])
 
@@ -271,12 +271,7 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
       )}
 
       {menu && (
-        <div
-          ref={menuRef}
-          className="ctx-menu"
-          style={{ left: menu.x, top: menu.y }}
-          onClick={() => setMenu(null)}
-        >
+        <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
           <button onClick={() => void play(results.indexOf(menu.track))}>播放</button>
           <button onClick={() => playNext(menu.track)}>下一首播放</button>
           <button onClick={() => appendToQueue([menu.track])}>加入队列</button>
@@ -287,7 +282,7 @@ export default function Online({ open, onClose }: { open: boolean; onClose: () =
               加入「{p.name}」
             </button>
           ))}
-        </div>
+        </ContextMenu>
       )}
     </div>
   )

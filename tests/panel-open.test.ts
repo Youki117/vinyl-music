@@ -56,3 +56,35 @@ describe("面板的开合契约", () => {
     })
   }
 })
+
+/**
+ * 右键菜单只能由 ui/ContextMenu.tsx 渲染。
+ *
+ * 这条同样是被真 bug 逼出来的：菜单原先直接写在抽屉里，`position: fixed` 本以为
+ * 按视口定位，而 `.drawer` 上的 `backdrop-filter` 会让它成为 fixed 后代的包含块 ——
+ * 于是 `left: 1016px` 变成相对抽屉左边缘，实测落到 x≈1910，视口只有 1280 宽。
+ * 菜单每次都正常打开，只是整个在屏幕外面，看起来就是"右键没反应"。
+ *
+ * 解法是 portal 到 body。抽成一个组件之后，这条检查保证不会有人再手写一个 ——
+ * 手写的那个会重新踩进同一个包含块里，而且照样没有任何静态信号。
+ */
+describe("右键菜单必须走 ContextMenu 组件", () => {
+  const OWNER = "ContextMenu.tsx"
+
+  const writers = componentFiles(UI_DIR).filter((path) => {
+    if (path.endsWith(OWNER)) return false
+    return /className="ctx-menu"/.test(readFileSync(path, "utf8"))
+  })
+
+  it("除 ContextMenu.tsx 外，没有别处手写 ctx-menu", () => {
+    expect(writers.map((p) => p.slice(p.indexOf("src"))), "手写的菜单会掉进抽屉的包含块里，整个跑到屏幕外").toEqual([])
+  })
+
+  it("ContextMenu.tsx 确实 portal 到了 body", () => {
+    const src = readFileSync(join(UI_DIR, OWNER), "utf8")
+    expect(src).toMatch(/createPortal\(/)
+    expect(src).toMatch(/document\.body/)
+    // portal 出去之后不再是抽屉的后代，得靠这个属性豁免抽屉的"点外面就关"
+    expect(src, "少了 data-keep-panel，点菜单会把底下的抽屉一起关掉").toMatch(/data-keep-panel/)
+  })
+})

@@ -15,6 +15,7 @@ import {
 } from "@/store/library"
 import { usePlayer } from "@/store/player"
 import { IconArrowRight, IconImport, IconPlus, IconTrash } from "../icons"
+import ContextMenu from "../ContextMenu"
 import { useDismiss } from "../useDismiss"
 import PlaylistImport from "./PlaylistImport"
 
@@ -67,7 +68,6 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
   const sortTriggerRef = useRef<HTMLButtonElement>(null)
   const rootRef = useDismiss<HTMLDivElement>(open, onClose)
   // 右键菜单点哪儿都该收起来，包括抽屉内部，所以不豁免常驻区
-  const menuRef = useDismiss<HTMLDivElement>(menu !== null, () => setMenu(null), false)
   const sortMenuRef = useDismiss<HTMLDivElement>(sortMenuOpen, () => setSortMenuOpen(false), false)
 
   // 筛选+排序是纯函数，按输入缓存即可。导入期间 tracks 直到最后才整体替换，
@@ -432,12 +432,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
       )}
 
       {menu && (
-        <div
-          ref={menuRef}
-          className="ctx-menu"
-          style={{ left: menu.x, top: menu.y }}
-          onClick={() => setMenu(null)}
-        >
+        <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
           <button onClick={() => void playFrom(rows, rows.indexOf(menu.track))}>播放</button>
           <button onClick={() => playNext(menu.track)}>下一首播放</button>
           {/* 与「下一首播放」成对：那个插到当前之后，这个排到队尾 */}
@@ -460,7 +455,7 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
           <button className="danger" onClick={() => removeTracks([menu.track.id])}>
             从曲库移除（不删文件）
           </button>
-        </div>
+        </ContextMenu>
       )}
     </div>
   )
