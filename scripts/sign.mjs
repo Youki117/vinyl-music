@@ -22,16 +22,39 @@ import { existsSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 
 const TIMESTAMP_URL = process.env.SIGN_TIMESTAMP_URL ?? "http://timestamp.digicert.com"
-const TARGETS = [
-  "src-tauri/target/release/vinyl-player.exe",
-  // NSIS 安装包：分发时用户先点的是它，不签的话第一道门就被 SmartScreen 拦
-  ...readdirSync("src-tauri/target/release/bundle/nsis")
-    .filter((f) => f.endsWith("-setup.exe"))
-    .map((f) => join("src-tauri/target/release/bundle/nsis", f)),
-]
+
+/**
+ * 要签的东西。**必须惰性求值**：这个函数早先是顶层的一个数组字面量，
+ * 于是那句 readdirSync 跑在"没配证书就空转"之前 —— 还没打过包的机器（CI 上签名步骤
+ * 排在 bundle 之前也一样）拿到的不是那条友好提示，是一个 ENOENT 堆栈。
+ */
+function targets() {
+  const nsis = "src-tauri/target/release/bundle/nsis"
+  return [
+    "src-tauri/target/release/vinyl-player.exe",
+    // NSIS 安装包：分发时用户先点的是它，不签的话第一道门就被 SmartScreen 拦
+    ...(existsSync(nsis)
+      ? readdirSync(nsis)
+          .filter((f) => f.endsWith("-setup.exe"))
+          .map((f) => join(nsis, f))
+      : []),
+  ]
+}
 
 function findSigntool() {
-  const hit = execFileSync("where.exe", ["signtool"], { encoding: "utf8" }).split(/\r?\n/)[0]
+  // where 找不到时是**非零退出**，execFileSync 会抛 —— 而"找不到"正是要走下面
+  // 那段 SDK 兜底的情形。不接住的话兜底永远执行不到，等于白写。
+  let hit = ""
+  try {
+    // stderr 丢掉：where 找不到时会自己打一行"信息: 用提供的模式无法找到文件"，
+    // 而这条路径上"找不到"是预期分支，不该在构建日志里冒充错误
+    hit = execFileSync("where.exe", ["signtool"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).split(/\r?\n/)[0]
+  } catch {
+    hit = ""
+  }
   if (hit && existsSync(hit)) return hit
   // where 找不到就扫 Windows SDK 的版本目录，取最新
   const root = "C:/Program Files (x86)/Windows Kits/10/bin"
@@ -64,7 +87,7 @@ if (thumbprint) baseArgs.push("/sha1", thumbprint)
 else baseArgs.push("/f", pfxPath, "/p", pfxPassword)
 
 let failed = false
-for (const target of TARGETS) {
+for (const target of targets()) {
   if (!existsSync(target)) {
     console.warn(`跳过（不存在）：${target} —— 先跑 npm run tauri build`)
     continue
