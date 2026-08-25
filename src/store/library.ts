@@ -216,7 +216,7 @@ type LibraryState = {
   filter: string
 
   load(): Promise<void>
-  addFiles(refs: FileRef[]): Promise<Track[]>
+  addFiles(refs: FileRef[], opts?: { into?: ViewId | null }): Promise<Track[]>
   /**
    * 把在线曲目收进曲库。已在库里的按 id 去重，返回**全部**对应曲目（含已存在的），
    * 这样调用方可以直接拿去播放或加进歌单，不用自己再查一遍。
@@ -412,7 +412,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
       return out
     },
 
-    async addFiles(refs) {
+    async addFiles(refs, opts) {
       if (refs.length === 0) return []
       const existing = new Set(get().tracks.map((t) => t.id))
       const fresh = refs.filter((r) => !existing.has(r.id))
@@ -477,10 +477,11 @@ export const useLibrary = create<LibraryState>((set, get) => {
       const added = slots.filter((t): t is Track => t !== null)
       set((s) => ({ tracks: [...s.tracks, ...added], scanning: null }))
 
-      // 导入到某个具体歌单时，顺带加进去
-      const view = get().activeView
-      if (!(VIRTUAL_VIEWS as readonly string[]).includes(view)) {
-        get().addToPlaylist(view, added.map((t) => t.id))
+      // 默认进「当前歌单」（拖拽导入的自然语义）；显式 into: null 表示只进曲库、
+      // 歌单归属由调用方自己安排
+      const target = opts?.into !== undefined ? opts.into : get().activeView
+      if (target && !(VIRTUAL_VIEWS as readonly string[]).includes(target)) {
+        get().addToPlaylist(target, added.map((t) => t.id))
       }
       save()
       return added
@@ -765,11 +766,8 @@ export const useLibrary = create<LibraryState>((set, get) => {
         if (r) resolved.set(e.path, r)
       }
       if (resolved.size > 0) {
-        // addFiles 会把新曲目塞进「当前歌单」，导入过程中先躲开，避免污染
-        const prevView = get().activeView
-        set({ activeView: "all" })
-        await get().addFiles([...resolved.values()])
-        set({ activeView: prevView })
+        // 只解析进曲库；歌单成员由下面按 m3u 顺序统一编排，不掺入「当前歌单」
+        await get().addFiles([...resolved.values()], { into: null })
       }
 
       // 二、路径失效的退回按文件名匹配 —— 歌单文件常是从别的机器拷来的
