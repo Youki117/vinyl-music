@@ -848,9 +848,26 @@ export const useLibrary = create<LibraryState>((set, get) => {
     },
 
     byId(id) {
-      return get().tracks.find((t) => t.id === id)
+      // O(1)。此前是 tracks.find —— 全库最高频的查找挂在播放路径上，
+      // refreshQueueMeta 对队列每首都查一次，万首库下是平方级的空转
+      return byIdIndex.get(id)
     },
   }
+})
+
+/*
+ * 曲目 id → Track 的索引，给 byId 用。
+ *
+ * 本文件所有对 tracks 的变更都是不可变更新（换新数组），所以拿**数组引用**判断要不要
+ * 重建即可：一批变更（导入、批量改封面）只在第一次 set 时付一次 O(n)，之后的全部
+ * 查找都是 O(1)。订阅必须挂在模块级 —— 它要覆盖 store 的一生，而不是某个组件的。
+ */
+let byIdIndex = new Map<string, Track>()
+let indexedTracks: Track[] | null = null
+useLibrary.subscribe((s) => {
+  if (s.tracks === indexedTracks) return
+  indexedTracks = s.tracks
+  byIdIndex = new Map(s.tracks.map((t) => [t.id, t]))
 })
 
 function isVirtual(v: ViewId): v is VirtualView {
