@@ -121,13 +121,16 @@ export default function WeRail({
 }
 
 /**
- * 预览缩略图。**进了视口才读**，卸载时撤销 blob —— 与封面缓存同一套卫生习惯。
+ * 预览缩略图。**进了视口才读，滚出视口就撤**——与封面缓存同一套卫生习惯。
  * 预览缺失就留空格子，不挡选择。放行已由 WeRail 批量做过，这里只管读。
  *
  * 为什么要懒加载：轨道一次只露 4.5 张卡，而订阅几百张壁纸的人不少见。挂载就全读的话，
  * 每张都要把整个预览文件搬过 IPC，几百张就是几十兆的搬运，而且这些 blob 在面板关掉
  * 之前**全部同时挂着** —— skin 那边费劲设 `URL_CACHE_MAX = 6` 防的正是这种情况。
- * 按视口读把它压到个位数，滚到哪读到哪。
+ *
+ * 只"进了视口才读"是不够的：那样滚过一遍全轨道，读过的每一张都还留着，跟挂载就全读
+ * 的终局是一样的，只是晚一点到。必须**出视口就撤**，同时在场的才压得到个位数。
+ * 滚回来要重读一次，但 rootMargin 留了 200px 提前量 —— 卡片还在视口外就已经读完了。
  */
 function WeThumb({ path }: { path: string | null }) {
   const [url, setUrl] = useState<string | null>(null)
@@ -136,26 +139,25 @@ function WeThumb({ path }: { path: string | null }) {
 
   useEffect(() => {
     const el = ref.current
-    if (!el || visible) return
+    if (!el) return
 
     /*
      * root 用默认的视口，不用轨道自己。IntersectionObserver 会把祖先的 overflow 裁剪
      * 算进去，所以横向滚出轨道的卡同样判为不可见 —— 而用视口还顺带覆盖了"面板整体
      * 纵向滚动、这一栏根本没露出来"，拿轨道当 root 就管不到那一层。
      * rootMargin 提前 200px 起读，滚起来不至于看着格子一个个往上补。
+     *
+     * **进出都要报**，不能见到第一次相交就 disconnect：那样 visible 是个单向锁存，
+     * 下面那个 effect 的清理只在卸载时跑，于是"滚过一遍全轨道"= 几百个 blob 同时挂着
+     * 直到面板关闭，正是这里想避免的那件事。
      */
     const io = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          setVisible(true)
-          io.disconnect()
-        }
-      },
+      (entries) => setVisible(entries.some((e) => e.isIntersecting)),
       { rootMargin: "200px" },
     )
     io.observe(el)
     return () => io.disconnect()
-  }, [visible])
+  }, [])
 
   useEffect(() => {
     if (!visible || !path) return
@@ -174,6 +176,8 @@ function WeThumb({ path }: { path: string | null }) {
     return () => {
       alive = false
       if (own) URL.revokeObjectURL(own)
+      // 连 state 一起清掉：留着的话下次滚回来会先闪一帧指向死 blob 的旧 URL
+      setUrl(null)
     }
   }, [visible, path])
 
