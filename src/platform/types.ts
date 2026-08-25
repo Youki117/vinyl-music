@@ -31,6 +31,19 @@ export interface Platform {
   readFile(ref: FileRef): Promise<Uint8Array>
 
   /**
+   * 把本地文件变成一个可以直接喂给 `<video>` 的 **流式** URL —— 不把字节读进内存。
+   *
+   * 存在的理由只有视频底图：`toObjectUrl` 是"整个文件读成 Blob"，一段 200MB 的壁纸
+   * 就实打实占 200MB，且与播到第几秒无关。流式 URL 由宿主按 Range 请求供给，内存只
+   * 留一个缓冲窗口，**占用与文件大小脱钩**。音频不走这条 —— 它要进 Web Audio 做频谱
+   * 分析，跨源会静默污染音频图（见 `toObjectUrl` 的注释）。
+   *
+   * 实现必须在返回之前把访问权放行完毕；调用方拿到 URL 就会立刻去请求它。
+   * 没有这个能力的宿主返回 null，调用方退回 `toObjectUrl`。
+   */
+  streamUrl(path: string): Promise<string | null>
+
+  /**
    * 读取文件的一段字节。越过文件尾时返回实际能读到的部分，不报错。
    *
    * 导入只为读标签，却要把整首无损搬过 IPC —— 这是导入耗时与内存峰值的大头。
@@ -121,6 +134,12 @@ export interface Platform {
   request(url: string, init: RequestInit): Promise<Response>
 
   /**
+   * 列出本机 Wallpaper Engine 的壁纸（工坊 + 本地项目）。
+   * 没装 Steam/WE 时返回空数组。浏览器实现下恒为空。
+   */
+  listWallpaperEngine(): Promise<WeWallpaper[]>
+
+  /**
    * 把生成的图片存进应用数据目录，返回可当底图用的引用。
    */
   saveImage(name: string, bytes: Uint8Array): Promise<FileRef>
@@ -144,6 +163,18 @@ export interface Platform {
 }
 
 export type PlayerCommand = "toggle" | "pause" | "next" | "prev"
+
+/** 一个 Wallpaper Engine 壁纸的元信息。media 只有 video/image 类型才有。 */
+export type WeWallpaper = {
+  /** 工坊 id，或 my: 前缀的本地项目目录名 */
+  id: string
+  title: string
+  type: "video" | "image" | "scene" | "web" | "application" | "unknown"
+  /** 可直接当底图的主文件绝对路径（video/image） */
+  media: string | null
+  /** 预览图绝对路径 */
+  preview: string | null
+}
 
 /** 报给系统媒体面板的当前曲目信息。时间单位是秒。 */
 export type NowPlaying = {
@@ -187,6 +218,25 @@ export const PLAYLIST_EXTENSIONS = ["m3u", "m3u8"] as const
 /** 音源脚本扩展名 */
 export const SCRIPT_EXTENSIONS = ["js"] as const
 
+/**
+ * 可当底图用的图片扩展名。
+ *
+ * gif 在列表里是因为 Wallpaper Engine 有一批 gif 壁纸（`type: "image"`），而 gif
+ * 走的是图片那条路（`<img>` + background-image），Chromium 自己会让它动起来。
+ * 代价是它**不受视频底图那两道暂停闸门管**：曲目暂停时 gif 照动。浏览器在标签页
+ * 不可见时会自己停掉 gif 动画，所以真正漏掉的只有"暂停音乐"这一种情形。
+ */
+export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "avif", "bmp", "gif"] as const
+
+/**
+ * 可当底图用的视频扩展名。
+ *
+ * 只列 WebView2（Chromium）自带解码器认得的容器 —— mkv、avi 这类即使让用户选进来
+ * 也只会得到一块黑屏，不如在选择器里就不出现。mov 属于半通：装 H.264 能放，
+ * 装 ProRes 不能，留着是因为能放的那部分占多数。
+ */
+export const VIDEO_EXTENSIONS = ["mp4", "m4v", "webm", "mov"] as const
+
 function extOf(name: string): string {
   const dot = name.lastIndexOf(".")
   return dot < 0 ? "" : name.slice(dot + 1).toLowerCase()
@@ -202,4 +252,35 @@ export function isLyricFile(name: string): boolean {
 
 export function isPlaylistFile(name: string): boolean {
   return (PLAYLIST_EXTENSIONS as readonly string[]).includes(extOf(name))
+}
+
+export function isImageFile(name: string): boolean {
+  return (IMAGE_EXTENSIONS as readonly string[]).includes(extOf(name))
+}
+
+export function isVideoFile(name: string): boolean {
+  return (VIDEO_EXTENSIONS as readonly string[]).includes(extOf(name))
+}
+
+/** 能不能当底图。图片和视频都算。 */
+export function isBackdropFile(name: string): boolean {
+  return isImageFile(name) || isVideoFile(name)
+}
+
+/**
+ * 视频的 MIME。
+ *
+ * 必须显式给出：底图走的是 Blob URL，而没有 type 的 Blob 让 Chromium 拿不到
+ * Content-Type，`<video>` 会直接判定"没有可用的源"——**不抛错，只是一片空白**。
+ * 图片没这个问题（解码器嗅探字节就够），所以只有视频需要这张表。
+ */
+export function videoMime(name: string): string {
+  switch (extOf(name)) {
+    case "webm":
+      return "video/webm"
+    case "mov":
+      return "video/quicktime"
+    default:
+      return "video/mp4"
+  }
 }

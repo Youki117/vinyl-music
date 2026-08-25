@@ -91,16 +91,6 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
   // 只有自建歌单里"顺序"才是用户定的；虚拟歌单与排序视图下拖动没有意义
   const canReorder = inPlaylist && sort === "added" && !filter.trim()
 
-  /** 指针落在列表的哪个插入位（0..rows.length） */
-  const dropIndexAt = (clientY: number): number => {
-    const items = Array.from(listRef.current?.querySelectorAll("li") ?? [])
-    for (let i = 0; i < items.length; i++) {
-      const r = items[i].getBoundingClientRect()
-      if (clientY < r.top + r.height / 2) return i
-    }
-    return items.length
-  }
-
   /**
    * 按住拖动排序。
    *
@@ -108,24 +98,49 @@ export default function Playlist({ open, onClose }: { open: boolean; onClose: ()
    * 页面内的 dragstart 行为不稳；而且自己算插入位才好画落点指示线。
    *
    * 超过 4px 才认作拖动，否则会把双击播放一起吃掉。
+   *
+   * 行矩形在拖动激活那一刻量一次、滚动时重量（理由见队列面板同一处）：
+   * pointermove 每帧全量 getBoundingClientRect 是 O(n) 强制布局，大歌单会卡。
    */
   const beginDrag = (e: React.PointerEvent, from: number) => {
     if (!canReorder || e.button !== 0) return
     const startY = e.clientY
     const el = e.currentTarget as HTMLElement
+    const list = listRef.current
     let active = false
+
+    let rows: { top: number; height: number }[] = []
+    const measure = () => {
+      rows = Array.from(list?.querySelectorAll("li") ?? []).map((li) => {
+        const r = li.getBoundingClientRect()
+        return { top: r.top, height: r.height }
+      })
+    }
+    const onScroll = () => {
+      if (active) measure()
+    }
+    /** 指针落在列表的哪个插入位（0..rows.length） */
+    const dropIndexAt = (clientY: number): number => {
+      for (let i = 0; i < rows.length; i++) {
+        if (clientY < rows[i].top + rows[i].height / 2) return i
+      }
+      return rows.length
+    }
 
     const move = (ev: PointerEvent) => {
       if (!active && Math.abs(ev.clientY - startY) < 4) return
       if (!active) {
         active = true
         el.setPointerCapture(ev.pointerId)
+        measure()
+        list?.addEventListener("scroll", onScroll)
       }
       setDrag({ from, to: dropIndexAt(ev.clientY) })
     }
     const up = (ev: PointerEvent) => {
       document.removeEventListener("pointermove", move)
       document.removeEventListener("pointerup", up)
+      list?.removeEventListener("scroll", onScroll)
       if (!active) return
       const to = dropIndexAt(ev.clientY)
       setDrag(null)

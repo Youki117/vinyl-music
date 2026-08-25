@@ -28,7 +28,7 @@ import { useSkin } from "@/store/skin"
 import { ensureSource } from "@/source/boot"
 import { useLayout } from "@/store/layout"
 import { useOnline } from "@/store/online"
-import { isAudioFile, isLyricFile, isPlaylistFile, platform, type FileRef } from "@/platform"
+import { isAudioFile, isBackdropFile, isLyricFile, isPlaylistFile, platform, type FileRef } from "@/platform"
 /*
  * 给端到端核查用的入口（scripts/verify-*.mjs）。
  *
@@ -156,7 +156,7 @@ export default function App() {
       const audio = files.filter((f) => isAudioFile(f.name))
       const lrc = files.filter((f) => isLyricFile(f.name))
       const m3u = files.find((f) => isPlaylistFile(f.name))
-      const image = files.find((f) => /\.(png|jpe?g|webp|avif|bmp)$/i.test(f.name))
+      const image = files.find((f) => isBackdropFile(f.name))
 
       void (async () => {
         // 歌词要在音频入库之后才挂得上——同名匹配需要曲目已经存在

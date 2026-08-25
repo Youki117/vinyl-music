@@ -1,16 +1,22 @@
 /**
  * 平台分发。按运行环境惰性加载对应实现，Tauri 模块在浏览器下不会被求值。
  */
-import type { FileRef, NowPlaying, Platform, PlatformKind, PlayerCommand } from "./types"
+import type { FileRef, NowPlaying, Platform, PlatformKind, PlayerCommand, WeWallpaper } from "./types"
 
-export type { FileRef, NowPlaying, Platform, PlatformKind, PlayerCommand, WindowControls } from "./types"
+export type { FileRef, NowPlaying, Platform, PlatformKind, PlayerCommand, WeWallpaper, WindowControls } from "./types"
 export {
   AUDIO_EXTENSIONS,
+  IMAGE_EXTENSIONS,
   LYRIC_EXTENSIONS,
   PLAYLIST_EXTENSIONS,
+  VIDEO_EXTENSIONS,
   isAudioFile,
+  isBackdropFile,
+  isImageFile,
   isLyricFile,
   isPlaylistFile,
+  isVideoFile,
+  videoMime,
 } from "./types"
 
 export const IS_TAURI: boolean =
@@ -35,6 +41,7 @@ export const platform = {
   pickImage: (): Promise<FileRef | null> => impl().then((p) => p.pickImage()),
 
   readFile: (ref: FileRef): Promise<Uint8Array> => impl().then((p) => p.readFile(ref)),
+  streamUrl: (path: string): Promise<string | null> => impl().then((p) => p.streamUrl(path)),
   readSlice: (ref: FileRef, offset: number, length: number): Promise<Uint8Array> =>
     impl().then((p) => p.readSlice(ref, offset, length)),
   readText: (ref: FileRef): Promise<string> => impl().then((p) => p.readText(ref)),
@@ -43,6 +50,7 @@ export const platform = {
 
   pickPlaylistFile: (): Promise<FileRef | null> => impl().then((p) => p.pickPlaylistFile()),
   pickScript: (): Promise<FileRef | null> => impl().then((p) => p.pickScript()),
+  listWallpaperEngine: (): Promise<WeWallpaper[]> => impl().then((p) => p.listWallpaperEngine()),
   saveText: (name: string, text: string): Promise<boolean> =>
     impl().then((p) => p.saveText(name, text)),
   resolvePath: (baseId: string, entry: string): Promise<FileRef | null> =>

@@ -1,14 +1,22 @@
 mod grant;
+// 托管队列只在 setup 的 #[cfg(desktop)] 分支里 manage，命令注册也必须跟着走同一个
+// cfg —— 只注册不 manage 的话，State<PendingOpenFiles> 会在 invoke 时 panic
+#[cfg(desktop)]
+mod open_files;
 mod scan;
 mod slice;
 #[cfg(target_os = "windows")]
 mod smtc;
 #[cfg(target_os = "windows")]
 mod aspect;
+mod wallpaper_engine;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
+
+#[cfg(desktop)]
+use std::sync::Mutex;
 
 /// 前端约定的事件名。媒体键、托盘菜单、系统媒体面板都转成同一套事件，
 /// 前端只认事件不认来源。
@@ -51,10 +59,12 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             aspect::install(app.handle());
             // 首次启动的命令行参数（"打开方式"、拖到 exe 上、命令行直接带文件）。
-            // 之前只在单实例重复启动时处理了 argv，首次启动整个漏掉，
-            // 而前端也没人监听这个事件 —— 等于这条路从来没通过。
+            // 不发事件 —— 此刻前端必然还没挂上监听。存进托管状态，等前端 ready 后
+            // invoke take_open_files 来取，时序由调用方保证而不是靠 sleep 赌。
             #[cfg(desktop)]
-            emit_startup_files(app.handle());
+            app.manage(open_files::PendingOpenFiles(Mutex::new(playable_args(
+                std::env::args().skip(1),
+            ))));
             #[cfg(target_os = "windows")]
             smtc::init(app.handle())?;
             Ok(())
@@ -62,7 +72,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             scan::scan_audio_files,
             grant::allow_paths,
+            grant::allow_asset_paths,
             slice::read_file_slice,
+            #[cfg(desktop)]
+            open_files::take_open_files,
+            wallpaper_engine::list_we_wallpapers,
             #[cfg(target_os = "windows")]
             smtc::smtc_update
         ])
@@ -78,21 +92,6 @@ fn playable_args(args: impl Iterator<Item = String>) -> Vec<String> {
     args.filter(|a| !a.starts_with('-'))
         .filter(|a| std::path::Path::new(a).is_file())
         .collect()
-}
-
-/// 首次启动时把命令行里带的文件发给前端。
-#[cfg(desktop)]
-fn emit_startup_files(app: &tauri::AppHandle) {
-    let files = playable_args(std::env::args().skip(1));
-    if files.is_empty() {
-        return;
-    }
-    // 前端此刻还没挂上监听，延后一拍再发
-    let handle = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(1200));
-        let _ = handle.emit(EVT_OPEN_FILES, files);
-    });
 }
 
 /// 键盘媒体键。注册失败不该让应用起不来 —— 别的播放器可能已经占用了。

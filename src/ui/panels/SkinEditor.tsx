@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
 
 import { platform } from "@/platform"
 import { BUILTIN_BACKDROPS } from "@/skin/backdrops"
@@ -6,7 +6,9 @@ import { labelBackground } from "@/skin/resolve"
 import { useSkin } from "@/store/skin"
 import { IconPlus } from "../icons"
 import AiTab from "./AiTab"
+import WeRail from "./WeRail"
 import { useDismiss } from "../useDismiss"
+import { useRailWheel } from "../useRailWheel"
 
 /**
  * 皮肤面板：导入底图、调整取景框、调蒙版参数、查看固定标题规则。
@@ -37,27 +39,7 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
   const backdropRailRef = useRef<HTMLDivElement>(null)
   const rootRef = useDismiss<HTMLDivElement>(open, onClose)
 
-  useEffect(() => {
-    const rail = backdropRailRef.current
-    if (!open || tab !== "image" || !rail) return
-
-    /*
-     * React/WebView 会把 wheel 监听器注册成 passive，SyntheticEvent.preventDefault 不能可靠
-     * 阻止外层面板同时纵向滚动。这里显式使用 non-passive 原生监听：轨道还能横移时消费
-     * 滚轮，到达两端后把滚轮还给外层，用户才能继续上下浏览设置。
-     */
-    const onWheel = (event: WheelEvent) => {
-      const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX
-      const max = rail.scrollWidth - rail.clientWidth
-      const canMove = (delta < 0 && rail.scrollLeft > 0) || (delta > 0 && rail.scrollLeft < max - 1)
-      if (!canMove) return
-      event.preventDefault()
-      event.stopPropagation()
-      rail.scrollLeft += delta
-    }
-    rail.addEventListener("wheel", onWheel, { passive: false })
-    return () => rail.removeEventListener("wheel", onWheel)
-  }, [open, tab])
+  useRailWheel(backdropRailRef, open && tab === "image")
 
   if (!open) return null
 
@@ -135,7 +117,7 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
             {/*
               背景图片。装完不选图就只有一层 CSS 渐变，而整套配色都是从底图现算的，
               没有图等于看不出效果。setBackdrop 只用 ref.id，所以这里给个合成的
-              FileRef 就够，loadImage 见到 builtin: 前缀会走打包后的资源 URL。
+              FileRef 就够，loadMedia 见到 builtin: 前缀会走打包后的资源 URL。
               用户手动选过的图保留小缩略图和原路径，排在内置图之后；最后一格才是
               “继续选择”，这样它与其它选项等大，也不用每次从独立大按钮重新进入。
             */}
@@ -179,6 +161,8 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
             </div>
             </section>
 
+            <WeRail activeId={skin.backdrop} onPick={(ref) => void setBackdrop(ref)} />
+
             {backdrop ? (
               <>
                 <section className="panel-section">
@@ -186,7 +170,7 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
                 <div
                   className="preview backdrop-preview"
                   style={{
-                    backgroundImage: `url(${backdrop.url})`,
+                    backgroundImage: `url(${backdrop.poster})`,
                     backgroundPosition: `${skin.backdropFocus.x * 100}% ${skin.backdropFocus.y * 100}%`,
                   }}
                   onPointerDown={startDrag("backdrop")}
@@ -222,7 +206,7 @@ export default function SkinEditor({ open, onClose }: { open: boolean; onClose: 
                 <div className="label-row">
                   <div
                     className="preview label-preview"
-                    style={label ? labelBackground(label.url, skin.label.focus, label.width, label.height) : undefined}
+                    style={label ? labelBackground(label.poster, skin.label.focus, label.width, label.height) : undefined}
                     onPointerDown={startDrag("label")}
                     onPointerMove={onDragMove}
                     onWheel={onLabelWheel}

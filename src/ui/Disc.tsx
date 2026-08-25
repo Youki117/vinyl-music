@@ -38,7 +38,10 @@ export default function Disc({
    * - `"skin"`：皮肤图 > 内嵌封面 > 空。这是出厂带默认底图之前的老行为 ——
    *   那时"还没设过底图"才轮得到封面，现在成了一个显式选项。
    */
-  const skinArt = label ? labelBackground(label.url, focus, label.width, label.height) : undefined
+  // 贴纸吃 poster 而不是 url：底图是视频时 url 是视频流（asset:// 或退回的 blob），
+  // background-image 放不了；
+  // poster 是冻住的取样帧（图片底图的 poster 就是 url 自己），两种来源通吃
+  const skinArt = label ? labelBackground(label.poster, focus, label.width, label.height) : undefined
   const coverArt = cover
     ? { backgroundImage: `url(${cover})`, backgroundSize: "cover", backgroundPosition: "center" }
     : undefined

@@ -13,7 +13,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+# protocol-asset：视频底图走 asset:// 流式读盘，不再整份读进内存（见 grant.rs 的
+# allow_asset_paths）。这个 feature 必须与 tauri.conf.json 的 assetProtocol.enable 一致，
+# 少一边构建脚本会直接报错。
+tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 # AI 请求必须从 Rust 侧发：OpenAI 兼容的服务基本不给浏览器来源发 CORS 头，
@@ -34,6 +37,8 @@ tauri-plugin-global-shortcut = "2"
 souvlaki = "0.8"
 # 窗口比例锁定：SetWindowSubclass 挂 WM_SIZING（aspect.rs）。Cargo.lock 里已有该版本（传递依赖）。
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+# Wallpaper Engine 壁纸发现：读 Steam 的注册表项（HKCU SteamPath / HKLM InstallPath）
+winreg = "0.55"
 
 [profile.release]
 # 体积优先：PRD §7 要求安装包 < 20MB

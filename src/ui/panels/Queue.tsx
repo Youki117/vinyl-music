@@ -45,34 +45,53 @@ export default function Queue({ open, onClose }: { open: boolean; onClose: () =>
    */
   if (!open) return null
 
-  const dropIndexAt = (clientY: number): number => {
-    const items = Array.from(listRef.current?.querySelectorAll("li[data-row]") ?? [])
-    for (let i = 0; i < items.length; i++) {
-      const r = items[i].getBoundingClientRect()
-      if (clientY < r.top + r.height / 2) return i
-    }
-    return items.length
-  }
-
   // 拖动排序。交互与曲库面板完全一致（按住挪 4px 才算拖，落点按行中线判定），
   // 两个列表手感不一样比没有拖动更让人别扭
   const beginDrag = (e: React.PointerEvent, from: number) => {
     if (e.button !== 0) return
     const startY = e.clientY
     const el = e.currentTarget as HTMLElement
+    const list = listRef.current
     let active = false
+
+    /*
+     * 行矩形在**拖动激活那一刻**量一次，之后只读缓存。
+     *
+     * pointermove 每帧对全列表 getBoundingClientRect 是 O(n) 强制布局——几百行的队列
+     * 会当场卡出来。拖动中用滚轮滚了列表的话缓存会失真，所以 scroll 时重量一份；
+     * 落点判定只关心中线相对位置，这份开销可以忽略。
+     */
+    let rows: { top: number; height: number }[] = []
+    const measure = () => {
+      rows = Array.from(list?.querySelectorAll("li[data-row]") ?? []).map((li) => {
+        const r = li.getBoundingClientRect()
+        return { top: r.top, height: r.height }
+      })
+    }
+    const onScroll = () => {
+      if (active) measure()
+    }
+    const dropIndexAt = (clientY: number): number => {
+      for (let i = 0; i < rows.length; i++) {
+        if (clientY < rows[i].top + rows[i].height / 2) return i
+      }
+      return rows.length
+    }
 
     const move = (ev: PointerEvent) => {
       if (!active && Math.abs(ev.clientY - startY) < 4) return
       if (!active) {
         active = true
         el.setPointerCapture(ev.pointerId)
+        measure()
+        list?.addEventListener("scroll", onScroll)
       }
       setDrag({ from, to: dropIndexAt(ev.clientY) })
     }
     const up = (ev: PointerEvent) => {
       document.removeEventListener("pointermove", move)
       document.removeEventListener("pointerup", up)
+      list?.removeEventListener("scroll", onScroll)
       if (!active) return
       const to = dropIndexAt(ev.clientY)
       setDrag(null)

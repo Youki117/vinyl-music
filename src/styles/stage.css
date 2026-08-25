@@ -66,6 +66,17 @@
   background-repeat: no-repeat;
 }
 
+/* 视频底图与图片底图等价铺法：object-fit: cover 就是 background-size: cover 的对应物 */
+.backdrop-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* <video> 的默认行内基线缝隙会露出底下一条背景色 */
+  display: block;
+}
+
 /* 内置底纹：没有导入底图时用，模拟参考图的影棚背景 */
 .backdrop-builtin {
   position: absolute;

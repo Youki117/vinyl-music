@@ -10,7 +10,7 @@ import dUrl from "@/assets/backdrops/d.jpg"
  * CSS 渐变（`.backdrop-builtin`）。整个界面的配色都是从底图现算的 —— 蒙版、墨色、
  * 贴纸取色 —— 没有底图等于这套东西全看不出来。内置几张，装上就是完整效果。
  *
- * 用 `builtin:` 前缀和用户文件区分开：`loadImage` 见到这个前缀直接用打包后的
+ * 用 `builtin:` 前缀和用户文件区分开：`loadMedia` 见到这个前缀直接用打包后的
  * 资源 URL，不去走 `platform.readFile`（那条路只读用户文件，也读不到应用资源）。
  */
 export const BUILTIN_PREFIX = "builtin:"

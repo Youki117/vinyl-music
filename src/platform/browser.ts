@@ -93,14 +93,25 @@ export function create(): Platform {
     },
 
     async pickImage() {
-      const [file] = await openPicker({ accept: "image/*" })
+      const [file] = await openPicker({ accept: "image/*,video/*" })
       return file ? toRef(file) : null
+    },
+
+    // Wallpaper Engine 是本机 Steam 安装的概念，浏览器里没有
+    async listWallpaperEngine() {
+      return []
     },
 
     async readFile(ref) {
       const file = handles.get(ref.id)
       if (!file) throw new Error(`浏览器会话中找不到文件句柄：${ref.name}（刷新页面后需重新导入）`)
       return new Uint8Array(await file.arrayBuffer())
+    },
+
+    async streamUrl() {
+      // 浏览器里没有真实路径可供宿主按 Range 供给，只能退回 toObjectUrl。
+      // 意味着 dev 模式下视频底图仍然是整份进内存 —— 量内存必须用 tauri build 的包。
+      return null
     },
 
     async readSlice(ref, offset, length) {

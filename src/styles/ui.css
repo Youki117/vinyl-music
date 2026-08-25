@@ -1415,14 +1415,36 @@ header button.danger,
   opacity: 0.35;
 }
 
-.lib-main ol li[data-drop-before="true"]::before,
+/*
+ * 拖拽落点线：两头各缩进 10px 的一条短线。
+ *
+ * **必须绝对定位。** `.drawer li` 是 `display: flex`，静态定位的伪元素会变成一个
+ * 零宽的 flex 项 —— 线一点都画不出来，只剩那两侧 margin 把该行文字整体右推 20px。
+ * （这就是改动前的实际状态，所以这条线其实从来没显示过。）li 本身已经是
+ * `position: relative`，"正在播放"的金色左边条要用，这里正好白捡。
+ *
+ * **两条都挂 ::after。** ::before 被 `li[data-active]` 的金色左边条占着，拖到正在
+ * 播放那一行上会互相盖掉（队列面板注释里记的就是这个坑）。而 drop-before 与
+ * drop-after 在同一行上互斥 —— 前者要 `drag.to === i`，后者要 `drag.to === rows.length`
+ * 且是最后一行 —— 共用一个伪元素不会撞车。
+ */
+.lib-main ol li[data-drop-before="true"]::after,
 .lib-main ol li[data-drop-after="true"]::after {
   content: "";
-  display: block;
+  position: absolute;
+  left: 10px;
+  right: 10px;
   height: 2px;
-  margin: 0 10px;
   border-radius: 1px;
   background: #b2845f;
+}
+
+.lib-main ol li[data-drop-before="true"]::after {
+  top: 0;
+}
+
+.lib-main ol li[data-drop-after="true"]::after {
+  bottom: 0;
 }
 
 /* 曲库抽屉的操作行。按钮多于一行放得下时自动换行，不去挤压搜索框与关闭按钮 */
@@ -2088,7 +2110,7 @@ header button.danger,
 }
 
 .builtin-backdrop {
-  /* 4.5 张卡片 + 4 个 6px 间距正好占满轨道；下一张稳定露出一半。 */
+  /* 4.5 张卡片 + 4 个 6px 间距正好占满轨道；下一张稳定露出一半 */
   flex: 0 0 calc(22.222% - 5.333px);
   min-width: 0;
   aspect-ratio: 16 / 10;
@@ -2097,6 +2119,7 @@ header button.danger,
   background-size: cover;
   background-position: center;
   border: 1px solid rgba(255, 255, 255, 0.16);
+  position: relative;
   transition:
     border-color 160ms ease,
     transform 160ms ease;
@@ -2111,6 +2134,18 @@ header button.danger,
 .builtin-backdrop[data-on="true"] {
   border-color: var(--ink-accent, #b2845f);
   border-width: 2px;
+}
+
+/* Wallpaper Engine 壁纸卡的缩略图：blob URL 异步到位前先占个底色 */
+.we-thumb {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+}
+
+.we-thumb[data-pending="true"] {
+  background: var(--panel-bg-soft);
 }
 
 .backdrop-picker {
@@ -2224,6 +2259,14 @@ header button.danger,
   gap: 12px;
   padding: 18px 24px;
   border-bottom: 1px solid var(--panel-border);
+}
+
+/* 皮肤面板的 image 页区块最多（两条卡片轨道 + 两个预览），
+   收紧纵向占位让常见窗口下一屏放下 —— 竖向滚动少了，
+   面板滚轮和轨道滚轮打架的机会也就少了 */
+.skin-body .panel-section {
+  gap: 8px;
+  padding: 12px 24px;
 }
 
 .panel-title-row,
@@ -2969,13 +3012,15 @@ header button.danger,
 }
 
 .backdrop-preview {
-  height: 178px;
+  /* 从 178 压到 120：image 页内容要尽量一屏放下，减少面板竖向滚轮
+     与卡片轨道横向滚轮的交接。拖焦点 120px 高度依然够用 */
+  height: 120px;
   border: 1px solid var(--panel-border-strong);
 }
 
 .label-preview {
-  width: 120px;
-  height: 120px;
+  width: 96px;
+  height: 96px;
   box-shadow: 0 0 0 3px var(--panel-gold), 0 0 0 9px #090807;
 }
 
