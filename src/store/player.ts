@@ -540,9 +540,13 @@ export const usePlayer = create<PlayerState>((set, get) => {
         })
         save()
 
+        // 这首仍是当前曲目（没被切歌、队列也没动过）——歌词/封面/响度三路补齐
+        // 都要在回调开头问同一句，收口成一个谓词
+        const stillThisTrack = () => mineTrack === trackSeq && get().index === i
+
         // 响度对齐。标签命中是同步的，测量那条要解码整首歌，所以不 await ——
         // 声音先出来，量完再用斜坡滑过去
-        void applyTrackGain(track, bytes, () => mineTrack === trackSeq && get().index === i)
+        void applyTrackGain(track, bytes, stillThisTrack)
 
         // 把下一首提前拿到手上（F1.6）。延后一点点开始，别和刚起播时的封面歌词抢
         schedulePrefetch()
@@ -555,7 +559,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
             lib.ensureLyrics(track.id).catch(() => null),
             lib.ensureCover(track.id, bytes).catch(() => null),
           ]).then(([lrc, cover]) => {
-            if (mineTrack !== trackSeq || get().index !== i) return
+            if (!stillThisTrack()) return
             if (lrc || cover) get().refreshQueueMeta()
             // 封面要等解出来、落盘之后才报给系统媒体面板，否则任务栏那格是空的
             if (cover?.path) {
@@ -574,7 +578,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
           // 在线曲目的歌词与封面来自平台接口，和本地那条路完全不同
           void fillOnlineMeta(
             track,
-            () => mineTrack === trackSeq && get().index === i,
+            stillThisTrack,
             () => get().refreshQueueMeta(),
           )
         }
@@ -869,6 +873,9 @@ export const usePlayer = create<PlayerState>((set, get) => {
 
       const mine = ++qualitySeq
       const trackId = track.id
+      // 这轮换入是否仍然作数：没有更新的点击/切歌，引擎里挂着的也还是这首歌。
+      // 六个 await 落点都要问同一句，收口成一个谓词。
+      const stale = () => mine !== qualitySeq || get().current()?.id !== trackId
       let previousBytes: Uint8Array | null = null
       let position = 0
       let shouldResume = false
@@ -878,7 +885,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
       try {
         // 下载阶段不碰引擎，让旧音质继续播放；只有完整字节准备好才原子换入。
         const bytes = await fetchOnlineBytes(track, effective)
-        if (mine !== qualitySeq || get().current()?.id !== trackId) return
+        if (stale()) return
 
         /*
          * 真正换入前留一份临时回滚副本。下载失败时完全不会走到这里，旧音频继续播放；
@@ -889,7 +896,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
          * 马上要换入"这一刻才取，换入成功后立刻撒手，不让它活到 pushNowPlaying 之后。
          */
         previousBytes = await engine.copyLoadedBytes()
-        if (mine !== qualitySeq || get().current()?.id !== trackId) return
+        if (stale()) return
         position = engine.currentTime
         shouldResume = engine.status === "playing"
         loop = engine.loop
@@ -897,11 +904,11 @@ export const usePlayer = create<PlayerState>((set, get) => {
         cancelRetry()
 
         await engine.loadBytes(bytes)
-        if (mine !== qualitySeq || get().current()?.id !== trackId) return
+        if (stale()) return
         engine.seekSeconds(position)
         engine.setLoop(loop.a, loop.b)
         if (shouldResume) await engine.play()
-        if (mine !== qualitySeq || get().current()?.id !== trackId) return
+        if (stale()) return
 
         // 新音质已经稳定发声，回滚副本再无用处：立刻撒手，别让它多活一次事件循环
         previousBytes = null
@@ -918,7 +925,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
         if (previousBytes && get().current()?.id === trackId) {
           try {
             await engine.loadBytes(previousBytes)
-            if (mine !== qualitySeq || get().current()?.id !== trackId) return
+            if (stale()) return
             engine.seekSeconds(position)
             engine.setLoop(loop.a, loop.b)
             if (shouldResume) await engine.play()
