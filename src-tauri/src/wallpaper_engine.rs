@@ -13,6 +13,7 @@
 //! 读文件（媒体与预览）不走这条命令 —— 前端拿到路径后走既有的
 //! allow_paths + readFile 通道，能力域管理与普通底图完全一致。
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -47,7 +48,7 @@ const MAX_WALLPAPERS: usize = 2000;
 #[tauri::command(async)]
 pub fn list_we_wallpapers() -> Vec<WeWallpaper> {
     let mut out: Vec<WeWallpaper> = Vec::new();
-    let mut seen: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
 
     for lib in steam_libraries() {
         let containers = [
@@ -83,7 +84,7 @@ pub fn list_we_wallpapers() -> Vec<WeWallpaper> {
                     continue;
                 }
                 if let Some(w) = index_project(&path, id.clone()) {
-                    seen.push(id);
+                    seen.insert(id);
                     out.push(w);
                 }
             }
@@ -94,7 +95,9 @@ pub fn list_we_wallpapers() -> Vec<WeWallpaper> {
 }
 
 fn sort_wallpapers(mut list: Vec<WeWallpaper>) -> Vec<WeWallpaper> {
-    list.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    // cached_key 而不是 sort_by：后者会在每次比较里各分配一个小写副本，
+    // 两千条就是几万次多余分配（clippy 的 unnecessary_sort_by 也盯着这一条）
+    list.sort_by_cached_key(|w| w.title.to_lowercase());
     list
 }
 
@@ -124,9 +127,7 @@ fn index_project(dir: &Path, id: String) -> Option<WeWallpaper> {
     let media = if kind == "video" || kind == "image" {
         v.get("file")
             .and_then(|f| f.as_str())
-            .filter(|f| !f.is_empty())
-            .map(|f| dir.join(f))
-            .filter(|p| p.is_file())
+            .and_then(|f| resolve_in_dir(dir, f))
             .map(|p| p.to_string_lossy().into_owned())
     } else {
         None
@@ -146,24 +147,45 @@ fn index_project(dir: &Path, id: String) -> Option<WeWallpaper> {
 /// 预览图：project.json 的 preview/cover/poster 字段优先，都不存在时退回约定文件名。
 fn resolve_preview(dir: &Path, v: &serde_json::Value) -> Option<String> {
     for key in ["preview", "cover", "poster"] {
-        let cand = v
+        if let Some(p) = v
             .get(key)
             .and_then(|p| p.as_str())
-            .filter(|p| !p.is_empty())
-            .map(|p| dir.join(p));
-        if let Some(p) = cand {
-            if p.is_file() {
-                return Some(p.to_string_lossy().into_owned());
-            }
+            .and_then(|p| resolve_in_dir(dir, p))
+        {
+            return Some(p.to_string_lossy().into_owned());
         }
     }
     for name in ["preview.jpg", "preview.png"] {
-        let p = dir.join(name);
-        if p.is_file() {
+        if let Some(p) = resolve_in_dir(dir, name) {
             return Some(p.to_string_lossy().into_owned());
         }
     }
     None
+}
+
+/// 把 project.json 里的一个相对路径落到壁纸目录内，**并确认它没跑出去**。
+///
+/// `file` / `preview` 这些字段来自第三方（订阅来的工坊内容），而 `Path::join` 遇到
+/// 绝对路径会整个替换 base、`..` 也不做归一化。少了这道检查，一条
+/// `"file": "C:\\Users\\...\\某个文件"` 就能让前端把库外的任意文件放进 asset 能力域
+/// 再喂给 `<video>` / canvas —— 等于让工坊内容替用户决定放行哪条路径。
+///
+/// 返回的是**原始拼法**而不是 canonicalize 的结果：Windows 上后者带 `\\?\` verbatim
+/// 前缀，这种路径传到前端会一路出问题。规范化只用来做包含性判断（顺带把符号链接
+/// 指到库外的情形也挡掉）。
+fn resolve_in_dir(dir: &Path, entry: &str) -> Option<PathBuf> {
+    if entry.is_empty() {
+        return None;
+    }
+    let full = dir.join(entry);
+    if !full.is_file() {
+        return None;
+    }
+    let base = dir.canonicalize().ok()?;
+    if !full.canonicalize().ok()?.starts_with(&base) {
+        return None;
+    }
+    Some(full)
 }
 
 /// 所有 Steam 库根目录（去重）。Steam 根自身也是一个库。
@@ -349,6 +371,31 @@ mod tests {
         let w = index_project(&dir, "789".into()).unwrap();
         assert_eq!(w.media, None, "file 字段指向不存在的文件时不能给出死路径");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn index_project_rejects_paths_outside_the_wallpaper_dir() {
+        // 工坊内容是第三方数据。绝对路径（Path::join 会整个替换 base）和 ..（join 不
+        // 归一化）都不能把 media/preview 指到目录外 —— 那等于让别人的 project.json
+        // 决定前端把哪条路径放进 asset 能力域。
+        let root = std::env::temp_dir().join("vinyl_we_test_escape");
+        let _ = fs::remove_dir_all(&root);
+        let dir = root.join("wallpaper");
+        let outside = root.join("库外文件.mp4");
+        write(&outside, b"x");
+        let abs = outside.to_string_lossy().replace('\\', "\\\\");
+        write(
+            &dir.join("project.json"),
+            format!(
+                r#"{{"type":"video","title":"t","file":"{abs}","preview":"../库外文件.mp4"}}"#
+            )
+            .as_bytes(),
+        );
+
+        let w = index_project(&dir, "999".into()).unwrap();
+        assert_eq!(w.media, None, "绝对路径必须被挡下");
+        assert_eq!(w.preview, None, ".. 逃逸必须被挡下");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
