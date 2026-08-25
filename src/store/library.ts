@@ -639,7 +639,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
      *
      * **必须先取回字节再造 blob**，不能把远端 URL 直接塞进 `<img>`：CSP 的 `img-src`
      * 只放行 `'self' blob: data:`，远端地址一律被拦；而且平台的图床常要校验 Referer，
-     * WebView 里的 `<img>` 设不了。走 plugin-http 从 Rust 侧取则两个问题都没有。
+     * WebView 里的 `<img>` 设不了。走平台层的 request()（Tauri 下由 Rust 转发）取则两个问题都没有。
      *
      * 落一份到磁盘是为了系统媒体面板 —— 它读不了 blob:，只认真实文件路径。
      */
@@ -647,8 +647,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
       if (!get().byId(id) || probedCovers.has(id)) return
       probedCovers.add(id)
       try {
-        const { fetch: tauriFetch } = await import("@tauri-apps/plugin-http")
-        const res = await tauriFetch(url, { method: "GET" })
+        const res = await platform.request(url, { method: "GET" })
         if (!res.ok) return
         const mime = res.headers.get("content-type") ?? "image/jpeg"
         const data = new Uint8Array(await res.arrayBuffer())

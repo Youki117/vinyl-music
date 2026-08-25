@@ -487,7 +487,7 @@ class Engine {
    * **不把 URL 直接交给 `<audio>`**，而是先整段取回再走上面那条 Blob 路径。三个理由：
    *
    *   1. 音乐平台的 CDN 不给浏览器来源发 CORS 头，也常常要校验 Referer / UA。
-   *      WebView 里的 `<audio>` 两样都做不到，只有走 plugin-http 从 Rust 侧取才拿得到。
+   *      WebView 里的 `<audio>` 两样都做不到，只有走平台层的 request()（Tauri 下由 Rust 转发）才拿得到。
    *   2. 这些直链大多是 `http://`，而 CSP 的 `media-src` 只放行了 `blob:` 与 `https:`。
    *      为一个可选功能把整个应用的 CSP 放宽到 `http:`，不值。
    *   3. 与本地文件同一条路径，播放行为、进度、A-B 区间的语义完全一致，不用维护两套。
@@ -509,8 +509,7 @@ class Engine {
    * 绝不能碰 `<audio>`。
    */
   async fetchAudio(url: string): Promise<Uint8Array> {
-    const { fetch: tauriFetch } = await import("@tauri-apps/plugin-http")
-    const res = await tauriFetch(url, { method: "GET" })
+    const res = await platform.request(url, { method: "GET" })
     if (!res.ok) throw new Error(`音源地址取回失败：HTTP ${res.status}`)
     const bytes = new Uint8Array(await res.arrayBuffer())
     if (bytes.byteLength > MAX_FILE_BYTES) throw new Error("文件过大")

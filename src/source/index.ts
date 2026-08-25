@@ -35,7 +35,6 @@ const builtinScripts = import.meta.glob("./builtin/*.js", {
   import: "default",
   eager: true,
 }) as Record<string, string>
-import { fetch as tauriFetch } from "@tauri-apps/plugin-http"
 import { lxLyricToEnhancedLrc } from "./lyric"
 import { SOURCES, qqPlaylistIdOfInput, type SourceId } from "./catalog"
 
@@ -138,14 +137,14 @@ async function resolveQqPlaylistId(input: string): Promise<string> {
   const direct = qqPlaylistIdOfInput(input)
   if (direct) return direct
 
-  // 短链本身没有 id。让 Tauri HTTP 跟完重定向后，再从最终 URL 里取。
+  // 短链本身没有 id。让平台层的 HTTP 跟完重定向后，再从最终 URL 里取。
   const url = firstUrl(input)
   if (!url) throw new Error("QQ 歌单链接里没有找到歌单 id")
   const host = new URL(url).hostname.toLowerCase()
   if (host !== "qq.com" && !host.endsWith(".qq.com")) {
     throw new Error("这不是 QQ 音乐的歌单链接")
   }
-  const res = await tauriFetch(url, { method: "GET" })
+  const res = await platform.request(url)
   const redirected = qqPlaylistIdOfInput(res.url)
   if (!redirected) throw new Error("QQ 歌单短链没有解析出歌单 id")
   return redirected
@@ -186,7 +185,7 @@ async function getQqPlaylist(idOrLink: string, page: number): Promise<OnlinePlay
     },
   }
   const url = `https://u.y.qq.com/cgi-bin/musicu.fcg?data=${encodeURIComponent(JSON.stringify(request))}`
-  const res = await tauriFetch(url, {
+  const res = await platform.request(url, {
     method: "GET",
     headers: { "User-Agent": "Mozilla/5.0" },
   })
@@ -548,13 +547,13 @@ async function findSameTrack(source: SourceId, track: OnlineTrack): Promise<Onli
 /**
  * 这个地址给出来的到底是不是音频。
  *
- * 只要头 2 个字节，服务端支持 Range 就几乎不产生流量。走 plugin-http 从 Rust 侧发 ——
+ * 只要头 2 个字节，服务端支持 Range 就几乎不产生流量。走平台层的 request() 从外壳侧发 ——
  * 音乐平台的 CDN 不会给浏览器来源发 CORS 头，在 WebView 里直接 fetch 一律失败。
  */
 async function isAudio(url: string): Promise<boolean> {
   if (!/^https?:\/\//.test(url)) return false
   try {
-    const res = await tauriFetch(url, { method: "GET", headers: { Range: "bytes=0-1" } })
+    const res = await platform.request(url, { method: "GET", headers: { Range: "bytes=0-1" } })
     if (res.status !== 200 && res.status !== 206) return false
     const type = res.headers.get("content-type") ?? ""
     // 有的 CDN 就是不给 content-type，那就当它是音频 —— 宁可放过，不可错杀
