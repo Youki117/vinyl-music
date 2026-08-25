@@ -93,8 +93,13 @@ export function create(): Platform {
     },
 
     async pickImage() {
-      const [file] = await openPicker({ accept: "image/*" })
+      const [file] = await openPicker({ accept: "image/*,video/*" })
       return file ? toRef(file) : null
+    },
+
+    // Wallpaper Engine 是本机 Steam 安装的概念，浏览器里没有
+    async listWallpaperEngine() {
+      return []
     },
 
     async readFile(ref) {

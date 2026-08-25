@@ -1,8 +1,14 @@
 /**
  * Tauri 实现。所有 @tauri-apps/* 的 import 都收敛在本文件里。
  */
-import type { FileRef, Platform, WindowControls } from "./types"
-import { AUDIO_EXTENSIONS, PLAYLIST_EXTENSIONS, SCRIPT_EXTENSIONS } from "./types"
+import type { FileRef, Platform, WeWallpaper, WindowControls } from "./types"
+import {
+  AUDIO_EXTENSIONS,
+  IMAGE_EXTENSIONS,
+  PLAYLIST_EXTENSIONS,
+  SCRIPT_EXTENSIONS,
+  VIDEO_EXTENSIONS,
+} from "./types"
 import { decodeText } from "@/lib/text"
 import { isUnderDir, normalizeWin } from "@/lib/path"
 
@@ -72,6 +78,30 @@ async function grantPaths(paths: string[]): Promise<void> {
 async function ensureCacheDir(): Promise<void> {
   if (!(await exists(CACHE_DIR, { baseDir: BaseDirectory.AppData }))) {
     await mkdir(CACHE_DIR, { baseDir: BaseDirectory.AppData, recursive: true })
+  }
+}
+
+/**
+ * 断电窗口恢复（writeConfig 的另一半）。
+ *
+ * 写流程是「写 tmp → 删旧 → 改名」。在删旧与改名之间崩掉的话，正式文件不在而 tmp
+ * 完好 —— 曲库这种攒出来的数据不能就这么没了。这里把 tmp 扶正并返回内容；
+ * tmp 自己也坏（写在半截断电）就当没有，那时旧文件还没被删，正常路径读得到。
+ */
+async function recoverTmp<T>(name: string): Promise<T | null> {
+  const tmp = `${name}.tmp.json`
+  const dst = `${name}.json`
+  try {
+    if (!(await exists(tmp, { baseDir: BaseDirectory.AppData }))) return null
+    const value = JSON.parse(await readTextFile(tmp, { baseDir: BaseDirectory.AppData })) as T
+    await rename(tmp, dst, {
+      oldPathBaseDir: BaseDirectory.AppData,
+      newPathBaseDir: BaseDirectory.AppData,
+    }).catch(() => {})
+    console.warn(`配置 ${dst} 从中断的写入中恢复`)
+    return value
+  } catch {
+    return null
   }
 }
 
@@ -171,7 +201,11 @@ export function create(): Platform {
       const picked = await open({
         multiple: false,
         directory: false,
-        filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "webp", "avif", "bmp"] }],
+        filters: [
+          { name: "图片或视频", extensions: [...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS] },
+          { name: "图片", extensions: [...IMAGE_EXTENSIONS] },
+          { name: "视频", extensions: [...VIDEO_EXTENSIONS] },
+        ],
       })
       if (!picked || Array.isArray(picked)) return null
       return refOf(picked)
@@ -302,7 +336,10 @@ export function create(): Platform {
       const file = `${name}.json`
       let raw: string
       try {
-        if (!(await exists(file, { baseDir: BaseDirectory.AppData }))) return null
+        if (!(await exists(file, { baseDir: BaseDirectory.AppData }))) {
+          // 正式文件不在，先看看是不是倒在了"删旧→改名"的断电窗口里
+          return recoverTmp<T>(name)
+        }
         raw = await readTextFile(file, { baseDir: BaseDirectory.AppData })
       } catch (e) {
         // 权限或 IO 问题。抛出去会把整个 init() 带崩，界面停在空白态；
@@ -405,16 +442,32 @@ export function create(): Platform {
     onOpenFiles(handler) {
       let unlisten: (() => void) | null = null
       let cancelled = false
-      void listen<string[]>("player://open-files", async (e) => {
-        const paths = e.payload ?? []
+
+      const deliver = async (paths: string[]): Promise<void> => {
         if (paths.length === 0) return
         // 命令行传进来的路径同样不在静态能力域里
         await grantPaths(paths)
         handler(paths)
+      }
+
+      void listen<string[]>("player://open-files", (e) => {
+        void deliver(e.payload ?? [])
       }).then((fn) => {
-        if (cancelled) fn()
-        else unlisten = fn
+        if (cancelled) {
+          fn()
+          return
+        }
+        unlisten = fn
+        /*
+         * 监听挂稳了，回来取启动期间攒下的那批文件（命令行、"打开方式"、拖到 exe 上）。
+         * Rust 侧把它们存在托管队列里等这一取 —— 取完即清，此后二次启动走事件。
+         * 之前是 Rust 睡 1200ms 赌这边就位，慢机器上会静默丢文件。
+         */
+        void invoke<string[]>("take_open_files")
+          .then((pending) => deliver(pending))
+          .catch(() => {})
       })
+
       return () => {
         cancelled = true
         unlisten?.()
@@ -435,6 +488,10 @@ export function create(): Platform {
         cancelled = true
         unlisten?.()
       }
+    },
+
+    async listWallpaperEngine() {
+      return invoke<WeWallpaper[]>("list_we_wallpapers")
     },
 
     window: makeWindowControls(),

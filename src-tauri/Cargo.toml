@@ -34,6 +34,8 @@ tauri-plugin-global-shortcut = "2"
 souvlaki = "0.8"
 # 窗口比例锁定：SetWindowSubclass 挂 WM_SIZING（aspect.rs）。Cargo.lock 里已有该版本（传递依赖）。
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+# Wallpaper Engine 壁纸发现：读 Steam 的注册表项（HKCU SteamPath / HKLM InstallPath）
+winreg = "0.55"
 
 [profile.release]
 # 体积优先：PRD §7 要求安装包 < 20MB
