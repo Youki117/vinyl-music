@@ -850,6 +850,11 @@ export const useLibrary = create<LibraryState>((set, get) => {
     byId(id) {
       // O(1)。此前是 tracks.find —— 全库最高频的查找挂在播放路径上，
       // refreshQueueMeta 对队列每首都查一次，万首库下是平方级的空转
+      const { tracks } = get()
+      if (tracks !== indexedTracks) {
+        indexedTracks = tracks
+        byIdIndex = new Map(tracks.map((t) => [t.id, t]))
+      }
       return byIdIndex.get(id)
     },
   }
@@ -859,16 +864,18 @@ export const useLibrary = create<LibraryState>((set, get) => {
  * 曲目 id → Track 的索引，给 byId 用。
  *
  * 本文件所有对 tracks 的变更都是不可变更新（换新数组），所以拿**数组引用**判断要不要
- * 重建即可：一批变更（导入、批量改封面）只在第一次 set 时付一次 O(n)，之后的全部
- * 查找都是 O(1)。订阅必须挂在模块级 —— 它要覆盖 store 的一生，而不是某个组件的。
+ * 重建即可：一批变更（导入、批量改封面）只在变更后第一次查找时付一次 O(n)，
+ * 之后的全部查找都是 O(1)。
+ *
+ * **在 byId 里按需重建，不挂 store 订阅。** 订阅那种写法能跑，但对的理由很脆：它要求
+ * 索引那个监听器永远排在 React 的监听器前面（靠"模块求值早于组件挂载"），而
+ * `Disc.tsx` / `MiniPlayer.tsx` 的 selector 恰好是 `useLibrary((s) => s.byId(id)?.cover)`
+ * —— 一旦顺序变了（比如哪天给 store 套个中间件），selector 会读到上一版索引，
+ * 而这种错不会报错，只会偶发地显示旧封面。按需重建把这条前提整个去掉：
+ * 索引只跟 `tracks` 的引用走，谁先谁后都不影响。顺带还省掉了"没人查也照样重建"。
  */
 let byIdIndex = new Map<string, Track>()
 let indexedTracks: Track[] | null = null
-useLibrary.subscribe((s) => {
-  if (s.tracks === indexedTracks) return
-  indexedTracks = s.tracks
-  byIdIndex = new Map(s.tracks.map((t) => [t.id, t]))
-})
 
 function isVirtual(v: ViewId): v is VirtualView {
   return (VIRTUAL_VIEWS as readonly string[]).includes(v)
