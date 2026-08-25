@@ -56,6 +56,18 @@ describe("planEviction", () => {
     expect(doomed).toEqual(["v1", "v2", "v3", "v4", "v5", "v6"])
   })
 
+  it("刚读好的那份必须一起钉住，否则预读会被自己撤掉", () => {
+    /*
+     * 视频换视频：setBackdrop 会先预读一次确认目标能打开，而那一刻 pinnedIds 还是
+     * 上一轮的（只有旧视频）。第一条断言就是没钉时的下场 —— 刚读好的 new 当场被判死，
+     * refreshImages 只好把整套 probeVideo（metadata + seek + 全分辨率 toDataURL）重跑一遍。
+     * 所以 evictMedia 要接 justLoaded 一并钉住。
+     */
+    const entries = [vid("old"), vid("new")]
+    expect(planEviction(entries, ["old"], LIMITS)).toEqual(["new"])
+    expect(planEviction(entries, ["old", "new"], LIMITS)).toEqual([])
+  })
+
   it("图片不受视频那条上限影响", () => {
     const entries = [img("a"), img("b"), img("c"), vid("v")]
     expect(planEviction(entries, [], LIMITS)).toEqual([])

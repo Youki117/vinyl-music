@@ -169,9 +169,19 @@ function scheduleFadingEnd(
   }, 700)
 }
 
-function evictMedia(): void {
+/**
+ * 收一次缓存。`justLoaded` 是**本次刚装进去的那条**，一并钉住。
+ *
+ * 不钉的话，视频那条上限（1）会在最常见的一步上反咬：`setBackdrop` 会先预读一次确认
+ * 目标能打开，而那一刻 `pinnedIds` 还是上一轮的（旧视频在里面）—— 于是 planEviction
+ * 的视频轮跳过钉着的旧视频，把刚读好的新视频判死。画面最终是对的（refreshImages
+ * 会再读一次），代价是每次视频换视频都白跑一整套 probeVideo：metadata + seek +
+ * 全分辨率 drawImage + toDataURL，4K 下就是主线程上多卡几十毫秒。
+ */
+function evictMedia(justLoaded?: string): void {
   const entries = [...urlCache].map(([id, media]) => ({ id, kind: media.kind }))
-  for (const id of planEviction(entries, pinnedIds, {
+  const pinned = justLoaded ? [...pinnedIds, justLoaded] : pinnedIds
+  for (const id of planEviction(entries, pinned, {
     total: URL_CACHE_MAX,
     video: VIDEO_CACHE_MAX,
   })) {
@@ -222,7 +232,7 @@ async function loadMedia(id: string | null): Promise<LoadedMedia | null> {
   try {
     const loaded = video ? await probeVideo(url) : await probeImage(url)
     urlCache.set(id, loaded)
-    evictMedia()
+    evictMedia(id)
     return loaded
   } catch (err) {
     // 加载失败的 URL 也要还回去，不然这条泄漏路径反而最容易被触发
