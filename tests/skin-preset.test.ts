@@ -37,18 +37,28 @@ vi.stubGlobal(
   },
 )
 
-vi.mock("@/platform", () => ({
-  platform: {
-    readConfig: vi.fn(async () => null),
-    writeConfig: vi.fn(async () => {}),
-    readFile: vi.fn(async () => new Uint8Array([1])),
-    saveImage: vi.fn(async () => ({ id: "x", name: "x", size: 1, mtime: 0 })),
-    removeFile: vi.fn(async () => {}),
-  },
-  // skin.ts 加载底图时用它。漏了这个导出，refreshImages 会抛出来 ——
-  // 断言照样过（那条路径不影响预设逻辑），但控制台会刷一片红，久了就没人看测试输出了
-  toObjectUrl: vi.fn(async () => "blob:fake"),
-}))
+vi.mock("@/platform", async () => {
+  /*
+   * 判扩展名的那几个是纯函数，用真的 —— 假一份出来等于在测试里再维护一张扩展名表，
+   * 而且假的永远不会因为 VIDEO_EXTENSIONS 改动而失效，是最难发现的那种腐坏。
+   * 从 types 取而不是从 index 取：index 会做运行环境探测，这里不需要。
+   */
+  const actual = await vi.importActual<typeof import("@/platform/types")>("@/platform/types")
+  return {
+    platform: {
+      readConfig: vi.fn(async () => null),
+      writeConfig: vi.fn(async () => {}),
+      readFile: vi.fn(async () => new Uint8Array([1])),
+      saveImage: vi.fn(async () => ({ id: "x", name: "x", size: 1, mtime: 0 })),
+      removeFile: vi.fn(async () => {}),
+    },
+    // skin.ts 加载底图时用这三个。漏掉任何一个，refreshImages 都会抛出来 ——
+    // 断言照样过（那条路径不影响预设逻辑），但控制台会刷一片红，久了就没人看测试输出了
+    toObjectUrl: vi.fn(async () => "blob:fake"),
+    isVideoFile: actual.isVideoFile,
+    videoMime: actual.videoMime,
+  }
+})
 
 // 取色要读真实图片，测试环境里没有；不影响预设逻辑本身
 vi.mock("fast-average-color", () => ({
