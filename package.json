@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "visual": "node scripts/compare-visual.mjs",
     "probe:source": "node scripts/probe-source.mjs",
+    "sign": "node scripts/sign.mjs",
     "tauri": "tauri"
   },
   "dependencies": {
