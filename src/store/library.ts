@@ -4,6 +4,7 @@ import { isLyricFile, platform, type FileRef } from "@/platform"
 import { readCover, readMetadataLazy } from "@/audio/metadata"
 import { formatM3u, matchByName, parseM3u } from "@/lib/m3u"
 import { baseName, cleanTitle, stripExt } from "@/lib/text"
+import { createConfigSaver } from "./configSaver"
 
 /**
  * 曲目从哪来。**判别联合而不是可空字段**，是为了让类型逼着每个调用点表态 ——
@@ -276,14 +277,12 @@ type LibraryState = {
   byId(id: string): Track | undefined
 }
 
-let saveTimer = 0
-
 export const useLibrary = create<LibraryState>((set, get) => {
-  const save = () => {
-    window.clearTimeout(saveTimer)
-    saveTimer = window.setTimeout(() => {
+  const save = createConfigSaver<LibraryFile>(
+    "library",
+    () => {
       const s = get()
-      const file: LibraryFile = {
+      return {
         schemaVersion: SCHEMA,
         coverFiles: Object.fromEntries(coverFiles),
         tracks: s.tracks.map(({ cover: _c, lyrics: _l, missing: _m, ...rest }) => rest),
@@ -292,9 +291,9 @@ export const useLibrary = create<LibraryState>((set, get) => {
         sort: s.sort,
         sortDesc: s.sortDesc,
       }
-      void platform.writeConfig("library", file)
-    }, 1000)
-  }
+    },
+    1000,
+  )
 
   /**
    * 记下这首歌的封面已物化，并按 LRU 淘汰旧的。

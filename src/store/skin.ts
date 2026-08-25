@@ -14,6 +14,7 @@ import { builtinBackdropUrl } from "@/skin/backdrops"
 import { planEviction } from "@/skin/evict"
 import { labelSourceId } from "@/skin/resolve"
 import type { VeilParams } from "@/stage/veil/renderer"
+import { createConfigSaver } from "./configSaver"
 
 /**
  * 底图的运行时解析结果。持久化的是 FileRef.id，用时才转成 object URL。
@@ -339,20 +340,19 @@ function videoEvent(el: HTMLVideoElement, event: string): Promise<void> {
   })
 }
 
-let saveTimer = 0
-function scheduleSave(get: () => SkinState): void {
-  window.clearTimeout(saveTimer)
-  // 防抖 1 秒：调蒙版滑块时不要每一帧都写盘
-  saveTimer = window.setTimeout(() => {
-    const { skin, skins } = get()
-    const file: SkinsFile = {
+// 防抖 1 秒：调蒙版滑块时不要每一帧都写盘
+const scheduleSave = createConfigSaver<SkinsFile>(
+  "skins",
+  () => {
+    const { skin, skins } = useSkin.getState()
+    return {
       schemaVersion: SKIN_SCHEMA_VERSION,
       activeId: skin.id,
       skins: skins.map((s) => (s.id === skin.id ? skin : s)),
     }
-    void platform.writeConfig("skins", file)
-  }, 1000)
-}
+  },
+  1000,
+)
 
 function readableImageIds(skin: Skin, history: readonly CustomBackdrop[]): string[] {
   return [...new Set([skin.backdrop, labelSourceId(skin), ...history.map((item) => item.id)])].filter(
@@ -436,7 +436,7 @@ export const useSkin = create<SkinState>((set, get) => ({
      */
     set((s) => ({ skin: { ...s.skin, backdrop: ref.id }, fading: prev, overrideBackdrop: null }))
     await enqueueRefresh(set, get)
-    scheduleSave(get)
+    scheduleSave()
 
     if (shouldRemember && builtinBackdropUrl(ref.id) === null) {
       try {
@@ -478,7 +478,7 @@ export const useSkin = create<SkinState>((set, get) => ({
     const source = ref === "backdrop" ? "backdrop" : ref.id
     set((s) => ({ skin: { ...s.skin, label: { ...s.skin.label, source } } }))
     await enqueueRefresh(set, get)
-    scheduleSave(get)
+    scheduleSave()
   },
 
   patchVeil(p) {
@@ -492,12 +492,12 @@ export const useSkin = create<SkinState>((set, get) => ({
         tintAuto: p.tint !== undefined ? false : s.skin.tintAuto,
       },
     }))
-    scheduleSave(get)
+    scheduleSave()
   },
 
   patchSkin(p) {
     set((s) => ({ skin: { ...s.skin, ...p } }))
-    scheduleSave(get)
+    scheduleSave()
   },
 
   async activate(id) {
@@ -506,14 +506,14 @@ export const useSkin = create<SkinState>((set, get) => ({
     fadingId = get().skin.backdrop
     set((s) => ({ skin: next, fading: s.backdrop }))
     await enqueueRefresh(set, get)
-    scheduleSave(get)
+    scheduleSave()
     scheduleFadingEnd(set, get)
   },
 
   async saveAs(name) {
     const copy = makeSkin({ ...get().skin, id: undefined as unknown as string, name })
     set((s) => ({ skins: [...s.skins, copy], skin: copy }))
-    scheduleSave(get)
+    scheduleSave()
   },
 
   async removeSkin(id) {
@@ -525,7 +525,7 @@ export const useSkin = create<SkinState>((set, get) => ({
     set({ skins: rest })
     // 删的正好是当前这个，就切到剩下的第一个（activate 里会顺带落盘）
     if (skin.id === id) await get().activate(rest[0].id)
-    else scheduleSave(get)
+    else scheduleSave()
   },
 
   /**
@@ -545,7 +545,7 @@ export const useSkin = create<SkinState>((set, get) => ({
     // 没有意义；反过来如果是手调后存的，就该保持手动。让预设携带它自己的意图。
     set((s) => ({ skin: { ...s.skin, veil: { ...src.veil }, tintAuto: src.tintAuto } }))
     await enqueueRefresh(set, get)
-    scheduleSave(get)
+    scheduleSave()
   },
 }))
 

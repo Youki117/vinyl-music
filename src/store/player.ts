@@ -11,6 +11,7 @@ import { clampGainDb, gainDbFor, loadLoudness } from "@/audio/loudness"
 import { ensureSource } from "@/source/boot"
 import { localRef, useLibrary, type Track } from "./library"
 import { ShuffleOrder } from "./shuffle"
+import { createConfigSaver } from "./configSaver"
 
 export type { Track } from "./library"
 
@@ -433,8 +434,6 @@ function resetPlayCounter(): void {
   counted = false
 }
 
-let saveTimer = 0
-
 /** 上一次报给系统媒体面板的曲目与状态，用来判断有没有必要再报一次 */
 let smtcKey = ""
 /** 曲目 id → 封面文件路径。由 library.ensureCover 落盘后回填。 */
@@ -499,11 +498,11 @@ function pushNowPlaying(
 }
 
 export const usePlayer = create<PlayerState>((set, get) => {
-  const save = () => {
-    window.clearTimeout(saveTimer)
-    saveTimer = window.setTimeout(() => {
+  const save = createConfigSaver<SettingsFile>(
+    "settings",
+    () => {
       const s = get()
-      const file: SettingsFile = {
+      return {
         schemaVersion: SETTINGS_SCHEMA,
         volume: s.volume,
         mode: s.mode,
@@ -515,9 +514,9 @@ export const usePlayer = create<PlayerState>((set, get) => {
         normalize: s.normalize,
         onlineQuality: s.onlineQuality,
       }
-      void platform.writeConfig("settings", file)
-    }, 1000)
-  }
+    },
+    1000,
+  )
 
   return {
     status: "empty",

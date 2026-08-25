@@ -1,6 +1,7 @@
 import { create } from "zustand"
 
 import { platform } from "@/platform"
+import { createConfigSaver } from "./configSaver"
 
 /**
  * 组件位置自定义（需求 §4.3）。
@@ -165,20 +166,16 @@ type LayoutState = {
   persist(): void
 }
 
-let saveTimer = 0
-
 export const useLayout = create<LayoutState>((set, get) => {
-  const save = () => {
-    window.clearTimeout(saveTimer)
-    saveTimer = window.setTimeout(() => {
-      const file: LayoutFile = {
-        schemaVersion: SCHEMA,
-        offsets: get().offsets,
-        ...(get().sidebarOrder ? { sidebarOrder: get().sidebarOrder ?? undefined } : {}),
-      }
-      void platform.writeConfig("layout", file)
-    }, 400)
-  }
+  const save = createConfigSaver<LayoutFile>(
+    "layout",
+    () => ({
+      schemaVersion: SCHEMA,
+      offsets: get().offsets,
+      ...(get().sidebarOrder ? { sidebarOrder: get().sidebarOrder ?? undefined } : {}),
+    }),
+    400,
+  )
 
   return {
     offsets: {},

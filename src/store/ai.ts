@@ -26,6 +26,7 @@ import { thumbnailFromBytes } from "@/ai/thumbnail"
 import { generateArtwork, generateFromPrompt, hash, type Progress } from "@/ai/generate"
 import type { Track } from "./library"
 import { useSkin } from "./skin"
+import { createConfigSaver } from "./configSaver"
 
 const SCHEMA = 3
 
@@ -84,7 +85,6 @@ type AiState = {
 }
 
 let controller: AbortController | null = null
-let saveTimer = 0
 
 /**
  * 生成请求代际。
@@ -104,18 +104,18 @@ function baseBackdropId(): string | null {
 }
 
 export const useAi = create<AiState>((set, get) => {
-  const save = () => {
-    window.clearTimeout(saveTimer)
-    saveTimer = window.setTimeout(() => {
+  const save = createConfigSaver<AiFile>(
+    "ai",
+    () => {
       const s = get()
-      const file: AiFile = {
+      return {
         schemaVersion: SCHEMA,
         config: s.config,
         ...artworkFile(s.artwork, s.pinned, s.budgetBytes),
       }
-      void platform.writeConfig("ai", file)
-    }, 800)
-  }
+    },
+    800,
+  )
 
   /** 超预算就从最久没用到的开始删，文件一起删掉 */
   const enforceBudget = () => {
