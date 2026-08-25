@@ -12,7 +12,7 @@ import {
 import { decodeText } from "@/lib/text"
 import { isUnderDir, normalizeWin } from "@/lib/path"
 
-import { invoke } from "@tauri-apps/api/core"
+import { convertFileSrc, invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 import { appDataDir } from "@tauri-apps/api/path"
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http"
@@ -213,6 +213,21 @@ export function create(): Platform {
 
     async readFile(ref) {
       return fsReadFile(ref.id)
+    },
+
+    async streamUrl(path) {
+      /*
+       * 放行必须在返回之前 await 完。
+       *
+       * asset 协议查的是**自己那份** scope（tauri 的 protocol/asset.rs 里
+       * `scope.is_allowed`），`allow_paths` 放行过的路径在这里照样 403。而 403 落到
+       * `<video>` 上就是"没有可用的源"—— 不抛错，只是一片空白。放行要是与返回并行
+       * 发出去，就变成一个只在慢机器上偶发的空白底图。
+       */
+      await invoke<number>("allow_asset_paths", { paths: [path] }).catch((e) => {
+        console.warn("放行 asset 路径失败", e)
+      })
+      return convertFileSrc(path)
     },
 
     async readSlice(ref, offset, length) {

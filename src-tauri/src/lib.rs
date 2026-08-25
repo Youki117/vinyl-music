@@ -68,6 +68,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             scan::scan_audio_files,
             grant::allow_paths,
+            grant::allow_asset_paths,
             slice::read_file_slice,
             open_files::take_open_files,
             wallpaper_engine::list_we_wallpapers,

@@ -49,6 +49,9 @@ vi.mock("@/platform", async () => {
       readConfig: vi.fn(async () => null),
       writeConfig: vi.fn(async () => {}),
       readFile: vi.fn(async () => new Uint8Array([1])),
+      // 预设测试用的是 .jpg，走不到这条；备着是因为一旦哪天走到，
+      // undefined 会变成一个被 refreshImages 吞掉的 TypeError，查起来很费劲
+      streamUrl: vi.fn(async () => null),
       saveImage: vi.fn(async () => ({ id: "x", name: "x", size: 1, mtime: 0 })),
       removeFile: vi.fn(async () => {}),
     },

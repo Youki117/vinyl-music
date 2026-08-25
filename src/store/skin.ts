@@ -11,6 +11,7 @@ import {
 import { DEFAULT_SKIN, makeSkin, migrateSkins, SKIN_SCHEMA_VERSION, type Skin, type SkinsFile } from "@/skin/model"
 import { dominantColors, veilTintsFrom } from "@/skin/palette"
 import { builtinBackdropUrl } from "@/skin/backdrops"
+import { planEviction } from "@/skin/evict"
 import { labelSourceId } from "@/skin/resolve"
 import type { VeilParams } from "@/stage/veil/renderer"
 
@@ -101,8 +102,31 @@ const fac = new FastAverageColor()
 const urlCache = new Map<string, LoadedMedia>()
 const URL_CACHE_MAX = 6
 
+/**
+ * 视频底图额外的上限。**只留 1 份**（外加钉住的），理由见 skin/evict.ts。
+ *
+ * 一句话：6 这个数是按 2MB 的 jpg 定的，而一段视频底图是整个文件驻留在内存里，
+ * 同一个格子数放视频要贵两个数量级。
+ */
+const VIDEO_CACHE_MAX = 1
+
 /** 正在用的图不能被淘汰掉，否则底图会当场变白 */
 let pinnedIds: string[] = []
+
+/**
+ * 当前真正在显示的那两张（底图 / 贴纸）的 id。
+ *
+ * 底图取**临时覆盖优先**，否则基础底图 —— 取色、平均色、贴纸都得跟着真正显示的那张
+ * 走，否则听一首有专属 AI 配图的歌时，画面是 A 而配色取自 B，文字对比度会算错。
+ *
+ * 抽出来是因为有两处要用同一套判断：refreshImages 进来时钉表，转场结束时重算钉表。
+ * 两边各写一份的话，哪天 label 的取值规则变了，只改一处就会让另一处解错钉。
+ */
+function activeIds(state: SkinState): { backdrop: string | null; label: string | null } {
+  const backdrop = state.overrideBackdrop ?? state.skin.backdrop
+  const label = state.skin.label.source === "backdrop" ? backdrop : labelSourceId(state.skin)
+  return { backdrop, label }
+}
 
 /**
  * 正在交叉淡出的旧底图 id，转场那 700ms 里也不能被淘汰。
@@ -116,19 +140,43 @@ let fadingId: string | null = null
 let fadeSeq = 0
 
 /** 结束转场：只有最后一次安排的定时器有资格清 fading。 */
-function scheduleFadingEnd(set: (p: Partial<SkinState>) => void): void {
+function scheduleFadingEnd(
+  set: (p: Partial<SkinState>) => void,
+  get: () => SkinState,
+): void {
   const mine = ++fadeSeq
   window.setTimeout(() => {
     if (mine !== fadeSeq) return
     fadingId = null
+    /*
+     * 转场结束，旧底图不再需要保护 —— 重算钉表并立刻收一次缓存。
+     *
+     * 不在这里收，那份旧的要等到**下一次 loadMedia** 才有机会被淘汰；而"换一张就
+     * 不动了"恰恰是最常见的用法，于是稳定多占一份。图片时代无所谓（多留一张 jpg），
+     * 视频底图下就是白占几十上百兆。
+     *
+     * 重算而不是从钉表里摘掉 fadingId：用户重新选中同一张图时，fadingId 和当前底图
+     * 是同一个 id，摘掉它等于把正在显示的那张解了钉，下一轮淘汰会把画面撤成白的。
+     *
+     * 与在飞的 refreshImages 不冲突：上面的代际检查保证只有最后一次转场能走到这里，
+     * 此时在飞的那次读的是同一份状态，算出来的钉表与这里一致，只少一个 fadingId ——
+     * 而那正是要放掉的。
+     */
+    const { backdrop, label } = activeIds(get())
+    pinnedIds = [backdrop, label].filter((v): v is string => !!v)
+    evictMedia()
     set({ fading: null })
   }, 700)
 }
 
 function evictMedia(): void {
-  for (const [id, media] of urlCache) {
-    if (urlCache.size <= URL_CACHE_MAX) break
-    if (pinnedIds.includes(id)) continue
+  const entries = [...urlCache].map(([id, media]) => ({ id, kind: media.kind }))
+  for (const id of planEviction(entries, pinnedIds, {
+    total: URL_CACHE_MAX,
+    video: VIDEO_CACHE_MAX,
+  })) {
+    const media = urlCache.get(id)
+    if (!media) continue
     URL.revokeObjectURL(media.url)
     // poster 是 data: URL，没有可撤的句柄，跟着这条记录一起被 GC
     urlCache.delete(id)
@@ -155,8 +203,20 @@ async function loadMedia(id: string | null): Promise<LoadedMedia | null> {
    */
   const builtin = builtinBackdropUrl(id)
   const video = builtin === null && isVideoFile(id)
+
+  /*
+   * 视频优先走宿主的流式 URL（Tauri 下是 asset://），拿不到才退回 toObjectUrl。
+   *
+   * 差别是本质的：toObjectUrl 把**整个文件**读进内存，一段 200MB 的壁纸就占 200MB，
+   * 与播到第几秒无关；流式那条按 Range 供给，内存只留一个缓冲窗口。图片不走这条 ——
+   * 它们本来就小，而且 poster 直接复用 url，同源省掉一整套 CORS 顾虑。
+   *
+   * 退回路径不是摆设：浏览器 dev 模式没有真实路径，streamUrl 恒返回 null。
+   */
+  const streamed = video ? await platform.streamUrl(id).catch(() => null) : null
   const url =
     builtin ??
+    streamed ??
     (await toObjectUrl({ id, name: id, size: 0, mtime: 0 }, video ? videoMime(id) : undefined))
 
   try {
@@ -193,6 +253,16 @@ async function probeVideo(url: string): Promise<LoadedMedia> {
   el.preload = "auto"
   el.muted = true
   el.playsInline = true
+  /*
+   * 跨源视频会**污染 canvas**，那样下面的 toDataURL 直接抛 SecurityError，poster 取不到，
+   * 蒙版取色、文字配色、唱片贴纸整条链一起断。asset:// 与页面不同源，所以必须声明
+   * anonymous 走一遍 CORS —— tauri 的 protocol/asset.rs 每个响应都带
+   * `Access-Control-Allow-Origin: <window_origin>`，正好放行本窗口。
+   *
+   * blob: 是同源的，本来就不需要，也不该设：给同源资源发起 CORS 检查没有收益，
+   * 只多一条可能出岔子的路径。
+   */
+  if (!url.startsWith("blob:")) el.crossOrigin = "anonymous"
   el.src = url
 
   try {
@@ -373,7 +443,7 @@ export const useSkin = create<SkinState>((set, get) => ({
       }
     }
     // 转场结束后丢掉旧图引用，同时解除钉住
-    scheduleFadingEnd(set)
+    scheduleFadingEnd(set, get)
   },
 
   async setBackdropOverride(id) {
@@ -391,7 +461,7 @@ export const useSkin = create<SkinState>((set, get) => ({
     set({ overrideBackdrop: id, fading: prev })
     await enqueueRefresh(set, get)
     // 刻意不调 scheduleSave：这一层本来就不该落盘
-    scheduleFadingEnd(set)
+    scheduleFadingEnd(set, get)
   },
 
   async setLabelSource(ref) {
@@ -427,7 +497,7 @@ export const useSkin = create<SkinState>((set, get) => ({
     set((s) => ({ skin: next, fading: s.backdrop }))
     await enqueueRefresh(set, get)
     scheduleSave(get)
-    scheduleFadingEnd(set)
+    scheduleFadingEnd(set, get)
   },
 
   async saveAs(name) {
@@ -505,15 +575,8 @@ async function extractTints(img: LoadedMedia): Promise<string[]> {
 async function refreshImages(
   set: (p: Partial<SkinState>) => void,
   get: () => SkinState,
-): Promise<void> {  const { skin, overrideBackdrop } = get()
-  /*
-   * 真正要显示的那张 = 临时覆盖优先，否则基础底图。
-   *
-   * 取色、平均色、贴纸都跟着它走 —— 否则听一首有专属图的歌时，画面是 A 而配色
-   * 取自 B，文字对比度会算错。
-   */
-  const activeBackdrop = overrideBackdrop ?? skin.backdrop
-  const activeLabel = skin.label.source === "backdrop" ? activeBackdrop : labelSourceId(skin)
+): Promise<void> {
+  const { backdrop: activeBackdrop, label: activeLabel } = activeIds(get())
   try {
     // 先钉住这一轮要用的两张，免得加载第二张时把第一张淘汰掉
     pinnedIds = [activeBackdrop, activeLabel, fadingId].filter((v): v is string => !!v)

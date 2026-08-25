@@ -31,6 +31,19 @@ export interface Platform {
   readFile(ref: FileRef): Promise<Uint8Array>
 
   /**
+   * 把本地文件变成一个可以直接喂给 `<video>` 的 **流式** URL —— 不把字节读进内存。
+   *
+   * 存在的理由只有视频底图：`toObjectUrl` 是"整个文件读成 Blob"，一段 200MB 的壁纸
+   * 就实打实占 200MB，且与播到第几秒无关。流式 URL 由宿主按 Range 请求供给，内存只
+   * 留一个缓冲窗口，**占用与文件大小脱钩**。音频不走这条 —— 它要进 Web Audio 做频谱
+   * 分析，跨源会静默污染音频图（见 `toObjectUrl` 的注释）。
+   *
+   * 实现必须在返回之前把访问权放行完毕；调用方拿到 URL 就会立刻去请求它。
+   * 没有这个能力的宿主返回 null，调用方退回 `toObjectUrl`。
+   */
+  streamUrl(path: string): Promise<string | null>
+
+  /**
    * 读取文件的一段字节。越过文件尾时返回实际能读到的部分，不报错。
    *
    * 导入只为读标签，却要把整首无损搬过 IPC —— 这是导入耗时与内存峰值的大头。

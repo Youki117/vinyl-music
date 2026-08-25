@@ -13,7 +13,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+# protocol-asset：视频底图走 asset:// 流式读盘，不再整份读进内存（见 grant.rs 的
+# allow_asset_paths）。这个 feature 必须与 tauri.conf.json 的 assetProtocol.enable 一致，
+# 少一边构建脚本会直接报错。
+tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 # AI 请求必须从 Rust 侧发：OpenAI 兼容的服务基本不给浏览器来源发 CORS 头，

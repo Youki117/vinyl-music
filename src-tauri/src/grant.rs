@@ -1,3 +1,6 @@
+use std::path::Path;
+
+use tauri::Manager;
 use tauri_plugin_fs::FsExt;
 
 /// 把用户明确交给应用的路径加进 fs 运行时能力域。
@@ -13,6 +16,42 @@ use tauri_plugin_fs::FsExt;
 #[tauri::command]
 pub fn allow_paths(app: tauri::AppHandle, paths: Vec<String>) -> Result<usize, String> {
     let scope = app.fs_scope();
+    Ok(grant_each(paths, |path, is_dir| {
+        if is_dir {
+            scope.allow_directory(path, true).map_err(|e| e.to_string())
+        } else {
+            scope.allow_file(path).map_err(|e| e.to_string())
+        }
+    }))
+}
+
+/// 把路径加进 **asset 协议**的运行时能力域。
+///
+/// asset 协议有**自己独立的一份 scope**，和上面那个 fs scope 是两套东西：
+/// `allow_paths` 放行的路径，`asset://` 照样会 403（源码见 tauri 的
+/// `protocol/asset.rs`，它查的是 `asset_protocol_scope`）。而 403 在 `<video>` 上
+/// 表现为"没有可用的源"—— 不抛错，只是一片空白，最难查的那种。
+///
+/// 故意做成独立命令而不是并进 `allow_paths`：走 asset 协议的只有视频底图这一类，
+/// 顺手把每一首导入的音频也放进 asset 域是没必要的扩权。谁用谁申请。
+#[tauri::command]
+pub fn allow_asset_paths(app: tauri::AppHandle, paths: Vec<String>) -> Result<usize, String> {
+    let scope = app.asset_protocol_scope();
+    Ok(grant_each(paths, |path, is_dir| {
+        if is_dir {
+            scope.allow_directory(path, true).map_err(|e| e.to_string())
+        } else {
+            scope.allow_file(path).map_err(|e| e.to_string())
+        }
+    }))
+}
+
+/// 逐条放行，返回成功的条数。两个 scope 的类型不同（一个来自 fs 插件、一个来自
+/// tauri 本体），共用不了同一个句柄，但"怎么放"这套规则必须一致，所以抽在这里。
+fn grant_each(
+    paths: Vec<String>,
+    mut allow: impl FnMut(&Path, bool) -> Result<(), String>,
+) -> usize {
     let mut granted = 0usize;
 
     for p in paths {
@@ -22,16 +61,12 @@ pub fn allow_paths(app: tauri::AppHandle, paths: Vec<String>) -> Result<usize, S
         if !path.exists() {
             continue;
         }
-        let result = if path.is_dir() {
-            scope.allow_directory(&path, true)
-        } else {
-            scope.allow_file(&path)
-        };
-        match result {
+        match allow(&path, path.is_dir()) {
             Ok(()) => granted += 1,
             // 单条失败不该中断整批 —— 一个坏路径不能拖累整个曲库
             Err(e) => eprintln!("放行失败 {p}：{e}"),
         }
     }
-    Ok(granted)
+
+    granted
 }
