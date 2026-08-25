@@ -462,6 +462,9 @@ export function create(): Platform {
         if (paths.length === 0) return
         // 命令行传进来的路径同样不在静态能力域里
         await grantPaths(paths)
+        // 取回执和放行都是异步的，这中间可能已经退订了。退订之后再回调，
+        // 等于把文件交给一个不在了的界面
+        if (cancelled) return
         handler(paths)
       }
 

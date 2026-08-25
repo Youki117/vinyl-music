@@ -1,4 +1,7 @@
 mod grant;
+// 托管队列只在 setup 的 #[cfg(desktop)] 分支里 manage，命令注册也必须跟着走同一个
+// cfg —— 只注册不 manage 的话，State<PendingOpenFiles> 会在 invoke 时 panic
+#[cfg(desktop)]
 mod open_files;
 mod scan;
 mod slice;
@@ -12,6 +15,7 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
 
+#[cfg(desktop)]
 use std::sync::Mutex;
 
 /// 前端约定的事件名。媒体键、托盘菜单、系统媒体面板都转成同一套事件，
@@ -70,6 +74,7 @@ pub fn run() {
             grant::allow_paths,
             grant::allow_asset_paths,
             slice::read_file_slice,
+            #[cfg(desktop)]
             open_files::take_open_files,
             wallpaper_engine::list_we_wallpapers,
             #[cfg(target_os = "windows")]

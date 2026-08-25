@@ -13,5 +13,8 @@ pub struct PendingOpenFiles(pub Mutex<Vec<String>>);
 /// 前端来取启动文件。原子取出（取完即空），同一批不会被交付两次。
 #[tauri::command]
 pub fn take_open_files(state: tauri::State<'_, PendingOpenFiles>) -> Vec<String> {
-    std::mem::take(&mut *state.0.lock().expect("PendingOpenFiles 锁中毒"))
+    // 中毒了也照样取：这把锁只保护一个 Vec，里面的值不会因为上一次 panic 而不一致。
+    // 为它 panic 是把"启动文件没送到"升级成"整个应用炸了"，方向反了。
+    let mut pending = state.0.lock().unwrap_or_else(|e| e.into_inner());
+    std::mem::take(&mut *pending)
 }
