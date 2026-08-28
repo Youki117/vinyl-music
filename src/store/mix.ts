@@ -1,6 +1,7 @@
 import { create } from "zustand"
 
 import { platform } from "@/platform"
+import { createConfigSaver } from "./configSaver"
 import { AudioLayer, type LayerConfig } from "@/audio/layer"
 import { initialClips, type Clip } from "@/audio/clips"
 import { engine } from "@/audio/engine"
@@ -39,16 +40,13 @@ const live = new Map<string, AudioLayer>()
 /** sync 的代际号。await 期间递增即表示这一轮已经过期。 */
 let syncGeneration = 0
 let unsubscribeClock: (() => void) | null = null
-let saveTimer = 0
 
 export const useMix = create<MixState>((set, get) => {
-  const save = () => {
-    window.clearTimeout(saveTimer)
-    saveTimer = window.setTimeout(() => {
-      const file: MixFile = { schemaVersion: SCHEMA, mixes: get().mixes }
-      void platform.writeConfig("mix", file)
-    }, 800)
-  }
+  const save = createConfigSaver<MixFile>(
+    "mix",
+    () => ({ schemaVersion: SCHEMA, mixes: get().mixes }),
+    800,
+  )
 
   /**
    * 把 live 里的实例调成与配置一致。

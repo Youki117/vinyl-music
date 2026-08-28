@@ -11,6 +11,9 @@ import { clampGainDb, gainDbFor, loadLoudness } from "@/audio/loudness"
 import { ensureSource } from "@/source/boot"
 import { localRef, useLibrary, type Track } from "./library"
 import { ShuffleOrder } from "./shuffle"
+import { createConfigSaver } from "./configSaver"
+import { pushNowPlaying, setNowPlayingCoverPath } from "./nowPlaying"
+import { dropPrefetch, schedulePrefetch, takePrefetch } from "./prefetch"
 
 export type { Track } from "./library"
 
@@ -142,6 +145,7 @@ type PlayerState = {
 }
 
 const shuffle = new ShuffleOrder()
+export { shuffle }
 
 /**
  * 在线曲目的播放与元数据。
@@ -188,7 +192,7 @@ async function loadOnline(
 }
 
 /** 只取回字节，不碰 `<audio>`。预取用它 —— 那时当前这首还在放。 */
-async function fetchOnlineBytes(track: Track, quality: OnlineQuality): Promise<Uint8Array> {
+export async function fetchOnlineBytes(track: Track, quality: OnlineQuality): Promise<Uint8Array> {
   const online = asOnlineTrack(track)
   if (!online) throw new Error("曲目来源不明")
   const { resolvePlayUrl } = await onlineModule()
@@ -230,7 +234,7 @@ async function fillOnlineMeta(track: Track, stillCurrent: () => boolean, refresh
 }
 
 /** 曲目的响度缓存键。本地带上大小与修改时间，文件被换掉时缓存自动失效 */
-function loudnessKey(track: Track): string {
+export function loudnessKey(track: Track): string {
   const ref = localRef(track)
   return ref ? `${ref.id}|${ref.size}|${ref.mtime}` : track.id
 }
@@ -262,91 +266,6 @@ async function applyTrackGain(
 }
 
 // ── 预加载下一首（F1.6：切换间隔 < 200ms）────────────────────
-
-/**
- * 预取好的下一首。**只留一首。**
- *
- * 切歌那一刻才开始读文件（Tauri 下还要整个过一遍 IPC）或者才开始解析在线地址并下载，
- * 是切歌延迟里最贵的一块 —— 在线那条动辄一两秒。提前一首把字节拿在手上，
- * 切过去就只剩建 Blob 和等 loadedmetadata。
- *
- * 代价是常驻一份下一首的字节（几 MB 到几十 MB）。留两首就是双倍代价换一个更不准的
- * 猜测：用户按下一首的次数远多于按下下一首。
- */
-let prefetched: { id: string; quality: OnlineQuality | null; bytes: Uint8Array } | null = null
-/** 预取序号，用来作废在途的过期预取（切歌比下载快时会发生） */
-let prefetchSeq = 0
-let prefetchTimer = 0
-
-/**
- * 太大的文件不预取。40MB 的无损专辑轨常驻在内存里，为的只是省掉一次读盘 ——
- * 这笔账在 §10 那份内存账单面前划不来。
- */
-const PREFETCH_MAX_BYTES = 32 * 1024 * 1024
-
-/**
- * 等这么久再开始预取。
- *
- * 刚起播的那一两秒，在线曲目正在拉歌词和封面、本地曲目正在解封面，
- * 这时候再插一个整文件读取进去，抢的是用户马上就能看见的东西。
- */
-const PREFETCH_DELAY_MS = 1500
-
-function dropPrefetch(): void {
-  window.clearTimeout(prefetchTimer)
-  // 序号一变，在途的那次预取回来时会发现自己已经过期，直接丢掉
-  prefetchSeq++
-  prefetched = null
-}
-
-/**
- * 下一首在队列里的下标。null 表示没有下一首、或者**现在还不知道**。
- *
- * 随机模式走到本轮最后一首时就是"还不知道"：下一轮是那时才洗的。
- * 单曲循环也返回 null —— 下一首就是它自己，字节还在 `<audio>` 里。
- */
-function peekNextIndex(): number | null {
-  const { queue, index, mode } = usePlayer.getState()
-  if (queue.length === 0 || index < 0) return null
-  if (mode === "one") return null
-  if (mode === "shuffle") return shuffle.peek(queue.length)
-  const last = index >= queue.length - 1
-  if (last && mode === "once") return null
-  return last ? 0 : index + 1
-}
-
-async function prefetchNext(): Promise<void> {
-  const i = peekNextIndex()
-  if (i == null) return
-  const track = usePlayer.getState().queue[i]
-  if (!track) return
-  const ref = localRef(track)
-  const quality = ref ? null : qualityForTrack(track, usePlayer.getState().onlineQuality)
-  if (prefetched?.id === track.id && prefetched.quality === quality) return
-
-  if (ref && ref.size > PREFETCH_MAX_BYTES) return
-
-  const mine = ++prefetchSeq
-  try {
-    const bytes = ref ? await platform.readFile(ref) : await fetchOnlineBytes(track, quality!)
-    // 切歌比下载快时会走到这里：这份字节已经没人要了，别占着内存
-    if (mine !== prefetchSeq || bytes.byteLength > PREFETCH_MAX_BYTES) return
-    prefetched = { id: track.id, quality, bytes }
-
-    // 顺带把响度也量出来。测量要解码整首歌（几百毫秒），放在这里意味着下一首
-    // 一开声就是对齐的，不用等测量回来再滑一次音量
-    if (engine.normalize && track.gainDb == null) {
-      void loadLoudness(loudnessKey(track), bytes)
-    }
-  } catch {
-    // 预取失败无所谓：真播到的时候会走正常路径再来一遍，该报的错在那里报
-  }
-}
-
-function schedulePrefetch(): void {
-  window.clearTimeout(prefetchTimer)
-  prefetchTimer = window.setTimeout(() => void prefetchNext(), PREFETCH_DELAY_MS)
-}
 
 /** 播放计时，用于播放次数的计数规则 */
 let playedSec = 0
@@ -433,77 +352,12 @@ function resetPlayCounter(): void {
   counted = false
 }
 
-let saveTimer = 0
-
-/** 上一次报给系统媒体面板的曲目与状态，用来判断有没有必要再报一次 */
-let smtcKey = ""
-/** 曲目 id → 封面文件路径。由 library.ensureCover 落盘后回填。 */
-const coverPaths = new Map<string, string>()
-
-/**
- * 上报原因。三种情况对去重与节流的要求不一样，用一个 boolean 的 force 区分不开：
- *
- * - `state` 切歌、播放/暂停：按 曲目|状态 去重，位置每秒变四次不该跟着报
- * - `cover` 封面异步解出来后补报：曲目与状态都没变，必须绕过去重，否则任务栏那格
- *   永远是空的。频率极低，直发
- * - `seek`  跳转：也要绕过去重（否则面板位置停在旧值直到下次暂停或切歌），但拖进度条
- *   时每个 pointermove 都会触发一次，直发等于几秒内上百次 IPC 打进 COM，必须节流
- */
-type PushReason = "state" | "cover" | "seek"
-
-/** 拖动时的上报间隔。给足平滑感，又不至于把 IPC 打爆 */
-const SEEK_PUSH_MS = 250
-let seekTimer = 0
-let seekPending: { track: Track; playing: boolean; position: number } | null = null
-
-function sendNowPlaying(track: Track, playing: boolean, position: number): void {
-  smtcKey = `${track.id}|${playing}`
-  void platform.updateNowPlaying({
-    title: track.title,
-    artist: track.artist,
-    album: track.album,
-    playing,
-    duration: track.duration || engine.duration,
-    position,
-    coverPath: coverPaths.get(track.id) ?? null,
-  })
-}
-
-/** 报给系统媒体面板。 */
-function pushNowPlaying(
-  track: Track | null,
-  playing: boolean,
-  position: number,
-  reason: PushReason = "state",
-): void {
-  if (!track) return
-
-  if (reason === "seek") {
-    // 首尾都发：首帧让面板立刻跟上，尾帧保证松手后的最终位置一定落地 ——
-    // 只做前沿节流的话，拖完停在哪儿面板是不知道的
-    seekPending = { track, playing, position }
-    if (seekTimer) return
-    seekPending = null
-    sendNowPlaying(track, playing, position)
-    seekTimer = window.setTimeout(() => {
-      seekTimer = 0
-      const p = seekPending
-      seekPending = null
-      if (p) sendNowPlaying(p.track, p.playing, p.position)
-    }, SEEK_PUSH_MS)
-    return
-  }
-
-  if (reason === "state" && `${track.id}|${playing}` === smtcKey) return
-  sendNowPlaying(track, playing, position)
-}
-
 export const usePlayer = create<PlayerState>((set, get) => {
-  const save = () => {
-    window.clearTimeout(saveTimer)
-    saveTimer = window.setTimeout(() => {
+  const save = createConfigSaver<SettingsFile>(
+    "settings",
+    () => {
       const s = get()
-      const file: SettingsFile = {
+      return {
         schemaVersion: SETTINGS_SCHEMA,
         volume: s.volume,
         mode: s.mode,
@@ -515,9 +369,9 @@ export const usePlayer = create<PlayerState>((set, get) => {
         normalize: s.normalize,
         onlineQuality: s.onlineQuality,
       }
-      void platform.writeConfig("settings", file)
-    }, 1000)
-  }
+    },
+    1000,
+  )
 
   return {
     status: "empty",
@@ -655,15 +509,11 @@ export const usePlayer = create<PlayerState>((set, get) => {
       engine.setTrackGainDb(0)
 
       // 预取命中就直接用手上的字节。必须在 dropPrefetch 之前取走
-      const ready =
-        prefetched?.id === track.id &&
-        (track.origin.kind === "local" || prefetched.quality === onlineQuality)
-          ? prefetched.bytes
-          : null
+      const ref = localRef(track)
+      const ready = takePrefetch(track.id, ref ? null : onlineQuality)
       dropPrefetch()
 
       try {
-        const ref = localRef(track)
         let bytes: Uint8Array
         if (ready) {
           await engine.loadBytes(ready)
@@ -690,9 +540,13 @@ export const usePlayer = create<PlayerState>((set, get) => {
         })
         save()
 
+        // 这首仍是当前曲目（没被切歌、队列也没动过）——歌词/封面/响度三路补齐
+        // 都要在回调开头问同一句，收口成一个谓词
+        const stillThisTrack = () => mineTrack === trackSeq && get().index === i
+
         // 响度对齐。标签命中是同步的，测量那条要解码整首歌，所以不 await ——
         // 声音先出来，量完再用斜坡滑过去
-        void applyTrackGain(track, bytes, () => mineTrack === trackSeq && get().index === i)
+        void applyTrackGain(track, bytes, stillThisTrack)
 
         // 把下一首提前拿到手上（F1.6）。延后一点点开始，别和刚起播时的封面歌词抢
         schedulePrefetch()
@@ -705,11 +559,11 @@ export const usePlayer = create<PlayerState>((set, get) => {
             lib.ensureLyrics(track.id).catch(() => null),
             lib.ensureCover(track.id, bytes).catch(() => null),
           ]).then(([lrc, cover]) => {
-            if (mineTrack !== trackSeq || get().index !== i) return
+            if (!stillThisTrack()) return
             if (lrc || cover) get().refreshQueueMeta()
             // 封面要等解出来、落盘之后才报给系统媒体面板，否则任务栏那格是空的
             if (cover?.path) {
-              coverPaths.set(track.id, cover.path)
+              setNowPlayingCoverPath(track.id, cover.path)
               pushNowPlaying(get().current(), engine.status === "playing", engine.currentTime, "cover")
             }
           })
@@ -724,7 +578,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
           // 在线曲目的歌词与封面来自平台接口，和本地那条路完全不同
           void fillOnlineMeta(
             track,
-            () => mineTrack === trackSeq && get().index === i,
+            stillThisTrack,
             () => get().refreshQueueMeta(),
           )
         }
@@ -1019,6 +873,9 @@ export const usePlayer = create<PlayerState>((set, get) => {
 
       const mine = ++qualitySeq
       const trackId = track.id
+      // 这轮换入是否仍然作数：没有更新的点击/切歌，引擎里挂着的也还是这首歌。
+      // 六个 await 落点都要问同一句，收口成一个谓词。
+      const stale = () => mine !== qualitySeq || get().current()?.id !== trackId
       let previousBytes: Uint8Array | null = null
       let position = 0
       let shouldResume = false
@@ -1028,7 +885,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
       try {
         // 下载阶段不碰引擎，让旧音质继续播放；只有完整字节准备好才原子换入。
         const bytes = await fetchOnlineBytes(track, effective)
-        if (mine !== qualitySeq || get().current()?.id !== trackId) return
+        if (stale()) return
 
         /*
          * 真正换入前留一份临时回滚副本。下载失败时完全不会走到这里，旧音频继续播放；
@@ -1039,7 +896,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
          * 马上要换入"这一刻才取，换入成功后立刻撒手，不让它活到 pushNowPlaying 之后。
          */
         previousBytes = await engine.copyLoadedBytes()
-        if (mine !== qualitySeq || get().current()?.id !== trackId) return
+        if (stale()) return
         position = engine.currentTime
         shouldResume = engine.status === "playing"
         loop = engine.loop
@@ -1047,11 +904,11 @@ export const usePlayer = create<PlayerState>((set, get) => {
         cancelRetry()
 
         await engine.loadBytes(bytes)
-        if (mine !== qualitySeq || get().current()?.id !== trackId) return
+        if (stale()) return
         engine.seekSeconds(position)
         engine.setLoop(loop.a, loop.b)
         if (shouldResume) await engine.play()
-        if (mine !== qualitySeq || get().current()?.id !== trackId) return
+        if (stale()) return
 
         // 新音质已经稳定发声，回滚副本再无用处：立刻撒手，别让它多活一次事件循环
         previousBytes = null
@@ -1068,7 +925,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
         if (previousBytes && get().current()?.id === trackId) {
           try {
             await engine.loadBytes(previousBytes)
-            if (mine !== qualitySeq || get().current()?.id !== trackId) return
+            if (stale()) return
             engine.seekSeconds(position)
             engine.setLoop(loop.a, loop.b)
             if (shouldResume) await engine.play()

@@ -4,6 +4,7 @@ import { isLyricFile, platform, type FileRef } from "@/platform"
 import { readCover, readMetadataLazy } from "@/audio/metadata"
 import { formatM3u, matchByName, parseM3u } from "@/lib/m3u"
 import { baseName, cleanTitle, stripExt } from "@/lib/text"
+import { createConfigSaver } from "./configSaver"
 
 /**
  * 曲目从哪来。**判别联合而不是可空字段**，是为了让类型逼着每个调用点表态 ——
@@ -215,7 +216,7 @@ type LibraryState = {
   filter: string
 
   load(): Promise<void>
-  addFiles(refs: FileRef[]): Promise<Track[]>
+  addFiles(refs: FileRef[], opts?: { into?: ViewId | null }): Promise<Track[]>
   /**
    * 把在线曲目收进曲库。已在库里的按 id 去重，返回**全部**对应曲目（含已存在的），
    * 这样调用方可以直接拿去播放或加进歌单，不用自己再查一遍。
@@ -276,14 +277,12 @@ type LibraryState = {
   byId(id: string): Track | undefined
 }
 
-let saveTimer = 0
-
 export const useLibrary = create<LibraryState>((set, get) => {
-  const save = () => {
-    window.clearTimeout(saveTimer)
-    saveTimer = window.setTimeout(() => {
+  const save = createConfigSaver<LibraryFile>(
+    "library",
+    () => {
       const s = get()
-      const file: LibraryFile = {
+      return {
         schemaVersion: SCHEMA,
         coverFiles: Object.fromEntries(coverFiles),
         tracks: s.tracks.map(({ cover: _c, lyrics: _l, missing: _m, ...rest }) => rest),
@@ -292,9 +291,9 @@ export const useLibrary = create<LibraryState>((set, get) => {
         sort: s.sort,
         sortDesc: s.sortDesc,
       }
-      void platform.writeConfig("library", file)
-    }, 1000)
-  }
+    },
+    1000,
+  )
 
   /**
    * 记下这首歌的封面已物化，并按 LRU 淘汰旧的。
@@ -413,7 +412,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
       return out
     },
 
-    async addFiles(refs) {
+    async addFiles(refs, opts) {
       if (refs.length === 0) return []
       const existing = new Set(get().tracks.map((t) => t.id))
       const fresh = refs.filter((r) => !existing.has(r.id))
@@ -478,10 +477,11 @@ export const useLibrary = create<LibraryState>((set, get) => {
       const added = slots.filter((t): t is Track => t !== null)
       set((s) => ({ tracks: [...s.tracks, ...added], scanning: null }))
 
-      // 导入到某个具体歌单时，顺带加进去
-      const view = get().activeView
-      if (!(VIRTUAL_VIEWS as readonly string[]).includes(view)) {
-        get().addToPlaylist(view, added.map((t) => t.id))
+      // 默认进「当前歌单」（拖拽导入的自然语义）；显式 into: null 表示只进曲库、
+      // 歌单归属由调用方自己安排
+      const target = opts?.into !== undefined ? opts.into : get().activeView
+      if (target && !(VIRTUAL_VIEWS as readonly string[]).includes(target)) {
+        get().addToPlaylist(target, added.map((t) => t.id))
       }
       save()
       return added
@@ -639,7 +639,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
      *
      * **必须先取回字节再造 blob**，不能把远端 URL 直接塞进 `<img>`：CSP 的 `img-src`
      * 只放行 `'self' blob: data:`，远端地址一律被拦；而且平台的图床常要校验 Referer，
-     * WebView 里的 `<img>` 设不了。走 plugin-http 从 Rust 侧取则两个问题都没有。
+     * WebView 里的 `<img>` 设不了。走平台层的 request()（Tauri 下由 Rust 转发）取则两个问题都没有。
      *
      * 落一份到磁盘是为了系统媒体面板 —— 它读不了 blob:，只认真实文件路径。
      */
@@ -647,8 +647,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
       if (!get().byId(id) || probedCovers.has(id)) return
       probedCovers.add(id)
       try {
-        const { fetch: tauriFetch } = await import("@tauri-apps/plugin-http")
-        const res = await tauriFetch(url, { method: "GET" })
+        const res = await platform.request(url, { method: "GET" })
         if (!res.ok) return
         const mime = res.headers.get("content-type") ?? "image/jpeg"
         const data = new Uint8Array(await res.arrayBuffer())
@@ -767,11 +766,8 @@ export const useLibrary = create<LibraryState>((set, get) => {
         if (r) resolved.set(e.path, r)
       }
       if (resolved.size > 0) {
-        // addFiles 会把新曲目塞进「当前歌单」，导入过程中先躲开，避免污染
-        const prevView = get().activeView
-        set({ activeView: "all" })
-        await get().addFiles([...resolved.values()])
-        set({ activeView: prevView })
+        // 只解析进曲库；歌单成员由下面按 m3u 顺序统一编排，不掺入「当前歌单」
+        await get().addFiles([...resolved.values()], { into: null })
       }
 
       // 二、路径失效的退回按文件名匹配 —— 歌单文件常是从别的机器拷来的
